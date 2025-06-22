@@ -1,0 +1,60 @@
+defaults:
+  - base_gaze_policy_config
+
+type: gaze_policy
+
+# Indexing
+n_obs_steps: 1
+obs_step_size: 1
+n_action_steps: 2 # TODO
+horizon: 16
+action_temporal_ensemble_coeff: 0.0 # TODO
+gaze_temporal_ensemble_coeff: 0.0 # TODO
+drop_n_last_frames: 6
+
+# Observation
+image_norm_mode: mean_std
+state_norm_mode: min_max # TODO
+action_norm_mode: min_max # TODO
+resize_shape: [240, 320]
+input_shape: [224,224]
+image_out_dim: 512
+use_action_history: false # TODO
+proprio_dropout: 0.1
+
+# Gaze
+image_to_gaze_key: {}
+foveal_shape: [72, 96]
+gaze_noise_factor: 0.0 # TODO
+use_last_peripheral_only: true # TODO
+
+# Image Pooling
+# use_attn_pooling: true # TODO
+# attn_pooling_n_queries: 4
+# attn_pooling_out_dim: 1024
+# attn_pooling_n_layers: 2
+
+# Transformer
+n_decoder_layers: 8
+dim_model: 512
+n_heads: 8
+mlp_ratio: 4.0
+dropout: 0.1
+time_dim: 128
+max_seq_len: 64
+
+# Flow Matching
+flow_matcher: target
+n_sampling_steps: 10
+flow_matcher_kwargs:
+  sigma: 0.0 # tried 0.1 but very noisy. Think deterministic is better for action generation
+
+# Training
+optimizer_lr: 1e-4
+optimizer_lr_backbone: 1e-5
+optimizer_betas: [0.95, 0.999]
+optimizer_eps: 1e-8
+optimizer_weight_decay: 1e-6
+scheduler_name: cosine
+scheduler_warmup_steps: 500
+use_ema: false

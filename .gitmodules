@@ -1,0 +1,3 @@
+[submodule "gym_av_aloha"]
+	path = gym_av_aloha
+	url = https://github.com/Soltanilara/gym_av_aloha

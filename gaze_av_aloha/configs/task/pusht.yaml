@@ -1,0 +1,34 @@
+defaults:
+  - base_task_config
+
+type: pusht
+dataset_repo_id: lerobot/pusht
+dataset_root: ???
+dataset_episodes: ??? # use all episodes
+override_stats:
+  observation.image:
+    mean: [[[0.485]], [[0.456]], [[0.406]]]
+    std: [[[0.229]], [[0.224]], [[0.225]]]
+
+env_package: gym_pusht
+env_name: PushT-v0
+env_kwargs:
+  disable_env_checker: true
+  relative: false
+  legacy: true
+  action_scale: 1
+  obs_type: pixels_agent_pos
+  render_mode: rgb_array
+  observation_width: 96
+  observation_height: 96
+
+eval_n_episodes: 50
+eval_n_envs: 10
+
+fps: 10
+image_keys:
+  - observation.image
+state_key: observation.state
+action_key: action
+state_dim: 2
+action_dim: 2

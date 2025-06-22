@@ -1,0 +1,17 @@
+defaults:
+  - _self_
+  - base_config
+  - policy: gaze_policy
+  - task: av_aloha_sim_hook_package
+  - train: default
+  - wandb: gaze
+
+hydra:
+  run:
+    dir: ./outputs/${now:%Y-%m-%d_%H-%M-%S}_${wandb.job_name}
+
+seed: 42
+debug: true
+device: cuda
+resume: false
+checkpoint_path: ???
