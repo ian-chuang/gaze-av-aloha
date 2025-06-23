@@ -17,9 +17,7 @@ class GazePolicyConfig(PolicyConfig):
     image_norm_mode: str = "mean_std"
     state_norm_mode: str = "min_max" # need to confirm this is valid
     action_norm_mode: str = "min_max" # need to confirm this is valid
-    resize_shape: tuple = (240, 320)
-    input_shape: tuple = (224,224)
-    image_out_dim: int = 512 # need to confirm this is valid
+    resize_shape: tuple = (224, 224)
     use_action_history: bool = False # need to confirm this is valid
     action_history_padding: list[float] = field(default_factory=lambda: [
         0, -0.082, 1.06, 0, -0.953, 0, 1, 0, -0.082, 1.06, 0, -0.953, 0, 1, 0, -0.6, 0.5, 0, 0.5, 0, 0
@@ -28,24 +26,21 @@ class GazePolicyConfig(PolicyConfig):
 
     # gaze
     image_to_gaze_key: dict[str, str] = field(default_factory=lambda: {}) # need to confirm this is valid
-    foveal_shape: tuple = (72, 96)
-    gaze_noise_factor: float = 0.03 # please confirm this is valid
-    use_last_peripheral_only: bool = True # need to confirm this is valid
+    foveal_shape: tuple = (84, 112)
+    gaze_noise_factor: float = 0.02 # please confirm this is valid
 
     # Image Pooling
-    # use_attn_pooling: bool = True # need to confirm this is valid
-    # attn_pooling_n_queries: int = 4
-    # attn_pooling_out_dim: int = 1024
-    # attn_pooling_n_layers: int = 2
+    attn_pooling_n_queries: int = 8
+    attn_pooling_out_dim: int = 1024
+    attn_pooling_n_layers: int = 8
     
     # Transformer
     n_decoder_layers: int = 8
-    dim_model: int = 512
-    n_heads: int = 8
+    dim_model: int = 432 
+    n_heads: int = 6
     mlp_ratio: float = 4.0
     dropout: float = 0.1
     time_dim: int = 128
-    max_seq_len: int = 64
 
     # Flow Matching
     flow_matcher: str = "target"
