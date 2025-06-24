@@ -1,0 +1,54 @@
+from dataclasses import field, dataclass
+from gaze_av_aloha.configs import PolicyConfig
+
+@dataclass
+class FlowPolicyConfig(PolicyConfig):
+    type: str = "flow_policy"
+
+    n_obs_steps: int = 1
+    obs_step_size: int = 1
+    n_action_steps: int = 8
+    horizon: int = 16
+    use_action_temporal_ensemble: bool = False
+    action_temporal_ensemble_coeff: float = -0.5
+    drop_n_last_frames: int = 21
+
+    image_norm_mode: str = "mean_std"
+    state_norm_mode: str = "mean_std"
+    action_norm_mode: str = "mean_std"
+    
+    # Observation
+    resize_shape: tuple = (240, 320)
+    peripheral_shape: tuple = (240, 320)
+    peripheral_crop: tuple = (216, 288) 
+    use_spatial_softmax: bool = False 
+    num_kp: int = 32
+    state_dropout: float = 0.1
+
+    # Transformer
+    dim_model: int = 512
+    n_heads: int = 8
+    mlp_ratio: float = 4.0
+    n_decoder_layers: int = 6
+    dropout: float = 0.1
+    time_dim: int = 128
+    max_seq_len: int = 64
+
+    # Flow Matching
+    flow_matcher: str = "conditional"
+    n_sampling_steps: int = 10
+    flow_matcher_kwargs: dict = field(default_factory=lambda: {
+        "sigma": 0.0,
+    })
+
+    # Training
+    optimizer_lr: float = 1e-4
+    optimizer_lr_backbone: float = 1e-5
+    optimizer_betas: tuple = (0.95, 0.999)
+    optimizer_eps: float = 1e-8
+    optimizer_weight_decay: float = 1e-6
+    scheduler_name: str = "cosine"
+    scheduler_warmup_steps: int = 500
+    use_ema: bool = False
+    ema_decay: float = 0.9999
+

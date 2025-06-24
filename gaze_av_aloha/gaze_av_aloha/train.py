@@ -78,6 +78,9 @@ def train(cfg: Config):
     elif cfg.policy.type == "diffusion_policy":
         from gaze_av_aloha.policies.diffusion_policy.diffusion_policy import DiffusionPolicy
         policy = DiffusionPolicy(policy_cfg=cfg.policy, task_cfg=cfg.task, stats=stats)
+    elif cfg.policy.type == "flow_policy":
+        from gaze_av_aloha.policies.flow_policy.flow_policy import FlowPolicy
+        policy = FlowPolicy(policy_cfg=cfg.policy, task_cfg=cfg.task, stats=stats)
     else:
         raise ValueError(f"Unknown policy type: {cfg.policy.type}")
     if checkpoint_path:

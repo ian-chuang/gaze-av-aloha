@@ -30,9 +30,10 @@ class GazePolicyConfig(PolicyConfig):
     gaze_noise_factor: float = 0.02 # please confirm this is valid
 
     # Image Pooling
-    attn_pooling_n_queries: int = 8
+    # self_attn_n_layers: int = 4
+    attn_pooling_n_queries: int = 4
     attn_pooling_out_dim: int = 1024
-    attn_pooling_n_layers: int = 8
+    attn_pooling_n_layers: int = 12
     
     # Transformer
     n_decoder_layers: int = 8
@@ -51,7 +52,7 @@ class GazePolicyConfig(PolicyConfig):
 
     # Training
     optimizer_lr: float = 1e-4
-    optimizer_lr_backbone: float = 1e-4
+    optimizer_lr_backbone: float = 1e-5
     optimizer_betas: tuple = (0.95, 0.999)
     optimizer_eps: float = 1e-8
     optimizer_weight_decay: float = 1e-6
