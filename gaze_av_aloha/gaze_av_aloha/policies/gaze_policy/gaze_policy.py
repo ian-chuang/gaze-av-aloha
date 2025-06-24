@@ -15,7 +15,7 @@ import torchcfm.conditional_flow_matching as cfm
 import torch.nn.functional as F
 import einops
 from gaze_av_aloha.policies.gaze_policy.vision import VisionEncoder, crop_at_center
-from gaze_av_aloha.policies.gaze_policy.transformer import DiT, AttentionPooling, get_foveated_pos_embed, get_1d_rotary_embed
+from gaze_av_aloha.policies.gaze_policy.transformer import DiT, AttentionPooling, get_foveated_pos_embed, get_1d_rotary_embed, TransformerEncoder
 from torchvision.transforms import Resize
 import logging
 from torchvision.ops import roi_align
@@ -86,56 +86,60 @@ class GazePolicy(Policy):
         self.reset()
 
     def get_optimizer(self) -> torch.optim.Optimizer:
-        # logging.info(f"""
-        #     [GazePolicy] Initializing AdamW optimizer with the following parameters:
-        #     - Learning Rate: {self.cfg.optimizer_lr}
-        #     - Learning Rate for Backbone: {self.cfg.optimizer_lr_backbone}
-        #     - Betas: {self.cfg.optimizer_betas}
-        #     - Epsilon: {self.cfg.optimizer_eps}
-        #     - Weight Decay: {self.cfg.optimizer_weight_decay}
-        # """)
-        # backbone_condition = lambda n: "vision_encoders" in n and "backbone" in n
-        # if not any(backbone_condition(n) for n, p in self.named_parameters()):
-        #     raise ValueError(f"No parameters found satifying the condition for vision backbone: {backbone_condition}")
-
-        # params = [
-        #     {
-        #         "params": [
-        #             p
-        #             for n, p in self.named_parameters()
-        #             if not backbone_condition(n) and p.requires_grad
-        #         ]
-        #     },
-        #     {
-        #         "params": [
-        #             p
-        #             for n, p in self.named_parameters()
-        #             if backbone_condition(n) and p.requires_grad
-        #         ],
-        #         "lr": self.cfg.optimizer_lr_backbone,
-        #     },
-        # ]
-        # return torch.optim.AdamW(
-        #     params=params,
-        #     lr=self.cfg.optimizer_lr,
-        #     betas=self.cfg.optimizer_betas,
-        #     eps=self.cfg.optimizer_eps,
-        #     weight_decay=self.cfg.optimizer_weight_decay
-        # )
         logging.info(f"""
             [GazePolicy] Initializing AdamW optimizer with the following parameters:
             - Learning Rate: {self.cfg.optimizer_lr}
+            - Learning Rate for Backbone: {self.cfg.optimizer_lr_backbone}
             - Betas: {self.cfg.optimizer_betas}
             - Epsilon: {self.cfg.optimizer_eps}
             - Weight Decay: {self.cfg.optimizer_weight_decay}
         """)
+        backbone_condition = lambda n: "flow" in n and "dino" in n
+        if not any(backbone_condition(n) for n, p in self.named_parameters()):
+            raise ValueError(f"No parameters found satifying the condition for vision backbone: {backbone_condition}")
+        
+        for n, p in self.named_parameters():
+            if backbone_condition(n):
+                logging.info(f"[GazePolicy] Backbone parameter: {n} with shape {p.shape}")
+
+        params = [
+            {
+                "params": [
+                    p
+                    for n, p in self.named_parameters()
+                    if not backbone_condition(n) and p.requires_grad
+                ]
+            },
+            {
+                "params": [
+                    p
+                    for n, p in self.named_parameters()
+                    if backbone_condition(n) and p.requires_grad
+                ],
+                "lr": self.cfg.optimizer_lr_backbone,
+            },
+        ]
         return torch.optim.AdamW(
-            params=self.parameters(),
+            params=params,
             lr=self.cfg.optimizer_lr,
             betas=self.cfg.optimizer_betas,
             eps=self.cfg.optimizer_eps,
             weight_decay=self.cfg.optimizer_weight_decay
         )
+        # logging.info(f"""
+        #     [GazePolicy] Initializing AdamW optimizer with the following parameters:
+        #     - Learning Rate: {self.cfg.optimizer_lr}
+        #     - Betas: {self.cfg.optimizer_betas}
+        #     - Epsilon: {self.cfg.optimizer_eps}
+        #     - Weight Decay: {self.cfg.optimizer_weight_decay}
+        # """)
+        # return torch.optim.AdamW(
+        #     params=self.parameters(),
+        #     lr=self.cfg.optimizer_lr,
+        #     betas=self.cfg.optimizer_betas,
+        #     eps=self.cfg.optimizer_eps,
+        #     weight_decay=self.cfg.optimizer_weight_decay
+        # )
 
     
     def get_scheduler(self, optimizer: torch.optim.Optimizer, num_training_steps: int) -> torch.optim.lr_scheduler.LambdaLR | None:
@@ -300,14 +304,22 @@ class FlowModel(nn.Module):
         
         self.resize = Resize(policy_cfg.resize_shape)
         self.dino = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14_reg')
-        for param in self.dino.parameters():
-            param.requires_grad = False
+        # for param in self.dino.parameters():
+        #     param.requires_grad = False
         self.dino_embed = nn.Linear(self.dino.embed_dim, policy_cfg.dim_model)
         self.gaze_embed = nn.Linear(2, policy_cfg.dim_model)
         self.state_embed = nn.Linear(task_cfg.state_dim, policy_cfg.dim_model)
         self.state_dropout = nn.Dropout(policy_cfg.proprio_dropout)
         self.action_history_embed = nn.Linear(self.action_dim, policy_cfg.dim_model)
         self.action_history_dropout = nn.Dropout(policy_cfg.proprio_dropout)
+
+        # self.transformer_encoder = TransformerEncoder(
+        #     hidden_size=policy_cfg.dim_model,
+        #     num_layers=policy_cfg.self_attn_n_layers,
+        #     num_heads=policy_cfg.n_heads,
+        #     mlp_ratio=policy_cfg.mlp_ratio,
+        #     dropout=policy_cfg.dropout,
+        # )
 
         self.attn_pooling = AttentionPooling(
             hidden_size=policy_cfg.dim_model,
@@ -456,6 +468,7 @@ class FlowModel(nn.Module):
 
         tokens = torch.cat(tokens, dim=1)  # (B, S, D)
         pos_embed = torch.cat(pos_embed, dim=1).unsqueeze(1)  # (B, 1, S, D//n_heads)
+        # tokens = self.transformer_encoder(tokens, pos_embed)  # (B, S, D)
         cond = self.attn_pooling(tokens, pos_embed)
 
 
