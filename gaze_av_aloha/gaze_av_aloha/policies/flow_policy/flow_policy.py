@@ -4,28 +4,23 @@ from gaze_av_aloha.configs import TaskConfig
 from gaze_av_aloha.policies.policy import Policy
 import torch
 from diffusers.optimization import get_scheduler
-from diffusers.training_utils import EMAModel
 from gaze_av_aloha.policies.normalize import Normalize, Unnormalize
 from collections import deque
-from lerobot.common.policies.utils import (
+from gaze_av_aloha.utils.policy_utils import (
     get_device_from_parameters,
     get_dtype_from_parameters,
     populate_queues,
-    get_output_shape,
 )
 import torchcfm.conditional_flow_matching as cfm
 import torch.nn.functional as F
-from timm.models.vision_transformer import Mlp
-import math
 import einops
-# from gaze_av_aloha.models.adaln_attention import AdaLNHybridAttentionBlock, AdaLNFinalLayer
+from gaze_av_aloha.policies.flow_policy.transformer import DiT, AttentionPooling
+from gaze_av_aloha.policies.flow_policy.dino import DINO
+from torchvision.transforms import Resize
+import logging
 from torchvision.models._utils import IntermediateLayerGetter
 from torchvision.ops.misc import FrozenBatchNorm2d
 import torchvision
-import numpy as np
-from typing import Callable
-from torchvision.ops import roi_align
-import logging
 
 class FlowPolicy(Policy):
     def __init__(
@@ -59,29 +54,29 @@ class FlowPolicy(Policy):
             stats,
         )
         self.flow = FlowModel(policy_cfg, task_cfg)
-
         self.temporal_ensembler = TemporalEnsembler(
-            temporal_ensemble_coeff=policy_cfg.action_temporal_ensemble_coeff,
+            temporal_ensemble_coeff=policy_cfg.temporal_ensemble_coeff,
             chunk_size=policy_cfg.horizon,
         )
-
         self.reset()
 
     def get_optimizer(self) -> torch.optim.Optimizer:
         logging.info(f"""
-            [FlowWMPolicy] Initializing AdamW optimizer with the following parameters:
+            [FlowPolicy] Initializing AdamW optimizer with the following parameters:
             - Learning Rate: {self.cfg.optimizer_lr}
             - Learning Rate for Backbone: {self.cfg.optimizer_lr_backbone}
             - Betas: {self.cfg.optimizer_betas}
             - Epsilon: {self.cfg.optimizer_eps}
             - Weight Decay: {self.cfg.optimizer_weight_decay}
         """)
-        backbone_condition = lambda n: "dino" in n
+        backbone_condition = lambda n: "backbone" in n
         if not any(backbone_condition(n) for n, p in self.named_parameters()):
             raise ValueError(f"No parameters found satifying the condition for vision backbone: {backbone_condition}")
+        
         for n, p in self.named_parameters():
-            if backbone_condition(n) and p.requires_grad:
+            if backbone_condition(n):
                 logging.info(f"{n}")
+
         params = [
             {
                 "params": [
@@ -108,6 +103,11 @@ class FlowPolicy(Policy):
         )
     
     def get_scheduler(self, optimizer: torch.optim.Optimizer, num_training_steps: int) -> torch.optim.lr_scheduler.LambdaLR | None:
+        logging.info(f"""
+            [FlowPolicy] Initializing scheduler '{self.cfg.scheduler_name}' with the following parameters:
+            - Warmup Steps: {self.cfg.scheduler_warmup_steps}
+            - Total Training Steps: {num_training_steps}
+        """)
         return get_scheduler(
             name=self.cfg.scheduler_name,
             optimizer=optimizer,
@@ -116,16 +116,20 @@ class FlowPolicy(Policy):
         )
     
     def get_ema(self):
-        return EMAModel(
-            parameters=self.parameters(),
-            ema_decay=self.cfg.ema_decay,
-        ) if self.cfg.use_ema else None
+        logging.info(f"""
+            [FlowPolicy] EMA is not implemented for FlowPolicy.
+        """)
+        return None
     
     def get_delta_timestamps(self):
         observation_indices = list(reversed(range(0, -self.cfg.n_obs_steps*self.cfg.obs_step_size, -self.cfg.obs_step_size)))
         assert len(observation_indices) == self.cfg.n_obs_steps, "Observation indices length mismatch"
         action_indices = list(range(self.cfg.horizon))
-        logging.info(f"Observation indices: {observation_indices}, Action indices: {action_indices}")
+        logging.info(f"""
+            [FlowPolicy] Delta Timestamps:
+            Observation Indices: {observation_indices}
+            Action Indices: {action_indices}
+        """)
         return {
             # observations
             **{
@@ -145,7 +149,7 @@ class FlowPolicy(Policy):
             self.task_cfg.state_key: deque(maxlen=obs_queue_size),
             **{key: deque(maxlen=obs_queue_size) for key in self.task_cfg.image_keys},
         }
-        self.temporal_ensembler.reset()
+        self.temporal_ensembler.reset()   
 
     @torch.no_grad()
     def select_action(self, batch: dict[str, Tensor], return_viz: bool = False) -> Tensor:
@@ -163,14 +167,10 @@ class FlowPolicy(Policy):
             batch = self.normalize_inputs(batch)
             actions, viz = self.flow.generate_actions(batch)
             actions = self.unnormalize_outputs({self.task_cfg.action_key: actions})[self.task_cfg.action_key]
-            actions = self.temporal_ensembler.update(
-                actions[:, :, :self.task_cfg.action_dim],
-                n=self.cfg.n_action_steps
-            )
-            # actions = actions[:, :self.cfg.n_action_steps, :self.task_cfg.action_dim]
+            actions = self.temporal_ensembler.update(actions, n=self.cfg.n_action_steps)
             self._queues[self.task_cfg.action_key].extend(actions.transpose(0, 1))
 
-        action = self._queues[self.task_cfg.action_key].popleft()        
+        action = self._queues[self.task_cfg.action_key].popleft()
         if return_viz: return action, viz
         return action
 
@@ -207,58 +207,83 @@ class FlowModel(nn.Module):
         )
 
         # observation processing
-        self.resize = torchvision.transforms.Resize(policy_cfg.resize_shape)
-        vision_encoders = {}
-        self.image_encoder_keys = [k.split(".")[-1] for k in task_cfg.image_keys]
-        for key in self.image_encoder_keys:
-            vision_encoders[key] = VisionEncoder(
-                resize_shape=policy_cfg.peripheral_shape,
-                crop_shape=policy_cfg.peripheral_crop,
-                crop_is_random=True,
-                use_spatial_softmax=policy_cfg.use_spatial_softmax,
-                num_kp=policy_cfg.num_kp,
-                out_dim=policy_cfg.dim_model,
-            )
-        self.vision_encoders = nn.ModuleDict(vision_encoders)
+        self.resize = Resize(policy_cfg.resize_shape)
+        self.input_resizer = Resize(policy_cfg.input_shape)
+        # self.dino = DINO(policy_cfg.dino_freeze_n_layers)
+        # self.dino_embed = nn.Linear(self.dino.embed_dim, policy_cfg.dim_model)
+        backbone = torchvision.models.resnet18(
+            weights=torchvision.models.ResNet18_Weights.IMAGENET1K_V1,
+            norm_layer=FrozenBatchNorm2d,
+        )
+        self.backbone = IntermediateLayerGetter(backbone, return_layers={"layer4": "feature_map"})
+        self.pool = nn.AdaptiveAvgPool2d((1, 1))
+        self.state_dropout = nn.Dropout(policy_cfg.state_dropout)
+        # self.state_embed = nn.Sequential(
+        #     nn.Dropout(policy_cfg.state_dropout),
+        #     nn.Linear(task_cfg.state_dim, policy_cfg.dim_model),
+        #     nn.GELU(),
+        #     nn.Dropout(policy_cfg.state_dropout),
+        #     nn.Linear(policy_cfg.dim_model, policy_cfg.dim_model),
+        # )
+        # self.attn_pooling = AttentionPooling(
+        #     hidden_size=policy_cfg.dim_model,
+        #     out_dim=policy_cfg.pool_out_dim,
+        #     num_queries=policy_cfg.pool_n_queries,
+        #     depth=policy_cfg.pool_n_layers,
+        #     num_heads=policy_cfg.n_heads,
+        #     mlp_ratio=policy_cfg.mlp_ratio,
+        #     dropout=policy_cfg.dropout,
+        # ) 
 
-        self.cond_dim = len(self.image_encoder_keys) * 512 + task_cfg.state_dim
-        
-        self.unet = DiffusionConditionalUnet1d(
-            global_cond_dim=self.cond_dim,
-            action_dim=task_cfg.action_dim,
+        # diffusion transformer
+        self.DiT = DiT(
+            in_dim=task_cfg.action_dim,
+            out_dim=task_cfg.action_dim,
+            cond_dim=(512 * len(task_cfg.image_keys) + task_cfg.state_dim) * policy_cfg.n_obs_steps,  
+            hidden_size=policy_cfg.dim_model,
+            depth=policy_cfg.dit_n_layers,
+            num_heads=policy_cfg.n_heads,
+            mlp_ratio=policy_cfg.mlp_ratio,
+            dropout=policy_cfg.dropout,
+            time_dim=policy_cfg.time_dim,
         )
 
     def prepare_global_conditioning(self, batch: dict[str, Tensor]) -> tuple[Tensor, dict]:
         viz = {}
+        batch = dict(batch)  # make a copy to avoid modifying the original batch
+
         cond = []
-
-        cond.append(
-            batch[self.task_cfg.state_key].flatten(start_dim=1)
-        ) 
-
-        # process images
-        for image_key, image_encoder_key in zip(self.task_cfg.image_keys, self.image_encoder_keys):
-            images = batch[image_key]  # (B, S, C, H, W)
-            batch_size = images.shape[0]
-            images = einops.rearrange(images, 'b s c h w -> (b s) c h w')
-            images = self.resize(images)  # (B, S, C, H, W)
-            feat = self.vision_encoders[image_encoder_key](images)  
-            feat = einops.rearrange(feat, '(b s) d -> b (s d)', b=batch_size)  # (B, S, D)
-            cond.append(feat)  # (B, S, D)
+        for image_key in self.task_cfg.image_keys:
+            img = batch[image_key]  # (B, S, C, H, W)
+            batch_size = img.shape[0]
+            img = einops.rearrange(img, 'b s c h w -> (b s) c h w')
+            img = self.resize(img) 
+            img = self.input_resizer(img)  # (B*S, C, H, W)
+            feat = self.backbone(img)['feature_map']  # (B*S, C, H, W)
+            feat = self.pool(feat).flatten(start_dim=1)  # (B*S, C, 1,
+            feat = einops.rearrange(feat, '(b s) d -> b (s d)', b=batch_size)  # (B, S*C)
+            cond.append(feat)  # (B*S, C)
             if not self.training:
-                viz[image_encoder_key] = images
+                viz[image_key] = img
+        cond.append(self.state_dropout(batch[self.task_cfg.state_key]).flatten(start_dim=1))  
+        cond = torch.cat(cond, dim=1) 
 
-        cond = torch.cat(cond, dim=1)
 
+        # tokens = [self.state_embed(batch[self.task_cfg.state_key])]  # (B, S, D)
+        # for image_key in self.task_cfg.image_keys:
+        #     img = batch[image_key]  # (B, S, C, H, W)
+        #     batch_size = img.shape[0]
+        #     img = einops.rearrange(img, 'b s c h w -> (b s) c h w')
+        #     img = self.resize(img) 
+        #     dino_feat = self.dino(img)
+        #     dino_feat = einops.rearrange(dino_feat, '(b s) l d -> b (s l) d', b=batch_size)
+        #     tokens.append(self.dino_embed(dino_feat))  # (B, S*L, D)
+        #     if not self.training:
+        #         viz[image_key] = img
+
+        # tokens = torch.cat(tokens, dim=1)  
+        # cond = self.attn_pooling(tokens) 
         return cond, viz
-
-    def predict(self, noise: Tensor, timestep: Tensor, global_cond: dict) -> Tensor:
-        x = self.unet.forward(
-            x=noise,
-            timestep=timestep,
-            global_cond=global_cond,
-        )
-        return x
 
     # ========= inference  ============
     def conditional_sample(
@@ -274,7 +299,7 @@ class FlowModel(nn.Module):
 
         for n in range(num_steps):
             timestep = n * dt * torch.ones(x.shape[0], device=x.device)
-            vt = self.predict(x, timestep, global_cond)
+            vt = self.DiT(x=x, timestep=timestep, cond=global_cond)
             x = x + vt * dt
 
         return x
@@ -289,143 +314,13 @@ class FlowModel(nn.Module):
         global_cond, _ = self.prepare_global_conditioning(batch) 
         x0 = torch.randn_like(batch[self.task_cfg.action_key]) 
         timestep, xt, ut = self.flow_matcher.sample_location_and_conditional_flow(x0, batch[self.task_cfg.action_key])
-        vt = self.predict(xt, timestep, global_cond=global_cond)
+        vt = self.DiT(x=xt, timestep=timestep, cond=global_cond)
         flow_matching_loss = F.mse_loss(vt, ut, reduction="none").mean()
         loss = flow_matching_loss
         loss_dict = {
             "flow_matching_loss": flow_matching_loss.item(),
         }
         return loss, loss_dict
-
-class VisionEncoder(nn.Module):
-    def __init__(
-        self, 
-        resize_shape: tuple[int, int],
-        crop_shape: tuple[int, int] | None = None,
-        crop_is_random: bool = True,
-        num_kp: int = 32,
-        out_dim: int = 512,
-        use_spatial_softmax: bool = False,
-    ):
-        super().__init__()
-        # pre proc
-        self.resize = torchvision.transforms.Resize(resize_shape)
-        if crop_shape is not None:
-            self.do_crop = True
-            # Always use center crop for eval
-            self.center_crop = torchvision.transforms.CenterCrop(crop_shape)
-            if crop_is_random:
-                self.maybe_random_crop = torchvision.transforms.RandomCrop(crop_shape)
-            else:
-                self.maybe_random_crop = self.center_crop
-        else:
-            self.do_crop = False
-
-        backbone = torchvision.models.resnet18(
-            weights=torchvision.models.ResNet18_Weights.IMAGENET1K_V1,
-            norm_layer=FrozenBatchNorm2d,
-        )
-        self.backbone = IntermediateLayerGetter(backbone, return_layers={"layer4": "feature_map"})
-
-        # post proc
-        if not self.do_crop:
-            dummy_shape = (1, 3, *resize_shape)
-        else:
-            dummy_shape = (1, 3, *crop_shape)
-        feature_map_shape = get_output_shape(
-            lambda x: self.backbone(x)["feature_map"], dummy_shape
-        )[1:]
-
-        if use_spatial_softmax:
-            self.pool = SpatialSoftmax(feature_map_shape, num_kp=num_kp)
-            self.out = nn.Sequential(
-                nn.Linear(num_kp*2, num_kp*2),
-                nn.ReLU(inplace=True),
-                nn.Linear(num_kp*2, out_dim),
-            )
-        else:
-            self.pool = nn.AdaptiveAvgPool2d((1, 1))
-            self.out = nn.Linear(feature_map_shape[0], out_dim) if feature_map_shape[0] != out_dim else nn.Identity()
-
-    def forward(self, x: Tensor) -> Tensor:
-        x = self.resize(x)
-        if self.do_crop:
-            if self.training:  
-                x = self.maybe_random_crop(x)
-            else:
-                x = self.center_crop(x)
-        x = self.backbone(x)["feature_map"]
-        x = self.pool(x) # (B, K, 2)
-        x = torch.flatten(x, start_dim=1)
-        x = self.out(x)
-        return x
-
-class SpatialSoftmax(nn.Module):
-    def __init__(self, input_shape, num_kp=None):
-        """
-        Args:
-            input_shape (list): (C, H, W) input feature map shape.
-            num_kp (int): number of keypoints in output. If None, output will have the same number of channels as input.
-        """
-        super().__init__()
-
-        assert len(input_shape) == 3
-        self._in_c, self._in_h, self._in_w = input_shape
-
-        if num_kp is not None:
-            self.nets = torch.nn.Conv2d(self._in_c, num_kp, kernel_size=1)
-            self._out_c = num_kp
-        else:
-            self.nets = None
-            self._out_c = self._in_c
-
-        # we could use torch.linspace directly but that seems to behave slightly differently than numpy
-        # and causes a small degradation in pc_success of pre-trained models.
-        pos_x, pos_y = np.meshgrid(np.linspace(-1.0, 1.0, self._in_w), np.linspace(-1.0, 1.0, self._in_h))
-        pos_x = torch.from_numpy(pos_x.reshape(self._in_h * self._in_w, 1)).float()
-        pos_y = torch.from_numpy(pos_y.reshape(self._in_h * self._in_w, 1)).float()
-        # register as buffer so it's moved to the correct device.
-        self.register_buffer("pos_grid", torch.cat([pos_x, pos_y], dim=1))
-
-    def forward(self, features: Tensor) -> Tensor:
-        """
-        Args:
-            features: (B, C, H, W) input feature maps.
-        Returns:
-            (B, K, 2) image-space coordinates of keypoints.
-        """
-        if self.nets is not None:
-            features = self.nets(features)
-
-        # [B, K, H, W] -> [B * K, H * W] where K is number of keypoints
-        features = features.reshape(-1, self._in_h * self._in_w)
-        # 2d softmax normalization
-        attention = F.softmax(features, dim=-1)
-        # [B * K, H * W] x [H * W, 2] -> [B * K, 2] for spatial coordinate mean in x and y dimensions
-        expected_xy = attention @ self.pos_grid
-        # reshape to [B, K, 2]
-        feature_keypoints = expected_xy.view(-1, self._out_c, 2)
-
-        return feature_keypoints
-    
-def crop_at_center(images: Tensor, centers: Tensor, crop_shape: tuple):
-    # crop the images around the predicted gaze
-    boxes = torch.zeros(centers.shape[0], 5, device=centers.device)
-    h, w = images.shape[-2:]
-    new_h, new_w = crop_shape
-    eye_pixel_x = ((centers[:, 0] + 1) / 2) * w
-    eye_pixel_y = ((centers[:, 1] + 1) / 2) * h
-    boxes[:, 0] = torch.arange(centers.shape[0], device=centers.device)
-    boxes[:, 1] = eye_pixel_x - new_w / 2
-    boxes[:, 2] = eye_pixel_y - new_h / 2
-    boxes[:, 3] = eye_pixel_x + new_w / 2
-    boxes[:, 4] = eye_pixel_y + new_h / 2     
-    images = roi_align(
-        images,
-        boxes,
-        output_size=crop_shape,
-    )   
-    return images
 
 class TemporalEnsembler:
     def __init__(self, temporal_ensemble_coeff: float, chunk_size: int) -> None:
