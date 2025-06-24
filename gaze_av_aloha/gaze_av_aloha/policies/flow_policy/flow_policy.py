@@ -4,6 +4,7 @@ from gaze_av_aloha.configs import TaskConfig
 from gaze_av_aloha.policies.policy import Policy
 import torch
 from diffusers.optimization import get_scheduler
+from diffusers.training_utils import EMAModel
 from gaze_av_aloha.policies.normalize import Normalize, Unnormalize
 from collections import deque
 from gaze_av_aloha.utils.policy_utils import (
@@ -115,11 +116,12 @@ class FlowPolicy(Policy):
             num_training_steps=num_training_steps,
         )
     
-    def get_ema(self):
-        logging.info(f"""
-            [FlowPolicy] EMA is not implemented for FlowPolicy.
-        """)
-        return None
+    def get_ema(self) -> EMAModel | None:
+        logging.info(f"[FlowPolicy] Initializing EMA with decay {self.cfg.ema_decay} and use_ema={self.cfg.use_ema}")
+        return EMAModel(
+            parameters=self.parameters(),
+            decay=self.cfg.ema_decay,
+        ) if self.cfg.use_ema else None
     
     def get_delta_timestamps(self):
         observation_indices = list(reversed(range(0, -self.cfg.n_obs_steps*self.cfg.obs_step_size, -self.cfg.obs_step_size)))
