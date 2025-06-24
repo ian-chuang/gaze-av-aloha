@@ -37,7 +37,7 @@ class FlowPolicyConfig(PolicyConfig):
     time_dim: int = 128
 
     # Flow Matching
-    flow_matcher: str = "target"
+    flow_matcher: str = "conditional"
     n_sampling_steps: int = 10
     flow_matcher_kwargs: dict = field(default_factory=lambda: {
         "sigma": 0.0,
@@ -51,3 +51,5 @@ class FlowPolicyConfig(PolicyConfig):
     optimizer_weight_decay: float = 1e-6
     scheduler_name: str = "cosine"
     scheduler_warmup_steps: int = 500
+    use_ema: bool = True
+    ema_decay: float = 0.9999
