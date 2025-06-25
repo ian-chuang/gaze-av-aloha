@@ -28,7 +28,7 @@ class FlowPolicyConfig(PolicyConfig):
     dropout: float = 0.1
 
     # Attention Pooling
-    pool_n_queries: int = 4
+    pool_n_queries: int = 32
     pool_out_dim: int = 512
     pool_n_layers: int = 4
 
