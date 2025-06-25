@@ -230,14 +230,14 @@ class FlowModel(nn.Module):
         # )
         # self.backbone = IntermediateLayerGetter(backbone, return_layers={"layer4": "feature_map"})
         # self.pool = nn.AdaptiveAvgPool2d((1, 1))
-        self.state_dropout = nn.Dropout(policy_cfg.state_dropout)
-        # self.state_embed = nn.Sequential(
-        #     nn.Dropout(policy_cfg.state_dropout),
-        #     nn.Linear(task_cfg.state_dim, policy_cfg.dim_model),
-        #     nn.GELU(),
-        #     nn.Dropout(policy_cfg.state_dropout),
-        #     nn.Linear(policy_cfg.dim_model, policy_cfg.dim_model),
-        # )
+        # self.state_dropout = nn.Dropout(policy_cfg.state_dropout)
+        self.state_embed = nn.Sequential(
+            nn.Dropout(policy_cfg.state_dropout),
+            nn.Linear(task_cfg.state_dim, policy_cfg.dim_model),
+            nn.GELU(),
+            nn.Dropout(policy_cfg.state_dropout),
+            nn.Linear(policy_cfg.dim_model, policy_cfg.dim_model),
+        )
         
 
         # diffusion transformer
@@ -281,11 +281,11 @@ class FlowModel(nn.Module):
             img = self.input_resizer(img)  # (B*S, C, H, W)
             feat = self.backbone_proj(self.backbone(img))
             feat = self.pool(feat)
-            feat = einops.rearrange(feat, '(b s) d -> b (s d)', b=batch_size)  # (B, S*C)
+            feat = einops.rearrange(feat, '(b s) l d -> b (s l) d', b=batch_size)  # (B, S*L, D)
             cond.append(feat)  # (B*S, C)
             if not self.training:
                 viz[image_key] = img
-        cond.append(self.state_dropout(batch[self.task_cfg.state_key]).flatten(start_dim=1))  
+        cond.append(self.state_embed(batch[self.task_cfg.state_key]))  # (B, S, D)
         cond = torch.cat(cond, dim=1) 
 
 
