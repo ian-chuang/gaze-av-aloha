@@ -18,7 +18,7 @@ class FlowPolicyConfig(PolicyConfig):
     action_norm_mode: str = "min_max" 
     resize_shape: tuple = (240, 320)
     input_shape: tuple = (224,224)
-    dino_freeze_n_layers: int = 9
+    dino_freeze_n_layers: int = 0
     state_dropout: float = 0.1 # need to confirm this is valid
 
     # Transformer Layers
@@ -30,18 +30,14 @@ class FlowPolicyConfig(PolicyConfig):
     # Attention Pooling
     pool_n_queries: int = 4
     pool_out_dim: int = 512
-    pool_n_layers: int = 6
+    pool_n_layers: int = 4
 
     # DiT
     dit_n_layers: int = 8
     time_dim: int = 128
 
     # Flow Matching
-    flow_matcher: str = "conditional"
     n_sampling_steps: int = 10
-    flow_matcher_kwargs: dict = field(default_factory=lambda: {
-        "sigma": 0.0,
-    })
 
     # Training
     optimizer_lr: float = 1e-4
@@ -52,4 +48,4 @@ class FlowPolicyConfig(PolicyConfig):
     scheduler_name: str = "cosine"
     scheduler_warmup_steps: int = 500
     use_ema: bool = True
-    ema_decay: float = 0.9999
+    ema_decay: float = 0.99

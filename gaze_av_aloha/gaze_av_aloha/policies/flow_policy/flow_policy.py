@@ -23,6 +23,13 @@ from torchvision.models._utils import IntermediateLayerGetter
 from torchvision.ops.misc import FrozenBatchNorm2d
 import torchvision
 
+
+def sample_beta(alpha, beta, bsize, device):
+    gamma1 = torch.empty((bsize,), device=device).uniform_(0, 1).pow(1 / alpha)
+    gamma2 = torch.empty((bsize,), device=device).uniform_(0, 1).pow(1 / beta)
+    return gamma1 / (gamma1 + gamma2)
+
+
 class FlowPolicy(Policy):
     def __init__(
         self, 
@@ -203,22 +210,26 @@ class FlowModel(nn.Module):
         self.cfg = policy_cfg
         self.task_cfg = task_cfg
 
-        self.flow_matcher = _make_flow_matcher(
-            policy_cfg.flow_matcher,
-            **policy_cfg.flow_matcher_kwargs,
-        )
-
         # observation processing
         self.resize = Resize(policy_cfg.resize_shape)
         self.input_resizer = Resize(policy_cfg.input_shape)
-        # self.dino = DINO(policy_cfg.dino_freeze_n_layers)
-        # self.dino_embed = nn.Linear(self.dino.embed_dim, policy_cfg.dim_model)
-        backbone = torchvision.models.resnet18(
-            weights=torchvision.models.ResNet18_Weights.IMAGENET1K_V1,
-            norm_layer=FrozenBatchNorm2d,
-        )
-        self.backbone = IntermediateLayerGetter(backbone, return_layers={"layer4": "feature_map"})
-        self.pool = nn.AdaptiveAvgPool2d((1, 1))
+        self.backbone = DINO(policy_cfg.dino_freeze_n_layers)
+        self.backbone_proj = nn.Linear(self.backbone.embed_dim, policy_cfg.dim_model)
+        self.pool = AttentionPooling(
+            hidden_size=policy_cfg.dim_model,
+            out_dim=policy_cfg.pool_out_dim,
+            num_queries=policy_cfg.pool_n_queries,
+            depth=policy_cfg.pool_n_layers,
+            num_heads=policy_cfg.n_heads,
+            mlp_ratio=policy_cfg.mlp_ratio,
+            dropout=policy_cfg.dropout,
+        ) 
+        # backbone = torchvision.models.resnet18(
+        #     weights=torchvision.models.ResNet18_Weights.IMAGENET1K_V1,
+        #     norm_layer=FrozenBatchNorm2d,
+        # )
+        # self.backbone = IntermediateLayerGetter(backbone, return_layers={"layer4": "feature_map"})
+        # self.pool = nn.AdaptiveAvgPool2d((1, 1))
         self.state_dropout = nn.Dropout(policy_cfg.state_dropout)
         # self.state_embed = nn.Sequential(
         #     nn.Dropout(policy_cfg.state_dropout),
@@ -227,21 +238,13 @@ class FlowModel(nn.Module):
         #     nn.Dropout(policy_cfg.state_dropout),
         #     nn.Linear(policy_cfg.dim_model, policy_cfg.dim_model),
         # )
-        # self.attn_pooling = AttentionPooling(
-        #     hidden_size=policy_cfg.dim_model,
-        #     out_dim=policy_cfg.pool_out_dim,
-        #     num_queries=policy_cfg.pool_n_queries,
-        #     depth=policy_cfg.pool_n_layers,
-        #     num_heads=policy_cfg.n_heads,
-        #     mlp_ratio=policy_cfg.mlp_ratio,
-        #     dropout=policy_cfg.dropout,
-        # ) 
+        
 
         # diffusion transformer
         self.DiT = DiT(
             in_dim=task_cfg.action_dim,
             out_dim=task_cfg.action_dim,
-            cond_dim=(512 * len(task_cfg.image_keys) + task_cfg.state_dim) * policy_cfg.n_obs_steps,  
+            cond_dim=policy_cfg.pool_out_dim + task_cfg.state_dim * policy_cfg.n_obs_steps,  
             hidden_size=policy_cfg.dim_model,
             depth=policy_cfg.dit_n_layers,
             num_heads=policy_cfg.n_heads,
@@ -249,6 +252,21 @@ class FlowModel(nn.Module):
             dropout=policy_cfg.dropout,
             time_dim=policy_cfg.time_dim,
         )
+
+    def sample_noise(self, shape, device):
+        noise = torch.normal(
+            mean=0.0,
+            std=1.0,
+            size=shape,
+            dtype=torch.float32,
+            device=device,
+        )
+        return noise
+
+    def sample_time(self, bsize, device):
+        time_beta = sample_beta(1.5, 1.0, bsize, device)
+        time = time_beta * 0.999 + 0.001
+        return time.to(dtype=torch.float32, device=device)
 
     def prepare_global_conditioning(self, batch: dict[str, Tensor]) -> tuple[Tensor, dict]:
         viz = {}
@@ -261,8 +279,8 @@ class FlowModel(nn.Module):
             img = einops.rearrange(img, 'b s c h w -> (b s) c h w')
             img = self.resize(img) 
             img = self.input_resizer(img)  # (B*S, C, H, W)
-            feat = self.backbone(img)['feature_map']  # (B*S, C, H, W)
-            feat = self.pool(feat).flatten(start_dim=1)  # (B*S, C, 1,
+            feat = self.backbone_proj(self.backbone(img))
+            feat = self.pool(feat)
             feat = einops.rearrange(feat, '(b s) d -> b (s d)', b=batch_size)  # (B, S*C)
             cond.append(feat)  # (B*S, C)
             if not self.training:
@@ -292,19 +310,21 @@ class FlowModel(nn.Module):
         self, batch_size: int, global_cond: Tensor | None = None
     ) -> Tensor:
         device = get_device_from_parameters(self)
-        dtype = get_dtype_from_parameters(self)
 
-        num_steps = self.cfg.n_sampling_steps
-        shape = (batch_size, self.cfg.horizon, self.task_cfg.action_dim)
-        x = torch.randn(shape, device=device, dtype=dtype)
-        dt = 1.0 / num_steps
+        actions_shape = (batch_size, self.cfg.horizon, self.task_cfg.action_dim)
+        noise = self.sample_noise(actions_shape, device=device)
 
-        for n in range(num_steps):
-            timestep = n * dt * torch.ones(x.shape[0], device=x.device)
-            vt = self.DiT(x=x, timestep=timestep, cond=global_cond)
-            x = x + vt * dt
+        dt = -1.0 / self.cfg.n_sampling_steps
+        dt = torch.tensor(dt, dtype=torch.float32, device=device)
 
-        return x
+        xt = noise
+        time = torch.tensor(1.0, dtype=torch.float32, device=device)
+        while time >= -dt / 2:
+            vt = self.DiT(x=xt, timestep=time.expand(batch_size), cond=global_cond)
+            # Euler step
+            xt += dt * vt
+            time += dt
+        return xt
 
     def generate_actions(self, batch: dict[str, Tensor]) -> Tensor:
         batch_size = batch[self.task_cfg.state_key].shape[0]
@@ -314,9 +334,15 @@ class FlowModel(nn.Module):
 
     def compute_loss(self, batch: dict[str, Tensor]) -> Tensor:
         global_cond, _ = self.prepare_global_conditioning(batch) 
-        x0 = torch.randn_like(batch[self.task_cfg.action_key]) 
-        timestep, xt, ut = self.flow_matcher.sample_location_and_conditional_flow(x0, batch[self.task_cfg.action_key])
-        vt = self.DiT(x=xt, timestep=timestep, cond=global_cond)
+
+        actions = batch[self.task_cfg.action_key]
+        noise = self.sample_noise(actions.shape, actions.device)
+        time = self.sample_time(actions.shape[0], actions.device)
+        time_expanded = time[:, None, None]
+        xt = time_expanded * noise + (1 - time_expanded) * actions
+        ut = noise - actions
+
+        vt = self.DiT(x=xt, timestep=time, cond=global_cond)
         flow_matching_loss = F.mse_loss(vt, ut, reduction="none").mean()
         loss = flow_matching_loss
         loss_dict = {
