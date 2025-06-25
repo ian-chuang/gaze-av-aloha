@@ -22,6 +22,7 @@ import logging
 from torchvision.models._utils import IntermediateLayerGetter
 from torchvision.ops.misc import FrozenBatchNorm2d
 import torchvision
+import numpy as np
 
 
 def sample_beta(alpha, beta, bsize, device):
@@ -214,6 +215,14 @@ class FlowModel(nn.Module):
         self.resize = Resize(policy_cfg.resize_shape)
         self.input_resizer = Resize(policy_cfg.input_shape)
         self.backbone = DINO(policy_cfg.dino_freeze_n_layers)
+        self.register_buffer(
+            'pos_embed_2d',
+            create_sinusoidal_pos_emb_2d(
+                shape=(policy_cfg.input_shape[0] // self.backbone.patch_size,
+                       policy_cfg.input_shape[1] // self.backbone.patch_size),
+                dimension=policy_cfg.dim_model // 2,
+            )
+        )
         self.backbone_proj = nn.Linear(self.backbone.embed_dim, policy_cfg.dim_model)
         self.pool = AttentionPooling(
             hidden_size=policy_cfg.dim_model,
@@ -237,6 +246,7 @@ class FlowModel(nn.Module):
             nn.GELU(),
             nn.Dropout(policy_cfg.state_dropout),
             nn.Linear(policy_cfg.dim_model, policy_cfg.dim_model),
+            nn.LayerNorm(policy_cfg.dim_model),
         )
         
 
@@ -280,7 +290,7 @@ class FlowModel(nn.Module):
             img = self.resize(img) 
             img = self.input_resizer(img)  # (B*S, C, H, W)
             feat = self.backbone_proj(self.backbone(img))
-            feat = self.pool(feat)
+            feat = self.pool(c=feat, c_pos_emb=self.pos_embed_2d)  # (B*S, C)
             feat = einops.rearrange(feat, '(b s) l d -> b (s l) d', b=batch_size)  # (B, S*L, D)
             cond.append(feat)  # (B*S, C)
             if not self.training:
@@ -407,3 +417,39 @@ class TemporalEnsembler:
             self.ensembled_actions_count[n:],
         )
         return action
+    
+def create_sinusoidal_pos_emb_2d(shape: tuple, dimension: int, temperature: int = 10000) -> Tensor:
+    two_pi = 2 * np.pi
+    eps = 1e-6
+
+    not_mask = torch.ones(1, shape[0], shape[1], dtype=torch.float32)
+    # Note: These are like range(1, H+1) and range(1, W+1) respectively, but in most implementations
+    # they would be range(0, H) and range(0, W). Keeping it at as is to match the original code.
+    y_range = not_mask.cumsum(1, dtype=torch.float32)
+    x_range = not_mask.cumsum(2, dtype=torch.float32)
+
+    # "Normalize" the position index such that it ranges in [0, 2π].
+    # Note: Adding epsilon on the denominator should not be needed as all values of y_embed and x_range
+    # are non-zero by construction. This is an artifact of the original code.
+    y_range = y_range / (y_range[:, -1:, :] + eps) * two_pi
+    x_range = x_range / (x_range[:, :, -1:] + eps) * two_pi
+
+    inverse_frequency = temperature ** (
+        2 * (torch.arange(dimension, dtype=torch.float32) // 2) / dimension
+    )
+
+    x_range = x_range.unsqueeze(-1) / inverse_frequency  # (1, H, W, 1)
+    y_range = y_range.unsqueeze(-1) / inverse_frequency  # (1, H, W, 1)
+
+    # Note: this stack then flatten operation results in interleaved sine and cosine terms.
+    # pos_embed_x and pos_embed_y are (1, H, W, C // 2).
+    pos_embed_x = torch.stack((x_range[..., 0::2].sin(), x_range[..., 1::2].cos()), dim=-1).flatten(3)
+    pos_embed_y = torch.stack((y_range[..., 0::2].sin(), y_range[..., 1::2].cos()), dim=-1).flatten(3)
+    pos_embed = torch.cat((pos_embed_y, pos_embed_x), dim=3).permute(0, 3, 1, 2)  # (1, C, H, W)
+
+    pos_embed = einops.rearrange(
+        pos_embed,
+        'b c h w -> b (h w) c',
+    )  # (1, H*W, C)
+
+    return pos_embed
