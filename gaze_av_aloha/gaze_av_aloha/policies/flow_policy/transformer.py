@@ -181,7 +181,7 @@ class DiTBlock(nn.Module):
         )
 
     def forward(self, x: Tensor, t: Tensor, c: Tensor) -> Tensor:
-        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(t+c.mean(dim=1)).chunk(6, dim=1)
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(t).chunk(6, dim=1)
         x = x + gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa))
         x = x + self.xattn(self.norm2(x), c) 
         x = x + gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
@@ -201,7 +201,7 @@ class FinalLayer(nn.Module):
         )
 
     def forward(self, x: Tensor, t: Tensor, c: Tensor) -> Tensor:
-        shift, scale = self.adaLN_modulation(t+c.mean(dim=1)).chunk(2, dim=1)
+        shift, scale = self.adaLN_modulation(t).chunk(2, dim=1)
         x = modulate(self.norm_final(x), shift, scale)
         x = self.linear(x)
         return x
@@ -301,14 +301,14 @@ class DiT(nn.Module):
         return x
     
 class AttentionBlock(nn.Module):
-    def __init__(self, use_xattn, hidden_size, num_heads, mlp_ratio=4.0, **block_kwargs):
+    def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, **block_kwargs):
         super().__init__()
-        self.use_xattn = use_xattn
-        self.norm1 = nn.LayerNorm(hidden_size)
-        self.attn = Attention(hidden_size, num_heads=num_heads, **block_kwargs)
-        if use_xattn:
-            self.norm2 = nn.LayerNorm(hidden_size)
-            self.xattn = CrossAttention(hidden_size, num_heads=num_heads, **block_kwargs)
+        # self.use_xattn = use_xattn
+        # self.norm1 = nn.LayerNorm(hidden_size)
+        # self.attn = Attention(hidden_size, num_heads=num_heads, **block_kwargs)
+        # if use_xattn:
+        self.norm2 = nn.LayerNorm(hidden_size)
+        self.xattn = CrossAttention(hidden_size, num_heads=num_heads, **block_kwargs)
         self.norm3 = nn.LayerNorm(hidden_size)
         self.mlp = Mlp(in_features=hidden_size, hidden_features=int(hidden_size * mlp_ratio), drop=0)
 
@@ -318,10 +318,10 @@ class AttentionBlock(nn.Module):
         context: [B, S_ctx, D] - Key/Value input
         mask: Optional attention mask
         """
-        x = x + self.attn(self.norm1(x))
-        if self.use_xattn:
-            assert c is not None, "Cross-attention requires conditioning context"
-            x = x + self.xattn(self.norm2(x), c)
+        # x = x + self.attn(self.norm1(x))
+        # if self.use_xattn:
+        #     assert c is not None, "Cross-attention requires conditioning context"
+        x = x + self.xattn(self.norm2(x), c)
         x = x + self.mlp(self.norm3(x))
         return x
 
@@ -375,7 +375,7 @@ class AttentionPooling(nn.Module):
         self.norm2 = nn.LayerNorm(hidden_size)
         self.blocks = nn.ModuleList([
             AttentionBlock(
-                use_xattn=i % 2 == 0,  # Alternate between self-attention and cross-attention
+                # use_xattn=i % 2 == 0,  # Alternate between self-attention and cross-attention
                 hidden_size=hidden_size,
                 num_heads=num_heads, 
                 mlp_ratio=mlp_ratio,
