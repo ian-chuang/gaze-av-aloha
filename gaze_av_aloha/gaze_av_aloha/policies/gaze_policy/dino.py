@@ -1,6 +1,7 @@
 from torch import nn, Tensor
 import torch
 import logging
+from pprint import pformat
 
 class DINO(nn.Module):
     def __init__(self, num_freeze_layers: int = 0):
@@ -36,10 +37,6 @@ class DINO(nn.Module):
     @property
     def patch_size(self):
         return self.backbone.patch_size
-    
-    @property
-    def num_register_tokens(self):
-        return self.backbone.num_register_tokens
 
-    def forward(self, x: Tensor, masks: Tensor = None) -> Tensor:
-        return self.backbone.forward_features(x, masks)
+    def forward(self, x: Tensor) -> Tensor:
+        return self.backbone.forward_features(x)['x_norm_patchtokens']

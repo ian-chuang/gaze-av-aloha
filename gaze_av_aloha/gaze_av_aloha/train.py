@@ -300,24 +300,26 @@ def train(cfg: Config):
 
             if eval_env and is_eval_step:
                 step_id = str(step).zfill(10)
-                logging.info(f"Eval policy at step {step}")
-                with torch.no_grad():
-                    eval_info = eval_policy(
-                        eval_env,
-                        policy,
-                        cfg.task.eval_n_episodes,
-                        videos_dir=run_dir / "eval" / f"videos_step_{step_id}",
-                        max_episodes_rendered=4,
-                        start_seed=cfg.seed,
-                    )
+                for name, options in cfg.task.eval_options.items():
+                    logging.info(f"Eval policy at step {step} with options: {name}={pformat(options, indent=4)}")
+                    with torch.no_grad():
+                        eval_info = eval_policy(
+                            eval_env,
+                            policy,
+                            cfg.task.eval_n_episodes,
+                            videos_dir=run_dir / "eval" / name / f"videos_step_{step_id}",
+                            max_episodes_rendered=4,
+                            start_seed=cfg.seed,
+                            options=options,
+                        )
 
-                logging.info(eval_info["aggregated"])
-                if cfg.wandb.enable and step >= wandb.run.step:
-                    for k, v in eval_info["aggregated"].items():
-                        if not isinstance(v, (int, float, str)): continue
-                        wandb.log({f"eval/{k}": v}, step=step)
-                    wandb_video = wandb.Video(eval_info['video_paths'][0], fps=cfg.task.fps, format="mp4")
-                    wandb.log({"eval/video": wandb_video}, step=step)
+                    logging.info(eval_info["aggregated"])
+                    if cfg.wandb.enable and step >= wandb.run.step:
+                        for k, v in eval_info["aggregated"].items():
+                            if not isinstance(v, (int, float, str)): continue
+                            wandb.log({f"eval/{k}_{name}": v}, step=step)
+                        wandb_video = wandb.Video(eval_info['video_paths'][0], fps=cfg.task.fps, format="mp4")
+                        wandb.log({f"eval/video_{name}": wandb_video}, step=step)
 
             if viz_env and is_viz_step:
                 step_id = str(step).zfill(10)
