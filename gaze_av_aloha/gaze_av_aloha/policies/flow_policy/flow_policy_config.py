@@ -7,19 +7,27 @@ class FlowPolicyConfig(PolicyConfig):
 
     n_obs_steps: int = 1
     obs_step_size: int = 1
-    n_action_steps: int = 2
+    n_action_steps: int = 8
     horizon: int = 16
+    use_temporal_ensemble: bool = False
     temporal_ensemble_coeff: float = 0.0
-    drop_n_last_frames: int = 6
+    drop_n_last_frames: int = 24
     
     # Observation
     image_norm_mode: str = "mean_std"
     state_norm_mode: str = "min_max" 
     action_norm_mode: str = "min_max" 
+    image_to_gaze_key: dict[str, str] = field(default_factory=lambda: {})
     resize_shape: tuple = (240, 320)
-    input_shape: tuple = (224,224)
-    dino_freeze_n_layers: int = 0
-    state_dropout: float = 0.1 # need to confirm this is valid
+    crop_shape: tuple = (224, 294)
+    crop_is_random: bool = True
+    dino_freeze_n_layers: int = 6
+    state_dropout: float = 0.1
+
+    # gaze
+    gaze_sigma = 0.1
+    gaze_k: int = 40
+    gaze_prob: float = 0.5
 
     # Transformer Layers
     dim_model: int = 512
@@ -28,16 +36,15 @@ class FlowPolicyConfig(PolicyConfig):
     dropout: float = 0.1
 
     # Attention Pooling
-    pool_n_queries: int = 32
-    pool_out_dim: int = 512
-    pool_n_layers: int = 4
+    pool_n_queries: int = 16
+    pool_n_layers: int = 2
 
     # DiT
     dit_n_layers: int = 8
     time_dim: int = 128
 
     # Flow Matching
-    n_sampling_steps: int = 10
+    n_sampling_steps: int = 6
 
     # Training
     optimizer_lr: float = 1e-4

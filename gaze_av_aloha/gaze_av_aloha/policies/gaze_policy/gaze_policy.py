@@ -14,11 +14,13 @@ from gaze_av_aloha.utils.policy_utils import (
 import torchcfm.conditional_flow_matching as cfm
 import torch.nn.functional as F
 import einops
-from gaze_av_aloha.policies.gaze_policy.vision import VisionEncoder, crop_at_center
-from gaze_av_aloha.policies.gaze_policy.transformer import DiT, AttentionPooling, get_foveated_pos_embed, get_1d_rotary_embed, TransformerEncoder
+from gaze_av_aloha.policies.gaze_policy.vision import crop_at_center
+from gaze_av_aloha.policies.gaze_policy.dino import DINO
+from gaze_av_aloha.policies.gaze_policy.transformer import DiT, AttentionPooling, get_foveated_pos_embed, get_1d_rotary_embed
 from torchvision.transforms import Resize
 import logging
 from torchvision.ops import roi_align
+from diffusers.training_utils import EMAModel
 
 class GazePolicy(Policy):
     def __init__(
@@ -94,7 +96,7 @@ class GazePolicy(Policy):
             - Epsilon: {self.cfg.optimizer_eps}
             - Weight Decay: {self.cfg.optimizer_weight_decay}
         """)
-        backbone_condition = lambda n: "flow" in n and "dino" in n
+        backbone_condition = lambda n: "dino" in n
         if not any(backbone_condition(n) for n, p in self.named_parameters()):
             raise ValueError(f"No parameters found satifying the condition for vision backbone: {backbone_condition}")
         
@@ -126,21 +128,6 @@ class GazePolicy(Policy):
             eps=self.cfg.optimizer_eps,
             weight_decay=self.cfg.optimizer_weight_decay
         )
-        # logging.info(f"""
-        #     [GazePolicy] Initializing AdamW optimizer with the following parameters:
-        #     - Learning Rate: {self.cfg.optimizer_lr}
-        #     - Betas: {self.cfg.optimizer_betas}
-        #     - Epsilon: {self.cfg.optimizer_eps}
-        #     - Weight Decay: {self.cfg.optimizer_weight_decay}
-        # """)
-        # return torch.optim.AdamW(
-        #     params=self.parameters(),
-        #     lr=self.cfg.optimizer_lr,
-        #     betas=self.cfg.optimizer_betas,
-        #     eps=self.cfg.optimizer_eps,
-        #     weight_decay=self.cfg.optimizer_weight_decay
-        # )
-
     
     def get_scheduler(self, optimizer: torch.optim.Optimizer, num_training_steps: int) -> torch.optim.lr_scheduler.LambdaLR | None:
         logging.info(f"""
@@ -155,11 +142,12 @@ class GazePolicy(Policy):
             num_training_steps=num_training_steps,
         )
     
-    def get_ema(self):
-        logging.info(f"""
-            [GazePolicy] EMA is not implemented for GazePolicy.
-        """)
-        return None
+    def get_ema(self) -> EMAModel | None:
+        logging.info(f"[FlowPolicy] Initializing EMA with decay {self.cfg.ema_decay} and use_ema={self.cfg.use_ema}")
+        return EMAModel(
+            parameters=self.parameters(),
+            decay=self.cfg.ema_decay,
+        ) if self.cfg.use_ema else None
     
     def get_delta_timestamps(self):
         observation_indices = list(reversed(range(0, -self.cfg.n_obs_steps*self.cfg.obs_step_size, -self.cfg.obs_step_size)))
@@ -303,27 +291,18 @@ class FlowModel(nn.Module):
         # observation processing
         
         self.resize = Resize(policy_cfg.resize_shape)
-        self.dino = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14_reg')
-        # for param in self.dino.parameters():
-        #     param.requires_grad = False
-        self.dino_embed = nn.Linear(self.dino.embed_dim, policy_cfg.dim_model)
+        self.input_resize = Resize(policy_cfg.input_shape)
+        self.dino_periph = DINO(6)
+        self.dino_foveal = DINO(6)
+        self.dino_embed = nn.Linear(self.dino_periph.embed_dim, policy_cfg.dim_model)
         self.gaze_embed = nn.Linear(2, policy_cfg.dim_model)
         self.state_embed = nn.Linear(task_cfg.state_dim, policy_cfg.dim_model)
         self.state_dropout = nn.Dropout(policy_cfg.proprio_dropout)
         self.action_history_embed = nn.Linear(self.action_dim, policy_cfg.dim_model)
         self.action_history_dropout = nn.Dropout(policy_cfg.proprio_dropout)
 
-        # self.transformer_encoder = TransformerEncoder(
-        #     hidden_size=policy_cfg.dim_model,
-        #     num_layers=policy_cfg.self_attn_n_layers,
-        #     num_heads=policy_cfg.n_heads,
-        #     mlp_ratio=policy_cfg.mlp_ratio,
-        #     dropout=policy_cfg.dropout,
-        # )
-
         self.attn_pooling = AttentionPooling(
             hidden_size=policy_cfg.dim_model,
-            out_dim=self.cfg.attn_pooling_out_dim,
             num_queries=self.cfg.attn_pooling_n_queries,
             depth=self.cfg.attn_pooling_n_layers,
             num_heads= self.cfg.n_heads,
@@ -334,8 +313,6 @@ class FlowModel(nn.Module):
         self.DiT = DiT(
             in_dim=self.action_dim,
             out_dim=self.action_dim,
-            cond_dim=policy_cfg.attn_pooling_out_dim,
-            # cond_dim=self.cfg.attn_pooling_out_dim + policy_cfg.n_obs_steps * (task_cfg.state_dim + len(policy_cfg.image_to_gaze_key) * 2),
             hidden_size=policy_cfg.dim_model,
             depth=policy_cfg.n_decoder_layers,
             num_heads=policy_cfg.n_heads,
@@ -344,8 +321,12 @@ class FlowModel(nn.Module):
             time_dim=policy_cfg.time_dim,
         )
         self.register_buffer(
-            "dit_pos_embed", 
+            "dit_x_pos_embed", 
             get_1d_rotary_embed(policy_cfg.dim_model // policy_cfg.n_heads, torch.arange(policy_cfg.horizon))
+        )
+        self.register_buffer(
+            "dit_c_pos_embed",
+            get_1d_rotary_embed(policy_cfg.dim_model // policy_cfg.n_heads, torch.arange(policy_cfg.attn_pooling_n_queries))
         )
 
     def prepare_global_conditioning(self, batch: dict[str, Tensor]) -> tuple[Tensor, dict]:
@@ -374,19 +355,20 @@ class FlowModel(nn.Module):
             batch_size = images.shape[0]
             images = einops.rearrange(images, 'b s c h w -> (b s) c h w')
             images = self.resize(images)  # (B, S, C, H, W)
+            images = self.input_resize(images)  # (B, S, C, H, W)
             images = einops.rearrange(images, '(b s) c h w -> b s c h w', b=batch_size)
 
             # peripheral processing
             peripheral = einops.rearrange(images, 'b s c h w -> (b s) c h w')
-            peripheral_feat = self.dino.forward_features(peripheral)["x_norm_patchtokens"]  # (B*S, D)
+            peripheral_feat = self.dino_periph(peripheral)
             peripheral_feat = einops.rearrange(peripheral_feat, '(b s) l d -> b (s l) d', b=batch_size)
             tokens.append(self.dino_embed(peripheral_feat))  # (B, S, D)
             pos_embed.append(
                 get_foveated_pos_embed(
                     gaze=torch.zeros((batch_size, self.cfg.n_obs_steps, 2), device=peripheral_feat.device),  # centered for peripheral
-                    image_shape=self.cfg.resize_shape,
-                    crop_shape=self.cfg.resize_shape,
-                    feat_shape=(int(self.cfg.resize_shape[0] / self.dino.patch_size), int(self.cfg.resize_shape[1] / self.dino.patch_size)),
+                    image_shape=self.cfg.input_shape,
+                    crop_shape=self.cfg.input_shape,
+                    feat_shape=(int(self.cfg.input_shape[0] / self.dino_periph.patch_size), int(self.cfg.input_shape[1] / self.dino_periph.patch_size)),
                     n_obs_steps=self.cfg.n_obs_steps,
                     dim=self.cfg.dim_model // self.cfg.n_heads,
                 )
@@ -401,17 +383,17 @@ class FlowModel(nn.Module):
                     images=einops.rearrange(images, 'b s c h w -> (b s) c h w'), 
                     centers=einops.rearrange(batch[gaze_key], "b s c -> (b s) c"), 
                     crop_shape=self.cfg.foveal_shape, 
-                    out_shape=self.cfg.resize_shape,
+                    out_shape=self.cfg.input_shape,
                 )
-                foveal_feat = self.dino.forward_features(foveal)["x_norm_patchtokens"]  # (B*S, D)
+                foveal_feat = self.dino_foveal(foveal)  # (B*S, L, D)
                 foveal_feat = einops.rearrange(foveal_feat, '(b s) l d -> b (s l) d', b=batch_size)
                 tokens.append(self.dino_embed(foveal_feat))  # (B, S, D)
                 pos_embed.append(
                     get_foveated_pos_embed(
                         gaze=batch[gaze_key], 
-                        image_shape=self.cfg.resize_shape,
+                        image_shape=self.cfg.input_shape,
                         crop_shape=self.cfg.foveal_shape,
-                        feat_shape=(int(self.cfg.resize_shape[0] / self.dino.patch_size), int(self.cfg.resize_shape[1] / self.dino.patch_size)),
+                        feat_shape=(int(self.cfg.input_shape[0] / self.dino_foveal.patch_size), int(self.cfg.input_shape[1] / self.dino_foveal.patch_size)),
                         n_obs_steps=self.cfg.n_obs_steps,
                         dim=self.cfg.dim_model // self.cfg.n_heads,
                     )
@@ -494,7 +476,7 @@ class FlowModel(nn.Module):
 
         for n in range(num_steps):
             timestep = n * dt * torch.ones(x.shape[0], device=x.device)
-            vt = self.DiT(x=x, timestep=timestep, cond=global_cond, pos_embed=self.dit_pos_embed)
+            vt = self.DiT(x=x, timestep=timestep, cond=global_cond, x_pos_embed=self.dit_x_pos_embed, c_pos_embed=self.dit_c_pos_embed)
             x = x + vt * dt
 
         return x
@@ -509,7 +491,7 @@ class FlowModel(nn.Module):
         global_cond, _ = self.prepare_global_conditioning(batch) 
         x0 = torch.randn_like(batch[self.task_cfg.action_key]) 
         timestep, xt, ut = self.flow_matcher.sample_location_and_conditional_flow(x0, batch[self.task_cfg.action_key])
-        vt = self.DiT(x=xt, timestep=timestep, cond=global_cond, pos_embed=self.dit_pos_embed)
+        vt = self.DiT(x=xt, timestep=timestep, cond=global_cond, x_pos_embed=self.dit_x_pos_embed, c_pos_embed=self.dit_c_pos_embed)
         flow_matching_loss = F.mse_loss(vt, ut, reduction="none").mean()
         loss = flow_matching_loss
         loss_dict = {

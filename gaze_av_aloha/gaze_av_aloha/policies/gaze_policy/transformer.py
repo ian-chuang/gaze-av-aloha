@@ -224,6 +224,8 @@ class DiTBlock(nn.Module):
         self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.attn = Attention(hidden_size, num_heads=num_heads, qkv_bias=True, **block_kwargs)
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
+        self.xattn = CrossAttention(hidden_size, num_heads=num_heads, qkv_bias=True, **block_kwargs)
+        self.norm3 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         mlp_hidden_dim = int(hidden_size * mlp_ratio)
         approx_gelu = lambda: nn.GELU(approximate="tanh")
         self.mlp = Mlp(in_features=hidden_size, hidden_features=mlp_hidden_dim, act_layer=approx_gelu, drop=0)
@@ -232,10 +234,11 @@ class DiTBlock(nn.Module):
             nn.Linear(hidden_size, 6 * hidden_size, bias=True)
         )
 
-    def forward(self, x, c, pos_embed=None):
-        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(c).chunk(6, dim=1)
-        x = x + gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa), pos_embed=pos_embed)
-        x = x + gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
+    def forward(self, x, t, c, x_pos_embed=None, c_pos_embed=None):
+        shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(t).chunk(6, dim=1)
+        x = x + gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa), pos_embed=x_pos_embed)
+        x = x + self.xattn(self.norm2(x), c, x_pos_embed=x_pos_embed, c_pos_embed=c_pos_embed)
+        x = x + gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm3(x), shift_mlp, scale_mlp))
         return x
 
 class FinalLayer(nn.Module):
@@ -251,8 +254,8 @@ class FinalLayer(nn.Module):
             nn.Linear(hidden_size, 2 * hidden_size, bias=True)
         )
 
-    def forward(self, x, c):
-        shift, scale = self.adaLN_modulation(c).chunk(2, dim=1)
+    def forward(self, x, t):
+        shift, scale = self.adaLN_modulation(t).chunk(2, dim=1)
         x = modulate(self.norm_final(x), shift, scale)
         x = self.linear(x)
         return x
@@ -281,7 +284,6 @@ class DiT(nn.Module):
         self,
         in_dim=21,
         out_dim=21,
-        cond_dim=512,
         hidden_size=512,
         depth=8,
         num_heads=8,
@@ -299,7 +301,6 @@ class DiT(nn.Module):
             nn.Mish(),
             nn.Linear(time_dim * 4, hidden_size),
         )
-        self.cond_embed = nn.Linear(cond_dim, hidden_size)
         self.blocks = nn.ModuleList([
             DiTBlock(
                 hidden_size, 
@@ -336,7 +337,7 @@ class DiT(nn.Module):
         nn.init.constant_(self.final_layer.linear.weight, 0)
         nn.init.constant_(self.final_layer.linear.bias, 0)
 
-    def forward(self, x, timestep, cond, pos_embed=None):
+    def forward(self, x, timestep, cond, x_pos_embed=None, c_pos_embed=None):
         """
         Forward pass of DiT.
         x: (B, N, D) - Input features, where B is batch size, N is sequence length, and D is feature dimension.
@@ -345,10 +346,9 @@ class DiT(nn.Module):
         """
         x = self.x_embed(x)  
         t = self.time_embed(timestep)
-        c = t + self.cond_embed(cond) 
         for block in self.blocks:
-            x = block(x, c, pos_embed=pos_embed)
-        x = self.final_layer(x, c)  
+            x = block(x, t, cond, x_pos_embed=x_pos_embed, c_pos_embed=c_pos_embed)
+        x = self.final_layer(x, t)
         return x
     
 class AttentionBlock(nn.Module):
@@ -415,18 +415,17 @@ class AttentionPooling(nn.Module):
     """
     Attention pooling layer that uses DiT as the backbone.
     """
-    def __init__(self, hidden_size, out_dim, num_queries, depth=2, num_heads=8, mlp_ratio=4.0, dropout=0.0):
+    def __init__(self, hidden_size, num_queries, depth=2, num_heads=8, mlp_ratio=4.0, dropout=0.0):
         super().__init__()
         self.hidden_size = hidden_size
         self.num_queries = num_queries
-        self.intermediate_dim = out_dim // num_queries
-        assert out_dim % num_queries == 0, "out_dim must be divisible by num_queries"
         self.query_tokens = nn.Embedding(num_queries, hidden_size)
-        # self.register_buffer("x_pos_embed", get_1d_rotary_embed(hidden_size // num_heads, torch.arange(num_queries)))
-        self.norm = nn.LayerNorm(hidden_size)
+        self.register_buffer("x_pos_embed", get_1d_rotary_embed(hidden_size // num_heads, torch.arange(num_queries)))
+        self.norm1 = nn.LayerNorm(hidden_size)
+        self.norm2 = nn.LayerNorm(hidden_size)
         self.blocks = nn.ModuleList([
             AttentionBlock(
-                use_xattn=i % 2 == 0,  # Alternate between self-attention and cross-attention
+                use_xattn=True,
                 hidden_size=hidden_size,
                 num_heads=num_heads, 
                 mlp_ratio=mlp_ratio,
@@ -434,7 +433,6 @@ class AttentionPooling(nn.Module):
                 proj_drop=dropout,
             ) for i in range(depth)
         ])
-        self.proj = nn.Linear(hidden_size, self.intermediate_dim)
         self.initialize_weights()
 
     def initialize_weights(self):
@@ -455,8 +453,8 @@ class AttentionPooling(nn.Module):
         """
         B = c.size(0)
         x = self.query_tokens.weight.unsqueeze(0).expand(B, -1, -1)
-        c = self.norm(c)
+        c = self.norm1(c)
         for block in self.blocks:
-            x = block(x=x, c=c, c_pos_embed=c_pos_embed) #x_pos_embed=self.x_pos_embed,
-        x = self.proj(x)  # (B, num_queries, intermediate_dim)
-        return x.flatten(start_dim=1) 
+            x = block(x=x, c=c, x_pos_embed=self.x_pos_embed, c_pos_embed=c_pos_embed) 
+        x = self.norm2(x)
+        return x

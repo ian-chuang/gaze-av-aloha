@@ -9,27 +9,21 @@ from gaze_av_aloha.policies.normalize import Normalize, Unnormalize
 from collections import deque
 from gaze_av_aloha.utils.policy_utils import (
     get_device_from_parameters,
-    get_dtype_from_parameters,
     populate_queues,
 )
-import torchcfm.conditional_flow_matching as cfm
 import torch.nn.functional as F
 import einops
-from gaze_av_aloha.policies.flow_policy.transformer import DiT, AttentionPooling
+from gaze_av_aloha.policies.flow_policy.transformer import DiT, AttentionPooling, get_1d_rotary_embed, get_nd_rotary_embed
+from gaze_av_aloha.policies.flow_policy.gaze import gaze_crop, gaze_mask
 from gaze_av_aloha.policies.flow_policy.dino import DINO
 from torchvision.transforms import Resize
 import logging
-from torchvision.models._utils import IntermediateLayerGetter
-from torchvision.ops.misc import FrozenBatchNorm2d
-import torchvision
 import numpy as np
-
 
 def sample_beta(alpha, beta, bsize, device):
     gamma1 = torch.empty((bsize,), device=device).uniform_(0, 1).pow(1 / alpha)
     gamma2 = torch.empty((bsize,), device=device).uniform_(0, 1).pow(1 / beta)
     return gamma1 / (gamma1 + gamma2)
-
 
 class FlowPolicy(Policy):
     def __init__(
@@ -45,7 +39,7 @@ class FlowPolicy(Policy):
 
         self.normalize_inputs = Normalize(
             {
-                **{k: policy_cfg.image_norm_mode for k in task_cfg.image_keys},
+                **{k: policy_cfg.image_norm_mode for k in policy_cfg.image_to_gaze_key.keys()},
                 task_cfg.state_key: policy_cfg.state_norm_mode,
             },
             stats,
@@ -62,11 +56,15 @@ class FlowPolicy(Policy):
             },
             stats,
         )
+
         self.flow = FlowModel(policy_cfg, task_cfg)
-        self.temporal_ensembler = TemporalEnsembler(
-            temporal_ensemble_coeff=policy_cfg.temporal_ensemble_coeff,
-            chunk_size=policy_cfg.horizon,
-        )
+
+        if policy_cfg.use_temporal_ensemble:
+            self.temporal_ensembler = TemporalEnsembler(
+                temporal_ensemble_coeff=policy_cfg.temporal_ensemble_coeff,
+                chunk_size=policy_cfg.horizon,
+            )
+
         self.reset()
 
     def get_optimizer(self) -> torch.optim.Optimizer:
@@ -78,7 +76,7 @@ class FlowPolicy(Policy):
             - Epsilon: {self.cfg.optimizer_eps}
             - Weight Decay: {self.cfg.optimizer_weight_decay}
         """)
-        backbone_condition = lambda n: "backbone" in n
+        backbone_condition = lambda n: "flow.dino" in n
         if not any(backbone_condition(n) for n, p in self.named_parameters()):
             raise ValueError(f"No parameters found satifying the condition for vision backbone: {backbone_condition}")
         
@@ -125,11 +123,15 @@ class FlowPolicy(Policy):
         )
     
     def get_ema(self) -> EMAModel | None:
-        logging.info(f"[FlowPolicy] Initializing EMA with decay {self.cfg.ema_decay} and use_ema={self.cfg.use_ema}")
-        return EMAModel(
-            parameters=self.parameters(),
-            decay=self.cfg.ema_decay,
-        ) if self.cfg.use_ema else None
+        if self.cfg.use_ema:
+            logging.info(f"[FlowPolicy] Initializing EMA with decay {self.cfg.ema_decay}")
+            return EMAModel(
+                parameters=self.parameters(),
+                decay=self.cfg.ema_decay,
+            ) 
+        else:
+            logging.info(f"[FlowPolicy] EMA is not used.")
+            return None
     
     def get_delta_timestamps(self):
         observation_indices = list(reversed(range(0, -self.cfg.n_obs_steps*self.cfg.obs_step_size, -self.cfg.obs_step_size)))
@@ -144,9 +146,14 @@ class FlowPolicy(Policy):
             # observations
             **{
                 k: [i / self.task_cfg.fps for i in observation_indices]
-                for k in self.task_cfg.image_keys
+                for k in self.cfg.image_to_gaze_key.keys()
             },
             self.task_cfg.state_key: [i / self.task_cfg.fps for i in observation_indices],
+            # gaze
+            **{
+                k: [i / self.task_cfg.fps for i in observation_indices]
+                for k in self.cfg.image_to_gaze_key.values()
+            },
             # actions
             self.task_cfg.action_key: [i / self.task_cfg.fps for i in action_indices],
         }
@@ -157,90 +164,61 @@ class FlowPolicy(Policy):
         self._queues = {
             self.task_cfg.action_key: deque(maxlen=self.cfg.n_action_steps),
             self.task_cfg.state_key: deque(maxlen=obs_queue_size),
-            **{key: deque(maxlen=obs_queue_size) for key in self.task_cfg.image_keys},
+            **{key: deque(maxlen=obs_queue_size) for key in self.cfg.image_to_gaze_key.keys()},
         }
-        self.temporal_ensembler.reset()   
+        if self.cfg.use_temporal_ensemble:
+            self.temporal_ensembler.reset()   
 
     @torch.no_grad()
     def select_action(self, batch: dict[str, Tensor], return_viz: bool = False) -> Tensor:
         self.eval()
-        assert self.task_cfg.state_key in batch, f"Missing {self.task_cfg.state_key} in batch"
-        assert all(key in batch for key in self.task_cfg.image_keys), f"Missing {self.task_cfg.image_keys} in batch"
         self._queues = populate_queues(self._queues, batch)
 
         viz = {}
         if len(self._queues[self.task_cfg.action_key]) == 0:
             batch = {
                 k: torch.stack(list(self._queues[k])[::self.cfg.obs_step_size], dim=1) 
-                for k in self.task_cfg.image_keys + [self.task_cfg.state_key]
+                for k in list(self.cfg.image_to_gaze_key.keys()) + [self.task_cfg.state_key]
             }
             batch = self.normalize_inputs(batch)
             actions, viz = self.flow.generate_actions(batch)
             actions = self.unnormalize_outputs({self.task_cfg.action_key: actions})[self.task_cfg.action_key]
-            actions = self.temporal_ensembler.update(actions, n=self.cfg.n_action_steps)
+
+            if self.cfg.use_temporal_ensemble:
+                actions = self.temporal_ensembler.update(actions, n=self.cfg.n_action_steps)
+            else:
+                actions = actions[:, :self.cfg.n_action_steps]
+
             self._queues[self.task_cfg.action_key].extend(actions.transpose(0, 1))
 
         action = self._queues[self.task_cfg.action_key].popleft()
+
         if return_viz: return action, viz
         return action
-
-    @torch.no_grad()
-    def get_action(self, batch: dict[str, Tensor]) -> Tensor:
-        batch = self.normalize_inputs(batch)
-        actions, viz = self.flow.generate_actions(batch)
-        actions = self.unnormalize_outputs({self.task_cfg.action_key: actions})[self.task_cfg.action_key]
-        return actions, viz
 
     def forward(self, batch: dict[str, Tensor]) -> tuple[Tensor, None]:
         batch = self.normalize_inputs(batch)
         batch = self.normalize_targets(batch)
         loss, loss_dict = self.flow.compute_loss(batch)
         return loss, loss_dict
-    
-def _make_flow_matcher(name: str, **kwargs: dict) -> cfm.ConditionalFlowMatcher:
-    if name == "conditional":
-        return cfm.ConditionalFlowMatcher(**kwargs)
-    elif name == "target":
-        return cfm.TargetConditionalFlowMatcher(**kwargs)
-    else:
-        raise ValueError(f"Unsupported flow matcher type {name}")
-        
+       
 class FlowModel(nn.Module):
     def __init__(self, policy_cfg: FlowPolicyConfig, task_cfg: TaskConfig):
         super().__init__()
         self.cfg = policy_cfg
         self.task_cfg = task_cfg
 
-        # observation processing
-        self.resize = Resize(policy_cfg.resize_shape)
-        self.input_resizer = Resize(policy_cfg.input_shape)
-        self.backbone = DINO(policy_cfg.dino_freeze_n_layers)
-        self.register_buffer(
-            'pos_embed_2d',
-            create_sinusoidal_pos_emb_2d(
-                shape=(policy_cfg.input_shape[0] // self.backbone.patch_size,
-                       policy_cfg.input_shape[1] // self.backbone.patch_size),
-                dimension=policy_cfg.dim_model // 2,
-            )
-        )
-        self.backbone_proj = nn.Linear(self.backbone.embed_dim, policy_cfg.dim_model)
-        self.pool = AttentionPooling(
-            hidden_size=policy_cfg.dim_model,
-            out_dim=policy_cfg.pool_out_dim,
-            num_queries=policy_cfg.pool_n_queries,
-            depth=policy_cfg.pool_n_layers,
-            num_heads=policy_cfg.n_heads,
-            mlp_ratio=policy_cfg.mlp_ratio,
-            dropout=policy_cfg.dropout,
-        ) 
-        # backbone = torchvision.models.resnet18(
-        #     weights=torchvision.models.ResNet18_Weights.IMAGENET1K_V1,
-        #     norm_layer=FrozenBatchNorm2d,
-        # )
-        # self.backbone = IntermediateLayerGetter(backbone, return_layers={"layer4": "feature_map"})
-        # self.pool = nn.AdaptiveAvgPool2d((1, 1))
-        # self.state_dropout = nn.Dropout(policy_cfg.state_dropout)
-        self.state_embed = nn.Sequential(
+        # img encoding
+        self.dino = DINO(num_freeze_layers=policy_cfg.dino_freeze_n_layers)
+        self.dino_proj = nn.Linear(self.dino.embed_dim, policy_cfg.dim_model)
+        assert policy_cfg.crop_shape[0] % self.dino.patch_size == 0 and \
+               policy_cfg.crop_shape[1] % self.dino.patch_size == 0, \
+            f"Crop shape {policy_cfg.crop_shape} must be divisible by dino patch size {self.dino.patch_size}."
+        self.patch_shape = (policy_cfg.crop_shape[0] // self.dino.patch_size,
+                            policy_cfg.crop_shape[1] // self.dino.patch_size)
+
+        # state encoding
+        self.state_proj = nn.Sequential(
             nn.Dropout(policy_cfg.state_dropout),
             nn.Linear(task_cfg.state_dim, policy_cfg.dim_model),
             nn.GELU(),
@@ -248,19 +226,58 @@ class FlowModel(nn.Module):
             nn.Linear(policy_cfg.dim_model, policy_cfg.dim_model),
             nn.LayerNorm(policy_cfg.dim_model),
         )
-        
 
+        # attention pooling
+        self.pool = AttentionPooling(
+            hidden_size=policy_cfg.dim_model,
+            num_queries=policy_cfg.pool_n_queries,
+            depth=policy_cfg.pool_n_layers,
+            num_heads=policy_cfg.n_heads,
+            mlp_ratio=policy_cfg.mlp_ratio,
+            dropout=policy_cfg.dropout,
+        ) 
+        
         # diffusion transformer
         self.DiT = DiT(
             in_dim=task_cfg.action_dim,
             out_dim=task_cfg.action_dim,
-            cond_dim=policy_cfg.pool_out_dim + task_cfg.state_dim * policy_cfg.n_obs_steps,  
             hidden_size=policy_cfg.dim_model,
             depth=policy_cfg.dit_n_layers,
             num_heads=policy_cfg.n_heads,
             mlp_ratio=policy_cfg.mlp_ratio,
             dropout=policy_cfg.dropout,
             time_dim=policy_cfg.time_dim,
+        )
+
+        s = policy_cfg.n_obs_steps
+        n = len(self.cfg.image_to_gaze_key)
+        h, w = self.patch_shape
+        self.register_buffer(
+            'attn_pooling_pos_embed',
+            torch.cat([
+                get_1d_rotary_embed(
+                    dim=policy_cfg.dim_model // policy_cfg.n_heads,
+                    pos=torch.arange(s * (1 + n*(1 + self.dino.num_register_tokens)), dtype=torch.float32),
+                ),
+                get_nd_rotary_embed(
+                    dim=policy_cfg.dim_model // policy_cfg.n_heads,
+                    grid_shape=(s, n, h, w)
+                ),
+            ], dim=0)
+        )
+        self.register_buffer(
+            'dit_x_pos_embed',
+            get_1d_rotary_embed(
+                dim=policy_cfg.dim_model // policy_cfg.n_heads,
+                pos=torch.arange(policy_cfg.horizon, dtype=torch.float32),
+            )
+        )
+        self.register_buffer(
+            'dit_c_pos_embed',
+            get_1d_rotary_embed(
+                dim=policy_cfg.dim_model // policy_cfg.n_heads,
+                pos=torch.arange(policy_cfg.pool_n_queries, dtype=torch.float32),
+            )
         )
 
     def sample_noise(self, shape, device):
@@ -282,37 +299,53 @@ class FlowModel(nn.Module):
         viz = {}
         batch = dict(batch)  # make a copy to avoid modifying the original batch
 
-        cond = []
-        for image_key in self.task_cfg.image_keys:
-            img = batch[image_key]  # (B, S, C, H, W)
-            batch_size = img.shape[0]
-            img = einops.rearrange(img, 'b s c h w -> (b s) c h w')
-            img = self.resize(img) 
-            img = self.input_resizer(img)  # (B*S, C, H, W)
-            feat = self.backbone_proj(self.backbone(img))
-            feat = self.pool(c=feat, c_pos_emb=self.pos_embed_2d)  # (B*S, C)
-            feat = einops.rearrange(feat, '(b s) l d -> b (s l) d', b=batch_size)  # (B, S*L, D)
-            cond.append(feat)  # (B*S, C)
-            if not self.training:
-                viz[image_key] = img
-        cond.append(self.state_embed(batch[self.task_cfg.state_key]))  # (B, S, D)
-        cond = torch.cat(cond, dim=1) 
+        img = torch.stack([batch[key] for key in self.cfg.image_to_gaze_key.keys()], dim=2)
+        b, s, n = img.shape[:3]
+        img = einops.rearrange(img, 'b s n c h w -> (b s n) c h w')  # (B*S*N, C, H, W)
+        img = Resize(self.cfg.resize_shape)(img)  # (B, S, C, H, W)
 
+        if self.training and torch.rand(1) < self.cfg.gaze_prob:
+            gaze = torch.stack([batch[key] for key in self.cfg.image_to_gaze_key.values()], dim=2)
+            gaze = einops.rearrange(gaze, 'b s n c -> (b s n) c')  # (B*S*N, C)
+            img, gaze = gaze_crop(images=img, crop_shape=self.cfg.crop_shape, gaze=gaze, crop_is_random=self.cfg.crop_is_random)
+            masks = gaze_mask(gaze=gaze, patch_shape=self.patch_shape, sigma=self.cfg.gaze_sigma, k=self.cfg.gaze_k, random=False)
+        else:
+            img, _ = gaze_crop(images=img, crop_shape=self.cfg.crop_shape, crop_is_random=self.training and self.cfg.crop_is_random)
+            masks = None
+        dino_feat = self.dino(img, masks=masks)  # (B*S, L, D)
 
-        # tokens = [self.state_embed(batch[self.task_cfg.state_key])]  # (B, S, D)
-        # for image_key in self.task_cfg.image_keys:
-        #     img = batch[image_key]  # (B, S, C, H, W)
-        #     batch_size = img.shape[0]
-        #     img = einops.rearrange(img, 'b s c h w -> (b s) c h w')
-        #     img = self.resize(img) 
-        #     dino_feat = self.dino(img)
-        #     dino_feat = einops.rearrange(dino_feat, '(b s) l d -> b (s l) d', b=batch_size)
-        #     tokens.append(self.dino_embed(dino_feat))  # (B, S*L, D)
-        #     if not self.training:
-        #         viz[image_key] = img
+        tokens = []
+        tokens.append(self.state_proj(batch[self.task_cfg.state_key])) # (B, S, D)
+        tokens.append(
+            einops.rearrange(
+                self.dino_proj(dino_feat['x_norm_clstoken']),
+                '(b s n) d -> b (s n) d',
+                b=b, s=s, n=n
+            )  
+        )
+        tokens.append(
+            einops.rearrange(
+                self.dino_proj(dino_feat['x_norm_regtokens']),
+                '(b s n) r d -> b (s n r) d',
+                b=b, s=s, n=n, r=self.dino.num_register_tokens
+            )
+        )
+        tokens.append(
+            einops.rearrange(
+                self.dino_proj(dino_feat['x_norm_patchtokens']),
+                '(b s n) l d -> b (s n l) d',
+                b=b, s=s, n=n, l=self.patch_shape[0] * self.patch_shape[1]
+            )
+        )
+        tokens = torch.cat(tokens, dim=1) 
+        cond = self.pool(
+            c=tokens,
+            c_pos_emb=self.attn_pooling_pos_embed,
+        )
 
-        # tokens = torch.cat(tokens, dim=1)  
-        # cond = self.attn_pooling(tokens) 
+        if not self.training:
+            viz['input'] = img
+
         return cond, viz
 
     # ========= inference  ============
@@ -330,7 +363,7 @@ class FlowModel(nn.Module):
         xt = noise
         time = torch.tensor(1.0, dtype=torch.float32, device=device)
         while time >= -dt / 2:
-            vt = self.DiT(x=xt, timestep=time.expand(batch_size), cond=global_cond)
+            vt = self.DiT(x=xt, c=global_cond, t=time.expand(batch_size), x_pos_emb=self.dit_x_pos_embed, c_pos_emb=self.dit_c_pos_embed)
             # Euler step
             xt += dt * vt
             time += dt
@@ -352,7 +385,7 @@ class FlowModel(nn.Module):
         xt = time_expanded * noise + (1 - time_expanded) * actions
         ut = noise - actions
 
-        vt = self.DiT(x=xt, timestep=time, cond=global_cond)
+        vt = self.DiT(x=xt, c=global_cond, t=time, x_pos_emb=self.dit_x_pos_embed, c_pos_emb=self.dit_c_pos_embed)
         flow_matching_loss = F.mse_loss(vt, ut, reduction="none").mean()
         loss = flow_matching_loss
         loss_dict = {
@@ -417,39 +450,3 @@ class TemporalEnsembler:
             self.ensembled_actions_count[n:],
         )
         return action
-    
-def create_sinusoidal_pos_emb_2d(shape: tuple, dimension: int, temperature: int = 10000) -> Tensor:
-    two_pi = 2 * np.pi
-    eps = 1e-6
-
-    not_mask = torch.ones(1, shape[0], shape[1], dtype=torch.float32)
-    # Note: These are like range(1, H+1) and range(1, W+1) respectively, but in most implementations
-    # they would be range(0, H) and range(0, W). Keeping it at as is to match the original code.
-    y_range = not_mask.cumsum(1, dtype=torch.float32)
-    x_range = not_mask.cumsum(2, dtype=torch.float32)
-
-    # "Normalize" the position index such that it ranges in [0, 2π].
-    # Note: Adding epsilon on the denominator should not be needed as all values of y_embed and x_range
-    # are non-zero by construction. This is an artifact of the original code.
-    y_range = y_range / (y_range[:, -1:, :] + eps) * two_pi
-    x_range = x_range / (x_range[:, :, -1:] + eps) * two_pi
-
-    inverse_frequency = temperature ** (
-        2 * (torch.arange(dimension, dtype=torch.float32) // 2) / dimension
-    )
-
-    x_range = x_range.unsqueeze(-1) / inverse_frequency  # (1, H, W, 1)
-    y_range = y_range.unsqueeze(-1) / inverse_frequency  # (1, H, W, 1)
-
-    # Note: this stack then flatten operation results in interleaved sine and cosine terms.
-    # pos_embed_x and pos_embed_y are (1, H, W, C // 2).
-    pos_embed_x = torch.stack((x_range[..., 0::2].sin(), x_range[..., 1::2].cos()), dim=-1).flatten(3)
-    pos_embed_y = torch.stack((y_range[..., 0::2].sin(), y_range[..., 1::2].cos()), dim=-1).flatten(3)
-    pos_embed = torch.cat((pos_embed_y, pos_embed_x), dim=3).permute(0, 3, 1, 2)  # (1, C, H, W)
-
-    pos_embed = einops.rearrange(
-        pos_embed,
-        'b c h w -> b (h w) c',
-    )  # (1, H*W, C)
-
-    return pos_embed

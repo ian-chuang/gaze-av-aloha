@@ -17,7 +17,8 @@ class GazePolicyConfig(PolicyConfig):
     image_norm_mode: str = "mean_std"
     state_norm_mode: str = "min_max" # need to confirm this is valid
     action_norm_mode: str = "min_max" # need to confirm this is valid
-    resize_shape: tuple = (224, 224)
+    resize_shape: tuple = (240,320)
+    input_shape: tuple = (224,224)
     use_action_history: bool = False # need to confirm this is valid
     action_history_padding: list[float] = field(default_factory=lambda: [
         0, -0.082, 1.06, 0, -0.953, 0, 1, 0, -0.082, 1.06, 0, -0.953, 0, 1, 0, -0.6, 0.5, 0, 0.5, 0, 0
@@ -31,9 +32,8 @@ class GazePolicyConfig(PolicyConfig):
 
     # Image Pooling
     # self_attn_n_layers: int = 4
-    attn_pooling_n_queries: int = 4
-    attn_pooling_out_dim: int = 1024
-    attn_pooling_n_layers: int = 12
+    attn_pooling_n_queries: int = 16
+    attn_pooling_n_layers: int = 4
     
     # Transformer
     n_decoder_layers: int = 8
@@ -59,6 +59,6 @@ class GazePolicyConfig(PolicyConfig):
     scheduler_name: str = "cosine"
     scheduler_warmup_steps: int = 500
     use_ema: bool = False
-    ema_decay: float = 0.9999
+    ema_decay: float = 0.99
 
 
