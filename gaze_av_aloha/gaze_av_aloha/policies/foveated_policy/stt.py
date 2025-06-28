@@ -1,24 +1,19 @@
-from segment_this_thing import Foveator, SegmentThisThingPredictor
-from segment_this_thing import build_segment_this_thing_b
 from torch import nn, Tensor
 import torch
+from torchvision.ops import roi_align
+
+from segment_this_thing import build_segment_this_thing_b
+from segment_this_thing.foveation import generate_grid_coords_2d, Foveator
+from segment_this_thing.model import extend_valid_token_mask
+
+import gaze_av_aloha
+from gaze_av_aloha.policies.foveated_policy.utils import denormalize_keypoints
+
 from pathlib import Path
 import os
-import gaze_av_aloha
-from segment_this_thing import build_segment_this_thing_b
-from segment_this_thing import Foveator, SegmentThisThingPredictor
-from gaze_av_aloha.policies.foveated_policy.utils import denormalize_keypoints, normalize_keypoints
-from torchvision.ops import roi_align
-import requests
 from tqdm import tqdm
-from typing import Optional
-import torch
-from itertools import islice
-from typing import List
-import torch
-import matplotlib.pyplot as plt
-import einops
-from segment_this_thing.foveation import Foveator, generate_grid_coords_2d
+import logging
+
 
 STT_URL = "https://huggingface.co/facebook/segment_this_thing/resolve/main/stt-b-qbkbmb5qsb4q2.pth"
 STT_PATH = Path(os.path.dirname(os.path.dirname(gaze_av_aloha.__file__))) / "cache" / "stt-b.pth"
@@ -212,7 +207,7 @@ class BatchedFoveator(Foveator):
         return valid_token_mask
 
 class STTEncoder(nn.Module):
-    def __init__(self):
+    def __init__(self, freeze_n_layers: int = 0):
         super().__init__()
         download_file(STT_URL, STT_PATH)
         self.foveator = BatchedFoveator(token_size=16, strides=[1, 2, 4, 6, 8], grid_sizes=[4, 4, 6, 8, 10])
@@ -221,11 +216,34 @@ class STTEncoder(nn.Module):
             token_size=16
         )
         stt.load_state_dict(torch.load(STT_PATH, weights_only=True))
-        self.image_encoder = stt.image_encoder
+        self.patch_emb = stt.image_encoder.patch_emb
+        self.pos_enc = stt.image_encoder.pos_enc
+        self.reg_tokens = stt.image_encoder.reg_tokens
+        self.blocks = stt.image_encoder.blocks
+
+        if freeze_n_layers == 0:
+            logging.info("[STTEncoder] Not freezing any layers of backbone")
+        elif freeze_n_layers < 0 or freeze_n_layers >= len(self.blocks):
+            logging.info("[STTEncoder] Freezing all layers of backbone")
+            for param in self.parameters():
+                param.requires_grad = False
+        else:
+            logging.info(f"[STTEncoder] Freezing first {freeze_n_layers} layers of backbone")
+            for param in self.patch_emb.parameters():
+                param.requires_grad = False
+            self.pos_enc.requires_grad = False
+            self.reg_tokens.requires_grad = False
+            for block in self.blocks[:freeze_n_layers]:
+                for param in block.parameters():
+                    param.requires_grad = False
 
     @property
-    def num_tokens(self) -> int:
+    def num_patch_tokens(self) -> int:
         return self.foveator.get_num_tokens()
+    
+    @property
+    def num_register_tokens(self) -> int:
+        return self.reg_tokens.shape[0]
     
     @property
     def input_size(self) -> int:
@@ -254,9 +272,32 @@ class STTEncoder(nn.Module):
 
     def forward(self, images: Tensor, centers: Tensor) -> Tensor:
         patches, mask = self.prepare_patches_and_mask(images, centers)
-        image_features, register_features = self.image_encoder(patches, mask)
-        return image_features, register_features
-    
+
+        embedded_tokens = self.patch_emb(
+            patches.flatten(2)
+        ) + self.pos_enc.unsqueeze(0)
+
+        num_registers = self.reg_tokens.shape[0]
+
+        embedded_tokens = torch.cat(
+            [
+                embedded_tokens,
+                self.reg_tokens.unsqueeze(0).expand(embedded_tokens.shape[0], -1, -1),
+            ],
+            dim=1,
+        )
+
+        valid_token_mask = extend_valid_token_mask(mask, num_registers)
+
+        invalid_token_mask = (
+            valid_token_mask.logical_not() if valid_token_mask is not None else None
+        )
+
+        transformed_tokens = embedded_tokens
+        for block in self.blocks:
+            transformed_tokens = block(transformed_tokens, invalid_token_mask)
+
+        return transformed_tokens
 
 # Only for testing purposes lol
 class STT(STTEncoder):
@@ -267,6 +308,7 @@ class STT(STTEncoder):
             token_size=16
         )
         stt.load_state_dict(torch.load(STT_PATH, weights_only=True))
+        self.image_encoder = stt.image_encoder
         self.mask_decoder = stt.mask_decoder
 
     def forward(self, images: Tensor, centers: Tensor) -> Tensor:
@@ -282,11 +324,13 @@ if __name__ == "__main__":
     from io import BytesIO
     from PIL import Image
     import numpy as np
+    import matplotlib.pyplot as plt
 
     batch_size = 4
     image_shape = (1280, 1280)
 
     stt = STT().cuda()
+    encoder = STTEncoder().cuda()
 
     image_url = "https://picsum.photos/id/20/367/267"
 
