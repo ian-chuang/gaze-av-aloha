@@ -130,8 +130,7 @@ class AttentionPoolingBlock(nn.Module):
         v = x_norm
         x = x + self.attn(q, k, v, need_weights=False)[0]
 
-        x_norm = self.norm2(x)
-        q = maybe_add_pos_embed(x_norm, x_pos_emb)
+        q = maybe_add_pos_embed(self.norm2(x), x_pos_emb)
         k = maybe_add_pos_embed(c, c_pos_emb)
         v = c
         x = x + self.xattn(q, k, v, need_weights=False)[0]

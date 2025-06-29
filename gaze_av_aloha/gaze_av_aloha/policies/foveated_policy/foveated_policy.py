@@ -87,7 +87,7 @@ class FoveatedPolicy(Policy):
             - Epsilon: {self.cfg.optimizer_eps}
             - Weight Decay: {self.cfg.optimizer_weight_decay}
         """)
-        backbone_condition = lambda n: "flow.backbone" in n
+        backbone_condition = lambda n: "flow.backbone." in n
         if not any(backbone_condition(n) for n, p in self.named_parameters()):
             raise ValueError(f"No parameters found satifying the condition for vision backbone: {backbone_condition}")
         
@@ -168,7 +168,7 @@ class FoveatedPolicy(Policy):
         obs_queue_size = (self.cfg.n_obs_steps-1)*self.cfg.obs_step_size+1
         self._obs_queue = {
             **{key: deque(maxlen=obs_queue_size) for key in self.cfg.image_to_gaze_key.keys()},
-            **{key: deque(maxlen=obs_queue_size) for key in self.cfg.image_to_gaze_key.values()},
+            **{key: deque(maxlen=obs_queue_size) for key in self.cfg.image_to_gaze_key.values()}, # gaze
             self.task_cfg.state_key: deque(maxlen=obs_queue_size),
             self.task_cfg.action_key: deque(maxlen=self.cfg.n_action_steps),
         }
@@ -215,8 +215,9 @@ class FoveatedPolicy(Policy):
                 self._act_queues[key].extend(outputs[key].transpose(0, 1))
 
         for key in self._act_queues:
-            item = self._act_queues[key].popleft()
-            self._obs_queue[key].append(item)
+            if len(self._act_queues[key]) > 0:
+                item = self._act_queues[key].popleft()
+                self._obs_queue[key].append(item)
         action = self._obs_queue[self.task_cfg.action_key][-1]  # Get the last action from the queue
 
         if return_viz: return action, viz
@@ -235,7 +236,7 @@ class FlowModel(nn.Module):
 
         self.target_keys_to_dim = {
             task_cfg.action_key: task_cfg.action_dim,
-            **{k: 2 for k in policy_cfg.image_to_gaze_key.values()},
+            **{k: 2 for k in policy_cfg.image_to_gaze_key.values() if policy_cfg.use_gaze},
         }
         self.state_proj = Mlp(
             in_features=self.task_cfg.state_dim, 
@@ -255,9 +256,24 @@ class FlowModel(nn.Module):
             out_features=policy_cfg.dim_model,
             drop=policy_cfg.dropout,
         )
-        self.backbone = STTEncoder(
-            freeze_n_layers=policy_cfg.freeze_n_layers
-        )
+
+        if policy_cfg.backbone == "dino":
+            self.backbone = DINO(
+                num_freeze_layers=policy_cfg.freeze_n_layers
+            )
+            p = self.backbone.patch_size
+            h, w = policy_cfg.input_shape[0] // p, policy_cfg.input_shape[1] // p
+            self.n_vit_tokens = 1 + self.backbone.num_register_tokens + h * w
+        elif policy_cfg.backbone == "stt":
+            self.backbone = STTEncoder(
+                freeze_n_layers=policy_cfg.freeze_n_layers
+            )
+            self.n_vit_tokens = self.backbone.num_register_tokens + self.backbone.num_patch_tokens
+        elif policy_cfg.backbone == "sam":
+            raise NotImplementedError("SAM backbone is not implemented yet.")
+        else:
+            raise ValueError(f"Unknown backbone: {policy_cfg.backbone}")
+        
         self.backbone_feat_proj = Mlp(
             in_features=self.backbone.embed_dim,
             hidden_features=policy_cfg.dim_model,
@@ -275,7 +291,7 @@ class FlowModel(nn.Module):
         self.pool_pos_embed = nn.Embedding(
             policy_cfg.n_obs_steps * (
                 1 + policy_cfg.use_action_history +
-                len(self.cfg.image_to_gaze_key) * (1 + self.backbone.num_register_tokens + self.backbone.num_patch_tokens)
+                len(self.cfg.image_to_gaze_key) * (policy_cfg.use_gaze + self.n_vit_tokens)
             ), 
             policy_cfg.dim_model
         )
@@ -325,11 +341,21 @@ class FlowModel(nn.Module):
         img = Resize(self.cfg.input_shape)(img)  # (B*S*N, C, H, W)
         if not self.training:
             viz['input'] = img
+        
+        if self.cfg.use_gaze:
+            gaze = torch.stack([batch[key] for key in self.cfg.image_to_gaze_key.values()], dim=2)
+            gaze = einops.rearrange(gaze, 'b s n c -> (b s n) c')  # (B*S*N, C)
+            if self.training:
+                gaze = gaze + torch.randn_like(gaze) * self.cfg.gaze_noise
 
-        gaze = torch.stack([batch[key] for key in self.cfg.image_to_gaze_key.values()], dim=2)
-        gaze = einops.rearrange(gaze, 'b s n c -> (b s n) c')  # (B*S*N, C)
-        if self.training:
-            gaze = gaze + torch.randn_like(gaze) * self.cfg.gaze_noise
+        if self.cfg.backbone == "stt":
+            backbone_feat = self.backbone(img, gaze)
+        elif self.cfg.backbone == "dino":
+            backbone_feat = self.backbone(img)
+        elif self.cfg.backbone == "sam":
+            raise NotImplementedError("SAM backbone is not implemented yet.")
+        else:
+            raise ValueError(f"Unknown backbone: {self.cfg.backbone}")
 
         tokens = []
         tokens.append(
@@ -339,16 +365,17 @@ class FlowModel(nn.Module):
             tokens.append(
                 self.action_history_proj(batch[self.task_cfg.action_key])
             ) # (B, S, D)
+        if self.cfg.use_gaze:
+            tokens.append(
+                einops.rearrange(
+                    self.gaze_proj(gaze),
+                    '(b s n) d -> b (s n) d',
+                    b=b, s=s, n=n
+                )  
+            ) # (B, S*N, D)
         tokens.append(
             einops.rearrange(
-                self.gaze_proj(gaze),
-                '(b s n) d -> b (s n) d',
-                b=b, s=s, n=n
-            )  
-        ) # (B, S*N, D)
-        tokens.append(
-            einops.rearrange(
-                self.backbone_feat_proj(self.backbone(img, gaze)),
+                self.backbone_feat_proj(backbone_feat),
                 '(b s n) l d -> b (s n l) d',
                 b=b, s=s, n=n
             )  
@@ -392,7 +419,7 @@ class FlowModel(nn.Module):
             k: v
             for k, v in zip(
                 self.target_keys_to_dim.keys(),
-                torch.split(sample, self.target_keys_to_dim.values(), dim=-1),
+                torch.split(sample, list(self.target_keys_to_dim.values()), dim=-1),
             )
         }
         return outputs, viz
@@ -487,6 +514,6 @@ class TemporalEnsembler:
             k: v 
             for k, v in zip(
                 self.keys_to_dim.keys(), 
-                torch.split(action, self.keys_to_dim.values(), dim=-1)
+                torch.split(action, list(self.keys_to_dim.values()), dim=-1)
             )
         }

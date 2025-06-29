@@ -7,11 +7,11 @@ class FoveatedPolicyConfig(PolicyConfig):
 
     n_obs_steps: int = 1
     obs_step_size: int = 1
-    n_action_steps: int = 8
+    n_action_steps: int = 2
     horizon: int = 16
-    use_temporal_ensemble: bool = False
+    use_temporal_ensemble: bool = True
     temporal_ensemble_coeff: float = 0.0
-    drop_n_last_frames: int = 24
+    drop_n_last_frames: int = 6
     
     # Observation
     image_norm_mode: str = "mean_std"
@@ -19,9 +19,11 @@ class FoveatedPolicyConfig(PolicyConfig):
     action_norm_mode: str = "min_max" 
     image_to_gaze_key: dict[str, str] = field(default_factory=lambda: {})
     resize_shape: tuple = (240, 320)
-    input_shape: tuple = (960, 1280)
-    freeze_n_layers: int = 0
+    input_shape: tuple = (224, 294) #(960, 1280)
+    backbone: str = "dino"
+    freeze_n_layers: int = 6
     gaze_noise: float = 0.05
+    use_gaze: bool = False
     use_action_history: bool = False
 
     # Transformer Layers
@@ -35,7 +37,7 @@ class FoveatedPolicyConfig(PolicyConfig):
     pool_n_layers: int = 2
 
     # DiT
-    dit_n_layers: int = 8
+    dit_n_layers: int = 6
     dit_time_dim: int = 128
 
     # Flow Matching
