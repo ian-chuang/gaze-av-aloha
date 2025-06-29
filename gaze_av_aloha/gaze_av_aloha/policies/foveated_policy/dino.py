@@ -5,7 +5,7 @@ import logging
 class DINO(nn.Module):
     def __init__(self, num_freeze_layers: int = 0):
         super().__init__()
-        self.backbone = torch.hub.load('facebookresearch/dinov2', 'dinov2_vits14_reg')
+        self.backbone = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitb14_reg')
 
         if num_freeze_layers == 0:
             logging.info("[DINO] Not freezing any layers of backbone")

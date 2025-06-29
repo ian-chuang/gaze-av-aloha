@@ -20,7 +20,7 @@ from gaze_av_aloha.policies.foveated_policy.transformer import DiT, AttentionPoo
 from gaze_av_aloha.policies.foveated_policy.dino import DINO
 from gaze_av_aloha.policies.foveated_policy.stt import STTEncoder
 from torchvision.transforms import Resize
-from gaze_av_aloha.policies.foveated_policy.utils import sample_beta
+from gaze_av_aloha.policies.foveated_policy.utils import sample_beta, crop_with_keypoints
 import logging
 from timm.layers import Mlp
 import math
@@ -262,7 +262,7 @@ class FlowModel(nn.Module):
                 num_freeze_layers=policy_cfg.freeze_n_layers
             )
             p = self.backbone.patch_size
-            h, w = policy_cfg.input_shape[0] // p, policy_cfg.input_shape[1] // p
+            h, w = policy_cfg.resize_shape[0] // p, policy_cfg.resize_shape[1] // p
             self.n_vit_tokens = 1 + self.backbone.num_register_tokens + h * w
         elif policy_cfg.backbone == "stt":
             self.backbone = STTEncoder(
@@ -334,22 +334,38 @@ class FlowModel(nn.Module):
         viz = {}
         batch = dict(batch)  # make a copy to avoid modifying the original batch
 
+        # load image and resize to input shape
         img = torch.stack([batch[key] for key in self.cfg.image_to_gaze_key.keys()], dim=2)
         b, s, n = img.shape[:3]
         img = einops.rearrange(img, 'b s n c h w -> (b s n) c h w')  # (B*S*N, C, H, W)
-        img = Resize(self.cfg.resize_shape)(img)  # (B, S, C, H, W)
         img = Resize(self.cfg.input_shape)(img)  # (B*S*N, C, H, W)
-        if not self.training:
-            viz['input'] = img
         
+        # crop
         if self.cfg.use_gaze:
             gaze = torch.stack([batch[key] for key in self.cfg.image_to_gaze_key.values()], dim=2)
             gaze = einops.rearrange(gaze, 'b s n c -> (b s n) c')  # (B*S*N, C)
             if self.training:
                 gaze = gaze + torch.randn_like(gaze) * self.cfg.gaze_noise
+            img, centers = crop_with_keypoints(
+                images=img, crop_shape=self.cfg.crop_shape, 
+                keypoints=gaze, crop_is_random=self.training
+            )
+        else:
+            img, _ = crop_with_keypoints(
+                images=img, crop_shape=self.cfg.crop_shape, 
+                crop_is_random=self.training
+            )
+
+        # resize to the final shape
+        img = Resize(self.cfg.resize_shape)(img)  # (B, S, C, H, W)
+        if not self.training:
+            viz['input'] = img
 
         if self.cfg.backbone == "stt":
-            backbone_feat = self.backbone(img, gaze)
+            patches, mask, crops = self.backbone.prepare_patches_and_mask(img, centers) # send in the centers (frame of ref of the crops)
+            backbone_feat = self.backbone(patches, mask)
+            if not self.training:
+                viz['crops'] = crops
         elif self.cfg.backbone == "dino":
             backbone_feat = self.backbone(img)
         elif self.cfg.backbone == "sam":
@@ -368,7 +384,7 @@ class FlowModel(nn.Module):
         if self.cfg.use_gaze:
             tokens.append(
                 einops.rearrange(
-                    self.gaze_proj(gaze),
+                    self.gaze_proj(gaze),  # send in the gaze (frame of ref of robot camera)
                     '(b s n) d -> b (s n) d',
                     b=b, s=s, n=n
                 )  
@@ -396,7 +412,7 @@ class FlowModel(nn.Module):
     ) -> Tensor:
         device = get_device_from_parameters(self)
 
-        actions_shape = (batch_size, self.cfg.horizon, self.task_cfg.action_dim)
+        actions_shape = (batch_size, self.cfg.horizon, self.noise_dim)
         noise = self.sample_noise(actions_shape, device=device)
 
         dt = -1.0 / self.cfg.n_sampling_steps

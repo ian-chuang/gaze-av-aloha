@@ -1,5 +1,6 @@
 from torch import nn, Tensor
 import torch
+import einops
 from torchvision.ops import roi_align
 
 from segment_this_thing import build_segment_this_thing_b
@@ -129,54 +130,46 @@ class BatchedFoveator(Foveator):
             raise ValueError(
                 f"[Foveator.extract_foveated_image]: Expected 3-channel image."
             )
-        
-        import time
-        
-        start_time = time.perf_counter()
+                
         integral_image = compute_integral_image(images) # (B, C, H, W)
-        print(f"[BatchedFoveator] compute_integral_image took {time.perf_counter() - start_time:.4f} seconds")
 
         # self.token_corner_indices is (N, U)
         # self.token_strides is (N)
         # generate_grid_coords_2d return (H, W, U)
         # All get mapped to (N, H, W, U)
-        start_time = time.perf_counter()
         lower_pixel_coords = self.token_corner_indices.view(
             -1, 1, 1, 2
         ) + self.token_strides.view(-1, 1, 1, 1) * self.grid_coords_2d
         upper_pixel_coords = lower_pixel_coords + self.token_strides.view(-1, 1, 1, 1)
 
-        # lol
         B, C, H, W = integral_image.shape
         N, I1, I2, _ = lower_pixel_coords.shape
-        lower_pixel_coords = lower_pixel_coords.unsqueeze(1).unsqueeze(0).expand(B, N, C, I1, I2, 2)
-        upper_pixel_coords = upper_pixel_coords.unsqueeze(1).unsqueeze(0).expand(B, N, C, I1, I2, 2)
-        b_idx = torch.arange(B).view(B, 1, 1, 1, 1).expand(B, N, C, I1, I2)
-        c_idx = torch.arange(C).view(1, 1, C, 1, 1).expand(B, N, C, I1, I2)
-        print(f"[BatchedFoveator] prepare pixel coords took {time.perf_counter() - start_time:.4f} seconds")
 
-        start_time = time.perf_counter()
-        ret = (
-            integral_image[
-                b_idx, c_idx,
-                upper_pixel_coords[..., 1], upper_pixel_coords[..., 0]
-            ]
-            - integral_image[
-                b_idx, c_idx,
-                upper_pixel_coords[..., 1], lower_pixel_coords[..., 0]
-            ]
-            - integral_image[
-                b_idx, c_idx,
-                lower_pixel_coords[..., 1], upper_pixel_coords[..., 0]
-            ]
-            + integral_image[
-                b_idx, c_idx,
-                lower_pixel_coords[..., 1], lower_pixel_coords[..., 0]
-            ]
+        # Convert (y, x) to flat indices: flat_idx = y * W + x
+        def to_flat_indices(coords):
+            return coords[..., 1] * W + coords[..., 0]  # shape: (N, I1, I2)
+
+        # Flatten spatial dimensions of integral image
+        flat_integral = integral_image.view(B, C, H * W)
+
+        # Compute flat indices
+        lu = to_flat_indices(upper_pixel_coords)  # top-left
+        ru = to_flat_indices(torch.stack([lower_pixel_coords[..., 0], upper_pixel_coords[..., 1]], dim=-1))  # top-right
+        ld = to_flat_indices(torch.stack([upper_pixel_coords[..., 0], lower_pixel_coords[..., 1]], dim=-1))  # bottom-left
+        rd = to_flat_indices(lower_pixel_coords)  # bottom-right
+
+        # Shape: (B, N, C, I1, I2) → make it (B, C, N * I1 * I2)
+        def gather_flat(flat_idx):
+            flat_idx = flat_idx.view(1, 1, -1).expand(B, C, -1)  # (B, C, N * I1 * I2)
+            x = flat_integral.gather(2, flat_idx).view(B, C, N, I1, I2)
+            return einops.rearrange(x, "B C N I1 I2 -> B N C I1 I2")
+
+        return (
+            gather_flat(rd)
+            + gather_flat(lu)
+            - gather_flat(ru)
+            - gather_flat(ld)
         ) / self.token_strides.square().view(1, -1, 1, 1, 1).float()
-        print(f"[BatchedFoveator] compute foveated image took {time.perf_counter() - start_time:.4f} seconds")
-
-        return ret
 
     def get_in_bounds_tokens(
         self,
@@ -282,11 +275,9 @@ class STTEncoder(nn.Module):
             crop_bounds
         )
         patches = self.foveator.extract_foveated_image(crops)
-        return patches, mask
+        return patches, mask, crops
 
-    def forward(self, images: Tensor, centers: Tensor) -> Tensor:
-        patches, mask = self.prepare_patches_and_mask(images, centers)
-
+    def forward(self, patches: Tensor, mask: Tensor) -> Tensor:
         embedded_tokens = self.patch_emb(
             patches.flatten(2)
         ) + self.pos_enc.unsqueeze(0)
