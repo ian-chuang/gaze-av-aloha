@@ -2,7 +2,7 @@ defaults:
   - _self_
   - base_config
   - policy: gaze_policy
-  - task: av_aloha_sim_hook_package
+  - task: av_aloha_sim_thread_needle
   - train: default
   - wandb: gaze
 

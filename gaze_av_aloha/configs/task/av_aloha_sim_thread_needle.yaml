@@ -1,8 +1,8 @@
 defaults:
   - base_task_config
 
-type: av_aloha_sim_hook_package
-dataset_repo_id: iantc104/av_aloha_sim_hook_package
+type: av_aloha_sim_thread_needle
+dataset_repo_id: iantc104/av_aloha_sim_thread_needle
 dataset_root: ???
 dataset_episodes: ??? # use all episodes
 override_stats:
@@ -14,7 +14,7 @@ override_stats:
     std: [[[0.229]], [[0.224]], [[0.225]]]
 
 env_package: gym_av_aloha
-env_name: hook-package-v1
+env_name: thread-needle-v1
 env_kwargs:
   disable_env_checker: true
   fps: 8.333333333333
@@ -27,6 +27,10 @@ eval_n_episodes: 50
 eval_n_envs: 5
 eval_options:
   iid: {}
+  ood_light:
+    randomize_light: true
+  ood_distractors:
+    distractors: true
 visualization_steps: 100
 
 fps: 8.333333333333

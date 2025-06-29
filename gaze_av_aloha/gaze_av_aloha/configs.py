@@ -22,6 +22,7 @@ class TaskConfig:
 
     eval_n_episodes: int = 50
     eval_n_envs: int = 10
+    eval_options: dict = field(default_factory=lambda: {})
 
     fps: float = 10
     visualization_steps: int = 300

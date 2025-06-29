@@ -3,6 +3,37 @@ from torch import nn, Tensor
 import math
 import torch.nn.functional as F
 from timm.layers import Mlp
+import numpy as np
+
+def get_nd_rotary_embed(dim, grid_shape, cls_token=False, base=10000):
+    """Create n-dimensional rotary positional embeddings.
+
+    Args:
+        dim: an int of the embedding dimension.
+        grid_shape: a sequence of int of the length along each axis.
+        base: the base from which to calculate the rotation angles.
+
+    Returns:
+        pos_embed: a tensor of shape (grid_shape[0]*...*grid_shape[N-1], dim) of positional embeddings.
+
+    """
+    # Compute the embedding dim for each axis
+    num_axis = len(grid_shape)
+    assert dim % num_axis == 0
+    axis_dim = dim // num_axis
+    assert axis_dim % 2 == 0
+
+    # Create meshgrid along eash axis
+    axis_ticks = [torch.arange(length).float() for length in grid_shape]
+    axis_grids = torch.meshgrid(*axis_ticks, indexing="ij")
+
+    # Compute position embeddings for each axis and concatenate
+    axis_thetas = [
+        get_1d_rotary_embed(axis_dim, axis_grid.flatten(), base)
+        for axis_grid in axis_grids
+    ]
+    thetas = torch.cat(axis_thetas, dim=-1)
+    return thetas
 
 def get_1d_rotary_embed(dim, pos, base=10000):
     """Create 1D rotary positional embeddings from a grid of positions.
@@ -15,9 +46,9 @@ def get_1d_rotary_embed(dim, pos, base=10000):
         thetas: a tensor of size (seq_len, dim) of rotary positional embeddings.
     """
     assert dim % 2 == 0
-    thetas = 1.0 / (base ** (torch.arange(0, dim, 2, device=pos.device).float() / dim))
-    thetas = pos.unsqueeze(-1) * thetas  # (N, D/2)
-    thetas = torch.cat((thetas, thetas), dim=-1)  # (N, D)
+    thetas = 1.0 / (base ** (torch.arange(0, dim, 2).float() / dim))
+    thetas = torch.outer(pos, thetas)  # (N, D/2)
+    thetas = thetas.repeat(1, 2)  # (N, D)
     return thetas
 
 def apply_rotary_embed(x, thetas):
@@ -34,44 +65,6 @@ def apply_rotary_embed(x, thetas):
     x1, x2 = x.chunk(2, dim=-1)
     x_rotate_half = torch.cat([-x2, x1], dim=-1)
     return x * thetas.cos() + x_rotate_half * thetas.sin()
-
-def get_foveated_pos_embed(
-    gaze: Tensor,
-    image_shape: tuple,
-    crop_shape: tuple,
-    feat_shape: tuple,
-    n_obs_steps: int = 1,
-    dim: int = 384,
-    base: int = 10000,
-):
-    patch_shape = (crop_shape[0] / feat_shape[0], crop_shape[1] / feat_shape[1])
-    num_axis = 3
-    assert dim % num_axis == 0
-    axis_dim = dim // num_axis
-    assert axis_dim % 2 == 0
-
-    # Create meshgrid along eash axis
-    axis_grids = list(torch.meshgrid(
-        torch.arange(n_obs_steps, dtype=torch.float32, device=gaze.device),
-        torch.linspace(-crop_shape[0]/2 + patch_shape[0]/2, crop_shape[0]/2 - patch_shape[0]/2, feat_shape[0], device=gaze.device),
-        torch.linspace(-crop_shape[1]/2 + patch_shape[1]/2, crop_shape[1]/2 - patch_shape[1]/2, feat_shape[1], device=gaze.device),
-        indexing="ij",
-    ))
-
-    gaze_x = gaze[..., 0] * image_shape[1] / 2 # (batch size , n_obs_steps)
-    gaze_y = gaze[..., 1] * image_shape[0] / 2 # (batch size , n_obs_steps)
-
-    axis_grids[0] = axis_grids[0].unsqueeze(0).expand(gaze.shape[0], -1, -1, -1)  # Expand to batch size
-    axis_grids[1] = axis_grids[1].unsqueeze(0) + gaze_y.unsqueeze(-1).unsqueeze(-1)  # Adjust x-axis with gaze
-    axis_grids[2] = axis_grids[2].unsqueeze(0) + gaze_x.unsqueeze(-1).unsqueeze(-1)  # Adjust y-axis with gaz
-    # Compute position embeddings for each axis and concatenate
-    axis_thetas = [
-        get_1d_rotary_embed(axis_dim, axis_grid.flatten(start_dim=1), base)
-        for axis_grid in axis_grids
-    ]
-    thetas = torch.cat(axis_thetas, dim=-1)
-
-    return thetas
 
 class Attention(nn.Module):
     """Multiheaded self-attention."""
@@ -234,11 +227,11 @@ class DiTBlock(nn.Module):
             nn.Linear(hidden_size, 6 * hidden_size, bias=True)
         )
 
-    def forward(self, x, t, c, x_pos_embed=None, c_pos_embed=None):
+    def forward(self, x: Tensor, c: Tensor, t: Tensor, x_pos_emb=None, c_pos_emb=None) -> Tensor:
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(t).chunk(6, dim=1)
-        x = x + gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa), pos_embed=x_pos_embed)
-        x = x + self.xattn(self.norm2(x), c, x_pos_embed=x_pos_embed, c_pos_embed=c_pos_embed)
-        x = x + gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm3(x), shift_mlp, scale_mlp))
+        x = x + gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa), pos_embed=x_pos_emb)
+        x = x + self.xattn(self.norm2(x), c, x_pos_embed=x_pos_emb, c_pos_embed=c_pos_emb)
+        x = x + gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
         return x
 
 class FinalLayer(nn.Module):
@@ -254,7 +247,7 @@ class FinalLayer(nn.Module):
             nn.Linear(hidden_size, 2 * hidden_size, bias=True)
         )
 
-    def forward(self, x, t):
+    def forward(self, x: Tensor, t: Tensor) -> Tensor:
         shift, scale = self.adaLN_modulation(t).chunk(2, dim=1)
         x = modulate(self.norm_final(x), shift, scale)
         x = self.linear(x)
@@ -337,102 +330,55 @@ class DiT(nn.Module):
         nn.init.constant_(self.final_layer.linear.weight, 0)
         nn.init.constant_(self.final_layer.linear.bias, 0)
 
-    def forward(self, x, timestep, cond, x_pos_embed=None, c_pos_embed=None):
-        """
-        Forward pass of DiT.
-        x: (B, N, D) - Input features, where B is batch size, N is sequence length, and D is feature dimension.
-        timestep: (B,) - Timestep indices for the diffusion process.
-        cond: (B, D) - Conditioning features, where D is the feature dimension.
-        """
+    def forward(self, x, c, t, x_pos_emb=None, c_pos_emb=None):
         x = self.x_embed(x)  
-        t = self.time_embed(timestep)
+        t = self.time_embed(t)
         for block in self.blocks:
-            x = block(x, t, cond, x_pos_embed=x_pos_embed, c_pos_embed=c_pos_embed)
-        x = self.final_layer(x, t)
+            x = block(x, c, t, x_pos_emb=x_pos_emb, c_pos_emb=c_pos_emb)
+        x = self.final_layer(x, t)  
         return x
-    
-class AttentionBlock(nn.Module):
-    def __init__(self, use_xattn, hidden_size, num_heads, mlp_ratio=4.0, **block_kwargs):
+
+class AttentionPoolingBlock(nn.Module):
+    def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, **block_kwargs):
         super().__init__()
-        self.use_xattn = use_xattn
         self.norm1 = nn.LayerNorm(hidden_size)
         self.attn = Attention(hidden_size, num_heads=num_heads, **block_kwargs)
-        if use_xattn:
-            self.norm2 = nn.LayerNorm(hidden_size)
-            self.xattn = CrossAttention(hidden_size, num_heads=num_heads, **block_kwargs)
+        self.norm2 = nn.LayerNorm(hidden_size)
+        self.xattn = CrossAttention(hidden_size, num_heads=num_heads, **block_kwargs)
         self.norm3 = nn.LayerNorm(hidden_size)
         self.mlp = Mlp(in_features=hidden_size, hidden_features=int(hidden_size * mlp_ratio), drop=0)
 
-    def forward(self, x, c=None, x_pos_embed=None, c_pos_embed=None):
-        """
-        x: [B, S, D] - Query input
-        context: [B, S_ctx, D] - Key/Value input
-        mask: Optional attention mask
-        """
-        x = x + self.attn(self.norm1(x), pos_embed=x_pos_embed)
-        if self.use_xattn:
-            assert c is not None, "Cross-attention requires conditioning context"
-            x = x + self.xattn(self.norm2(x), c, x_pos_embed=x_pos_embed, c_pos_embed=c_pos_embed)
+    def forward(self, x, c, x_pos_emb=None, c_pos_emb=None):
+        x = x + self.attn(self.norm1(x), pos_embed=x_pos_emb)
+        x = x + self.xattn(self.norm2(x), c, x_pos_embed=x_pos_emb, c_pos_embed=c_pos_emb)
         x = x + self.mlp(self.norm3(x))
         return x
 
-class TransformerEncoder(nn.Module):
-    """
-    Transformer encoder with multiple attention blocks.
-    """
-    def __init__(self, hidden_size, num_layers, num_heads, mlp_ratio=4.0, dropout=0.0):
-        super().__init__()
-        self.layers = nn.ModuleList([
-            AttentionBlock(
-                use_xattn=False,
-                hidden_size=hidden_size,
-                num_heads=num_heads,
-                mlp_ratio=mlp_ratio,
-                attn_drop=dropout,
-                proj_drop=dropout,
-            ) for _ in range(num_layers)
-        ])
-        self.initialize_weights()
-
-    def initialize_weights(self):
-        # Initialize transformer layers:
-        def _basic_init(module):
-            if isinstance(module, nn.Linear):
-                torch.nn.init.xavier_uniform_(module.weight)
-                if module.bias is not None:
-                    nn.init.constant_(module.bias, 0)
-            elif isinstance(module, nn.LayerNorm):
-                nn.init.constant_(module.bias, 0)
-                nn.init.constant_(module.weight, 1.0)
-        self.apply(_basic_init)
-
-    def forward(self, x, pos_embed=None):
-        for layer in self.layers:
-            x = layer(x, x_pos_embed=pos_embed)
-        return x
-    
 class AttentionPooling(nn.Module):
     """
     Attention pooling layer that uses DiT as the backbone.
     """
-    def __init__(self, hidden_size, num_queries, depth=2, num_heads=8, mlp_ratio=4.0, dropout=0.0):
+    def __init__(self, 
+        num_queries, 
+        hidden_size=512,
+        depth=8,
+        num_heads=8,
+        mlp_ratio=4.0,
+        dropout=0.0
+    ):
         super().__init__()
-        self.hidden_size = hidden_size
-        self.num_queries = num_queries
         self.query_tokens = nn.Embedding(num_queries, hidden_size)
-        self.register_buffer("x_pos_embed", get_1d_rotary_embed(hidden_size // num_heads, torch.arange(num_queries)))
         self.norm1 = nn.LayerNorm(hidden_size)
-        self.norm2 = nn.LayerNorm(hidden_size)
         self.blocks = nn.ModuleList([
-            AttentionBlock(
-                use_xattn=True,
+            AttentionPoolingBlock(
                 hidden_size=hidden_size,
                 num_heads=num_heads, 
                 mlp_ratio=mlp_ratio,
                 attn_drop=dropout,
                 proj_drop=dropout,
-            ) for i in range(depth)
+            ) for _ in range(depth)
         ])
+        self.norm2 = nn.LayerNorm(hidden_size)
         self.initialize_weights()
 
     def initialize_weights(self):
@@ -447,7 +393,7 @@ class AttentionPooling(nn.Module):
                 nn.init.constant_(module.weight, 1.0)
         self.apply(_basic_init)
 
-    def forward(self, c, c_pos_embed=None):
+    def forward(self, c, c_pos_emb=None):
         """
         context: (B, N, D) - Input features, where B is batch size, N is sequence length, and D is feature dimension.
         """
@@ -455,6 +401,8 @@ class AttentionPooling(nn.Module):
         x = self.query_tokens.weight.unsqueeze(0).expand(B, -1, -1)
         c = self.norm1(c)
         for block in self.blocks:
-            x = block(x=x, c=c, x_pos_embed=self.x_pos_embed, c_pos_embed=c_pos_embed) 
+            x = block(x=x, c=c, c_pos_emb=c_pos_emb)
         x = self.norm2(x)
-        return x
+        return x 
+    
+

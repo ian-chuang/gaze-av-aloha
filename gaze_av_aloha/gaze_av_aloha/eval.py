@@ -23,6 +23,7 @@ def rollout(
     seeds: list[int] | None = None,
     return_observations: bool = False,
     render_callback: Callable[[gym.vector.VectorEnv], None] | None = None,
+    options: dict | None = None,
 ) -> dict:
     assert isinstance(policy, nn.Module), "Policy must be a PyTorch nn module."
     device = get_device_from_parameters(policy)
@@ -30,7 +31,7 @@ def rollout(
     # Reset the policy and environments.
     policy.reset()
 
-    observation, info = env.reset(seed=seeds)
+    observation, info = env.reset(seed=seeds, options=options)
     if render_callback is not None:
         render_callback(env)
 
@@ -121,6 +122,7 @@ def eval_policy(
     videos_dir: Path | None = None,
     return_episode_data: bool = False,
     start_seed: int | None = None,
+    options: dict | None = None,
 ) -> dict:
     """
     Args:
@@ -193,6 +195,7 @@ def eval_policy(
             seeds=list(seeds) if seeds else None,
             return_observations=return_episode_data,
             render_callback=render_frame if max_episodes_rendered > 0 else None,
+            options=options,
         )
 
         # Figure out where in each rollout sequence the first done condition was encountered (results after
