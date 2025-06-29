@@ -19,6 +19,7 @@ from gaze_av_aloha.visualize import visualize_policy, NoTerminationWrapper
 from gaze_av_aloha.utils.dataclass_utils import save_dataclass, load_dataclass
 from gaze_av_aloha.configs import Config
 import gaze_av_aloha # import to ensure all configs are registered
+# import copy
 
 def train(cfg: Config):
     # get hydra run directory
@@ -75,9 +76,15 @@ def train(cfg: Config):
     if cfg.policy.type == "gaze_policy":
         from gaze_av_aloha.policies.gaze_policy.gaze_policy import GazePolicy
         policy = GazePolicy(policy_cfg=cfg.policy, task_cfg=cfg.task, stats=stats)
+    elif cfg.policy.type == "foveated_policy":
+        from gaze_av_aloha.policies.foveated_policy.foveated_policy import FoveatedPolicy
+        policy = FoveatedPolicy(policy_cfg=cfg.policy, task_cfg=cfg.task, stats=stats)
     elif cfg.policy.type == "diffusion_policy":
         from gaze_av_aloha.policies.diffusion_policy.diffusion_policy import DiffusionPolicy
         policy = DiffusionPolicy(policy_cfg=cfg.policy, task_cfg=cfg.task, stats=stats)
+    elif cfg.policy.type == "flow_policy":
+        from gaze_av_aloha.policies.flow_policy.flow_policy import FlowPolicy
+        policy = FlowPolicy(policy_cfg=cfg.policy, task_cfg=cfg.task, stats=stats)
     else:
         raise ValueError(f"Unknown policy type: {cfg.policy.type}")
     if checkpoint_path:
@@ -288,47 +295,54 @@ def train(cfg: Config):
                     logging.info(f"Removing previous checkpoint at {prev_checkpoint_dir}")
                     shutil.rmtree(prev_checkpoint_dir)
 
-        if eval_env and is_eval_step:
-            step_id = str(step).zfill(10)
-            logging.info(f"Eval policy at step {step}")
-            with torch.no_grad():
-                eval_info = eval_policy(
-                    eval_env,
-                    policy,
-                    cfg.task.eval_n_episodes,
-                    videos_dir=run_dir / "eval" / f"videos_step_{step_id}",
-                    max_episodes_rendered=4,
-                    start_seed=cfg.seed,
-                )
+        # load ema weights to an eval policy
+        if is_eval_step or is_viz_step:
+            if ema is not None:
+                ema.store(policy.parameters())
+                ema.copy_to(policy.parameters())
 
-            logging.info(eval_info["aggregated"])
-            if cfg.wandb.enable and step >= wandb.run.step:
-                for k, v in eval_info["aggregated"].items():
-                    if not isinstance(v, (int, float, str)): continue
-                    wandb.log({f"eval/{k}": v}, step=step)
-                wandb_video = wandb.Video(eval_info['video_paths'][0], fps=cfg.task.fps, format="mp4")
-                wandb.log({"eval/video": wandb_video}, step=step)
+            if eval_env and is_eval_step:
+                step_id = str(step).zfill(10)
+                for name, options in cfg.task.eval_options.items():
+                    logging.info(f"Eval policy at step {step} with options: {name}={pformat(options, indent=4)}")
+                    with torch.no_grad():
+                        eval_info = eval_policy(
+                            eval_env,
+                            policy,
+                            cfg.task.eval_n_episodes,
+                            videos_dir=run_dir / "eval" / name / f"videos_step_{step_id}",
+                            max_episodes_rendered=4,
+                            start_seed=cfg.seed,
+                            options=options,
+                        )
 
-        if viz_env and is_viz_step:
-            step_id = str(step).zfill(10)
-            logging.info(f"Visualize policy at step {step}")
-            with torch.no_grad():
-                video_paths = visualize_policy(
-                    viz_env,
-                    policy,
-                    videos_dir=run_dir / "visualize" / f"videos_step_{step_id}",
-                    seed=step,
-                    steps=cfg.task.visualization_steps,
-                )
-            if cfg.wandb.enable and step >= wandb.run.step:
-                for video_path in video_paths:
-                    name = Path(video_path).stem
-                    wandb_video = wandb.Video(video_path, fps=cfg.task.fps, format="mp4")
-                    wandb.log({f"visualize/{name}": wandb_video}, step=step)
+                    logging.info(eval_info["aggregated"])
+                    if cfg.wandb.enable and step >= wandb.run.step:
+                        for k, v in eval_info["aggregated"].items():
+                            if not isinstance(v, (int, float, str)): continue
+                            wandb.log({f"eval/{k}_{name}": v}, step=step)
+                        wandb_video = wandb.Video(eval_info['video_paths'][0], fps=cfg.task.fps, format="mp4")
+                        wandb.log({f"eval/video_{name}": wandb_video}, step=step)
 
-                
+            if viz_env and is_viz_step:
+                step_id = str(step).zfill(10)
+                logging.info(f"Visualize policy at step {step}")
+                with torch.no_grad():
+                    video_paths = visualize_policy(
+                        viz_env,
+                        policy,
+                        videos_dir=run_dir / "visualize" / f"videos_step_{step_id}",
+                        seed=step,
+                        steps=cfg.task.visualization_steps,
+                    )
+                if cfg.wandb.enable and step >= wandb.run.step:
+                    for video_path in video_paths:
+                        name = Path(video_path).stem
+                        wandb_video = wandb.Video(video_path, fps=cfg.task.fps, format="mp4")
+                        wandb.log({f"visualize/{name}": wandb_video}, step=step)
 
-        
+            if ema is not None:
+                ema.restore(policy.parameters())
 
     if eval_env:
         eval_env.close()

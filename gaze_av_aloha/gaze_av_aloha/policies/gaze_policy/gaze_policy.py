@@ -14,10 +14,13 @@ from gaze_av_aloha.utils.policy_utils import (
 import torchcfm.conditional_flow_matching as cfm
 import torch.nn.functional as F
 import einops
-from gaze_av_aloha.policies.gaze_policy.vision import VisionEncoder, crop_at_center
-from gaze_av_aloha.policies.gaze_policy.transformer import DiT, AttentionPooling
+from gaze_av_aloha.policies.gaze_policy.vision import crop_at_center
+from gaze_av_aloha.policies.gaze_policy.dino import DINO
+from gaze_av_aloha.policies.gaze_policy.transformer import DiT, AttentionPooling, get_foveated_pos_embed, get_1d_rotary_embed
 from torchvision.transforms import Resize
 import logging
+from torchvision.ops import roi_align
+from diffusers.training_utils import EMAModel
 
 class GazePolicy(Policy):
     def __init__(
@@ -93,9 +96,13 @@ class GazePolicy(Policy):
             - Epsilon: {self.cfg.optimizer_eps}
             - Weight Decay: {self.cfg.optimizer_weight_decay}
         """)
-        backbone_condition = lambda n: "vision_encoders" in n and "backbone" in n
+        backbone_condition = lambda n: "dino" in n
         if not any(backbone_condition(n) for n, p in self.named_parameters()):
             raise ValueError(f"No parameters found satifying the condition for vision backbone: {backbone_condition}")
+        
+        for n, p in self.named_parameters():
+            if backbone_condition(n):
+                logging.info(f"[GazePolicy] Backbone parameter: {n} with shape {p.shape}")
 
         params = [
             {
@@ -135,11 +142,12 @@ class GazePolicy(Policy):
             num_training_steps=num_training_steps,
         )
     
-    def get_ema(self):
-        logging.info(f"""
-            [GazePolicy] EMA is not implemented for GazePolicy.
-        """)
-        return None
+    def get_ema(self) -> EMAModel | None:
+        logging.info(f"[FlowPolicy] Initializing EMA with decay {self.cfg.ema_decay} and use_ema={self.cfg.use_ema}")
+        return EMAModel(
+            parameters=self.parameters(),
+            decay=self.cfg.ema_decay,
+        ) if self.cfg.use_ema else None
     
     def get_delta_timestamps(self):
         observation_indices = list(reversed(range(0, -self.cfg.n_obs_steps*self.cfg.obs_step_size, -self.cfg.obs_step_size)))
@@ -281,49 +289,44 @@ class FlowModel(nn.Module):
         )
 
         # observation processing
-        self.state_dropout = nn.Dropout(policy_cfg.proprio_dropout)
-        self.action_history_dropout = nn.Dropout(policy_cfg.proprio_dropout)
+        
         self.resize = Resize(policy_cfg.resize_shape)
-        vision_encoders = {}
-        self.image_encoder_keys = [k.split(".")[-1] for k in task_cfg.image_keys]
-        self.gaze_to_image_encoder_key = {
-            gaze_key : image_key.split(".")[-1] +  "_gaze" for image_key, gaze_key in policy_cfg.image_to_gaze_key.items()
-        }
-        for key in self.image_encoder_keys:
-            vision_encoders[key] = VisionEncoder(
-                resize_shape=policy_cfg.input_shape,
-                crop_shape=None,
-                crop_is_random=False,
-                out_dim=policy_cfg.image_out_dim,
-            )
-        for key in self.gaze_to_image_encoder_key.values():
-            vision_encoders[key] = VisionEncoder(
-                resize_shape=policy_cfg.input_shape,
-                crop_shape=None,
-                crop_is_random=False,
-                out_dim=policy_cfg.image_out_dim,
-            )
-        self.vision_encoders = nn.ModuleDict(vision_encoders)
+        self.input_resize = Resize(policy_cfg.input_shape)
+        self.dino_periph = DINO(6)
+        self.dino_foveal = DINO(6)
+        self.dino_embed = nn.Linear(self.dino_periph.embed_dim, policy_cfg.dim_model)
+        self.gaze_embed = nn.Linear(2, policy_cfg.dim_model)
+        self.state_embed = nn.Linear(task_cfg.state_dim, policy_cfg.dim_model)
+        self.state_dropout = nn.Dropout(policy_cfg.proprio_dropout)
+        self.action_history_embed = nn.Linear(self.action_dim, policy_cfg.dim_model)
+        self.action_history_dropout = nn.Dropout(policy_cfg.proprio_dropout)
 
-        cond_dim = task_cfg.state_dim
-        cond_dim += policy_cfg.image_out_dim * (len(self.task_cfg.image_keys) + len(self.cfg.image_to_gaze_key))
-        if policy_cfg.use_action_history:
-            cond_dim += self.action_dim
-        else:
-            cond_dim += len(policy_cfg.image_to_gaze_key) * 2
-        cond_dim = cond_dim * policy_cfg.n_obs_steps  # cond_dim for each observation step
+        self.attn_pooling = AttentionPooling(
+            hidden_size=policy_cfg.dim_model,
+            num_queries=self.cfg.attn_pooling_n_queries,
+            depth=self.cfg.attn_pooling_n_layers,
+            num_heads= self.cfg.n_heads,
+            mlp_ratio= policy_cfg.mlp_ratio,
+            dropout= policy_cfg.dropout,
+        ) 
 
         self.DiT = DiT(
             in_dim=self.action_dim,
             out_dim=self.action_dim,
-            cond_dim=cond_dim, 
             hidden_size=policy_cfg.dim_model,
             depth=policy_cfg.n_decoder_layers,
             num_heads=policy_cfg.n_heads,
             mlp_ratio=policy_cfg.mlp_ratio,
             dropout=policy_cfg.dropout,
-            max_seq_len=policy_cfg.max_seq_len,
             time_dim=policy_cfg.time_dim,
+        )
+        self.register_buffer(
+            "dit_x_pos_embed", 
+            get_1d_rotary_embed(policy_cfg.dim_model // policy_cfg.n_heads, torch.arange(policy_cfg.horizon))
+        )
+        self.register_buffer(
+            "dit_c_pos_embed",
+            get_1d_rotary_embed(policy_cfg.dim_model // policy_cfg.n_heads, torch.arange(policy_cfg.attn_pooling_n_queries))
         )
 
     def prepare_global_conditioning(self, batch: dict[str, Tensor]) -> tuple[Tensor, dict]:
@@ -344,66 +347,118 @@ class FlowModel(nn.Module):
                 batch[gaze_key] = gaze
 
         # process images
-        image_tokens = []
-        for image_key, image_encoder_key in zip(self.task_cfg.image_keys, self.image_encoder_keys):
+        tokens = []
+        pos_embed = []
+        for image_key in self.task_cfg.image_keys:
+            # resize images
             images = batch[image_key]  # (B, S, C, H, W)
             batch_size = images.shape[0]
             images = einops.rearrange(images, 'b s c h w -> (b s) c h w')
             images = self.resize(images)  # (B, S, C, H, W)
+            images = self.input_resize(images)  # (B, S, C, H, W)
             images = einops.rearrange(images, '(b s) c h w -> b s c h w', b=batch_size)
 
-            peripheral = images
-            if self.cfg.use_last_peripheral_only and len(self.cfg.image_to_gaze_key) > 0:
-                peripheral = peripheral[:, -1:]
-            peripheral = einops.rearrange(peripheral, 'b s c h w -> (b s) c h w')
-            peripheral_feat = self.vision_encoders[image_encoder_key](peripheral)  
-            peripheral_feat = einops.rearrange(peripheral_feat, '(b s) d -> b s d', b=batch_size)
-            image_tokens.append(peripheral_feat)  # (B, S, D)
+            # peripheral processing
+            peripheral = einops.rearrange(images, 'b s c h w -> (b s) c h w')
+            peripheral_feat = self.dino_periph(peripheral)
+            peripheral_feat = einops.rearrange(peripheral_feat, '(b s) l d -> b (s l) d', b=batch_size)
+            tokens.append(self.dino_embed(peripheral_feat))  # (B, S, D)
+            pos_embed.append(
+                get_foveated_pos_embed(
+                    gaze=torch.zeros((batch_size, self.cfg.n_obs_steps, 2), device=peripheral_feat.device),  # centered for peripheral
+                    image_shape=self.cfg.input_shape,
+                    crop_shape=self.cfg.input_shape,
+                    feat_shape=(int(self.cfg.input_shape[0] / self.dino_periph.patch_size), int(self.cfg.input_shape[1] / self.dino_periph.patch_size)),
+                    n_obs_steps=self.cfg.n_obs_steps,
+                    dim=self.cfg.dim_model // self.cfg.n_heads,
+                )
+            )
             if not self.training:
-                viz[image_encoder_key] = peripheral
+                viz[image_key] = peripheral
 
+            # crop processing
             if image_key in self.cfg.image_to_gaze_key:
                 gaze_key = self.cfg.image_to_gaze_key[image_key]
-                gaze = einops.rearrange(batch[gaze_key], "b s c -> (b s) c")
                 foveal = crop_at_center(
                     images=einops.rearrange(images, 'b s c h w -> (b s) c h w'), 
-                    centers=gaze, 
+                    centers=einops.rearrange(batch[gaze_key], "b s c -> (b s) c"), 
                     crop_shape=self.cfg.foveal_shape, 
                     out_shape=self.cfg.input_shape,
                 )
-                foveal_feat = self.vision_encoders[self.gaze_to_image_encoder_key[gaze_key]](foveal,gaze=gaze)
-                foveal_feat = einops.rearrange(foveal_feat, '(b s) d -> b s d', b=batch_size)
-                image_tokens.append(foveal_feat)  # (B, S, D)
-                if not self.training:
-                    viz[self.gaze_to_image_encoder_key[gaze_key]] = foveal
-
-        cond.append(
-            torch.cat(image_tokens, dim=1).flatten(start_dim=1)  # (B, S * D)
-        )
-        # add state
-        cond.append(
-            self.state_dropout(
-                batch[self.task_cfg.state_key].flatten(start_dim=1) 
-             ) # (B, S * state_dim)
-        )
-        # add action history or just gaze coords
-        if self.cfg.use_action_history:
-            cond.append(
-                self.action_history_dropout(
-                    batch["action_history"].flatten(start_dim=1)
-                )  # (B, S * action_dim)
-            )
-        elif len(self.cfg.image_to_gaze_key) > 0:
-            # if no action history, we still need to add gaze tokens to the condition
-            cond.append(
-                self.action_history_dropout(
-                        torch.cat(
-                        [batch[key].flatten(start_dim=1) for key in self.cfg.image_to_gaze_key.values()],
-                        dim=-1
+                foveal_feat = self.dino_foveal(foveal)  # (B*S, L, D)
+                foveal_feat = einops.rearrange(foveal_feat, '(b s) l d -> b (s l) d', b=batch_size)
+                tokens.append(self.dino_embed(foveal_feat))  # (B, S, D)
+                pos_embed.append(
+                    get_foveated_pos_embed(
+                        gaze=batch[gaze_key], 
+                        image_shape=self.cfg.input_shape,
+                        crop_shape=self.cfg.foveal_shape,
+                        feat_shape=(int(self.cfg.input_shape[0] / self.dino_foveal.patch_size), int(self.cfg.input_shape[1] / self.dino_foveal.patch_size)),
+                        n_obs_steps=self.cfg.n_obs_steps,
+                        dim=self.cfg.dim_model // self.cfg.n_heads,
                     )
                 )
+                tokens.append(
+                    self.gaze_embed(batch[gaze_key])  # (B, S, D)
+                )
+                pos_embed.append(
+                    get_foveated_pos_embed(
+                        gaze=batch[gaze_key], 
+                        image_shape=self.cfg.resize_shape,
+                        crop_shape=self.cfg.foveal_shape,
+                        feat_shape=(1,1),
+                        n_obs_steps=self.cfg.n_obs_steps,
+                        dim=self.cfg.dim_model // self.cfg.n_heads,
+                    )
+                )
+                if not self.training:
+                    viz[gaze_key] = foveal
+
+        tokens.append(
+            self.state_embed(self.state_dropout(
+                batch[self.task_cfg.state_key] 
+            ))
+        )
+        pos_embed.append(
+            get_foveated_pos_embed(
+                gaze=torch.zeros((batch_size, self.cfg.n_obs_steps, 2), device=batch[self.task_cfg.state_key].device),  # centered for state
+                image_shape=self.cfg.resize_shape,
+                crop_shape=self.cfg.resize_shape,
+                feat_shape=(1,1),
+                n_obs_steps=self.cfg.n_obs_steps,
+                dim=self.cfg.dim_model // self.cfg.n_heads,
             )
-        cond = torch.cat(cond, dim=-1)  # (B, cond_dim)
+        )
+        if self.cfg.use_action_history:
+            tokens.append(
+                self.action_history_embed(self.action_history_dropout(
+                    batch["action_history"]
+                ))  # (B, S, D)
+            )
+            pos_embed.append(
+                get_foveated_pos_embed(
+                    gaze=torch.zeros((batch_size, self.cfg.n_obs_steps, 2), device=batch["action_history"].device),  # centered for action history
+                    image_shape=self.cfg.resize_shape,
+                    crop_shape=self.cfg.resize_shape,
+                    feat_shape=(1,1),
+                    n_obs_steps=self.cfg.n_obs_steps,
+                    dim=self.cfg.dim_model // self.cfg.n_heads,
+                )
+            )
+
+
+
+        tokens = torch.cat(tokens, dim=1)  # (B, S, D)
+        pos_embed = torch.cat(pos_embed, dim=1).unsqueeze(1)  # (B, 1, S, D//n_heads)
+        # tokens = self.transformer_encoder(tokens, pos_embed)  # (B, S, D)
+        cond = self.attn_pooling(tokens, pos_embed)
+
+
+        # cond = torch.cat([
+        #     cond,
+        #     self.state_dropout(batch[self.task_cfg.state_key].flatten(start_dim=1)),  # (B, S, D)
+        #     torch.cat([batch[key].flatten(start_dim=1) for key in self.cfg.image_to_gaze_key.values()], dim=-1)
+        # ], dim=-1)  # (B, S, D + state_dim + gaze_dim)
 
         return cond, viz
 
@@ -421,7 +476,7 @@ class FlowModel(nn.Module):
 
         for n in range(num_steps):
             timestep = n * dt * torch.ones(x.shape[0], device=x.device)
-            vt = self.DiT(x=x, timestep=timestep, cond=global_cond)
+            vt = self.DiT(x=x, timestep=timestep, cond=global_cond, x_pos_embed=self.dit_x_pos_embed, c_pos_embed=self.dit_c_pos_embed)
             x = x + vt * dt
 
         return x
@@ -436,7 +491,7 @@ class FlowModel(nn.Module):
         global_cond, _ = self.prepare_global_conditioning(batch) 
         x0 = torch.randn_like(batch[self.task_cfg.action_key]) 
         timestep, xt, ut = self.flow_matcher.sample_location_and_conditional_flow(x0, batch[self.task_cfg.action_key])
-        vt = self.DiT(x=xt, timestep=timestep, cond=global_cond)
+        vt = self.DiT(x=xt, timestep=timestep, cond=global_cond, x_pos_embed=self.dit_x_pos_embed, c_pos_embed=self.dit_c_pos_embed)
         flow_matching_loss = F.mse_loss(vt, ut, reduction="none").mean()
         loss = flow_matching_loss
         loss_dict = {
@@ -501,3 +556,24 @@ class TemporalEnsembler:
             self.ensembled_actions_count[n:],
         )
         return action
+    
+def crop_at_center(images: Tensor, centers: Tensor, crop_shape: tuple, out_shape: tuple | None = None) -> Tensor:
+    # crop the images around the predicted gaze
+    if out_shape is None:
+        out_shape = crop_shape
+    boxes = torch.zeros(centers.shape[0], 5, device=centers.device)
+    h, w = images.shape[-2:]
+    new_h, new_w = crop_shape
+    eye_pixel_x = ((centers[:, 0] + 1) / 2) * w
+    eye_pixel_y = ((centers[:, 1] + 1) / 2) * h
+    boxes[:, 0] = torch.arange(centers.shape[0], device=centers.device)
+    boxes[:, 1] = eye_pixel_x - new_w / 2
+    boxes[:, 2] = eye_pixel_y - new_h / 2
+    boxes[:, 3] = eye_pixel_x + new_w / 2
+    boxes[:, 4] = eye_pixel_y + new_h / 2     
+    images = roi_align(
+        images,
+        boxes,
+        output_size=out_shape,
+    )   
+    return images
