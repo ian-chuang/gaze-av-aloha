@@ -18,12 +18,14 @@ class FoveatedPolicyConfig(PolicyConfig):
     state_norm_mode: str = "min_max" 
     action_norm_mode: str = "min_max" 
     image_to_gaze_key: dict[str, str] = field(default_factory=lambda: {})
-    resize_shape: tuple = (240, 320)
-    input_shape: tuple = (224, 294) #(960, 1280)
-    backbone: str = "dino"
+    input_shape: tuple = (480, 640) #(960, 1280)
+    crop_shape: tuple = (432, 576)
+    resize_shape: tuple = (960, 1280)
+    
+    backbone: str = "stt"
     freeze_n_layers: int = 6
-    gaze_noise: float = 0.05
-    use_gaze: bool = False
+    gaze_noise: float = 0.02
+    use_gaze: bool = True
     use_action_history: bool = False
 
     # Transformer Layers

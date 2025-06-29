@@ -42,6 +42,7 @@ def visualize_policy(
     )
 
     viz_videos = {}
+    max_height = 480
     
     # features_video = []
     while step < steps:
@@ -73,6 +74,10 @@ def visualize_policy(
                 images = einops.rearrange(images, "b c h w -> h (b w) c")
                 images = (images.numpy() * 255).astype(np.uint8)
                 images = cv2.cvtColor(images, cv2.COLOR_RGB2RGBA)
+                if images.shape[0] > max_height:
+                    scale = max_height / images.shape[0]
+                    new_width = int(images.shape[1] * scale)
+                    images = cv2.resize(images, (new_width, max_height), interpolation=cv2.INTER_AREA)
                 if key in viz_videos:
                     viz_videos[key].append(images)
                 else:
