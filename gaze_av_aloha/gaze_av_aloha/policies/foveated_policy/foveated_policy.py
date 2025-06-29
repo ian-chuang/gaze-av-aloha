@@ -225,6 +225,17 @@ class FoveatedPolicy(Policy):
 
     def forward(self, batch: dict[str, Tensor]) -> tuple[Tensor, None]:
         batch = self.normalize_inputs(batch)
+
+        # pad gaze obs with zeros
+        for gaze_key in self.cfg.image_to_gaze_key.values():
+            is_pad = batch[gaze_key + "_is_pad"][:, :self.cfg.n_obs_steps]
+            batch[gaze_key][:, :self.cfg.n_obs_steps][is_pad] = 0.0
+        
+        # pad action obs with state
+        is_pad = batch[self.task_cfg.action_key + "_is_pad"][:, :self.cfg.n_obs_steps]
+        state_pad = batch[self.task_cfg.state_key][:, :self.cfg.n_obs_steps][is_pad]
+        batch[self.task_cfg.action_key][:, self.cfg.n_obs_steps:][is_pad] = state_pad
+
         loss, loss_dict = self.flow.compute_loss(batch)
         return loss, loss_dict
        
