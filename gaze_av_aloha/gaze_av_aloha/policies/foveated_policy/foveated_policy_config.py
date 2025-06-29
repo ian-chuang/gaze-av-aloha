@@ -2,8 +2,8 @@ from dataclasses import field, dataclass
 from gaze_av_aloha.configs import PolicyConfig
 
 @dataclass
-class FlowPolicyConfig(PolicyConfig):
-    type: str = "flow_policy"
+class FoveatedPolicyConfig(PolicyConfig):
+    type: str = "foveated_policy"
 
     n_obs_steps: int = 1
     obs_step_size: int = 1
@@ -19,15 +19,10 @@ class FlowPolicyConfig(PolicyConfig):
     action_norm_mode: str = "min_max" 
     image_to_gaze_key: dict[str, str] = field(default_factory=lambda: {})
     resize_shape: tuple = (240, 320)
-    crop_shape: tuple = (224, 294)
-    crop_is_random: bool = True
-    dino_freeze_n_layers: int = 6
-    state_dropout: float = 0.1
-
-    # gaze
-    gaze_sigma = 0.1
-    gaze_k: int = 40
-    gaze_prob: float = 0.5
+    input_shape: tuple = (960, 1280)
+    freeze_n_layers: int = 0
+    gaze_noise: float = 0.05
+    use_action_history: bool = False
 
     # Transformer Layers
     dim_model: int = 512
@@ -41,10 +36,10 @@ class FlowPolicyConfig(PolicyConfig):
 
     # DiT
     dit_n_layers: int = 8
-    time_dim: int = 128
+    dit_time_dim: int = 128
 
     # Flow Matching
-    n_sampling_steps: int = 6
+    n_sampling_steps: int = 10
 
     # Training
     optimizer_lr: float = 1e-4

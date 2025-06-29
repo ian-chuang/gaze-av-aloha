@@ -244,6 +244,10 @@ class STTEncoder(nn.Module):
     @property
     def num_register_tokens(self) -> int:
         return self.reg_tokens.shape[0]
+
+    @property
+    def embed_dim(self) -> int:
+        return self.reg_tokens.shape[1]
     
     @property
     def input_size(self) -> int:

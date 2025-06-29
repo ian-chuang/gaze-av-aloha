@@ -1,0 +1,8 @@
+defaults:
+  - base_foveated_policy_config
+
+type: foveated_policy
+
+# Gaze
+image_to_gaze_key:
+  observation.images.zed_cam_left: left_eye
