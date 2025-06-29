@@ -130,12 +130,17 @@ class BatchedFoveator(Foveator):
                 f"[Foveator.extract_foveated_image]: Expected 3-channel image."
             )
         
+        import time
+        
+        start_time = time.perf_counter()
         integral_image = compute_integral_image(images) # (B, C, H, W)
+        print(f"[BatchedFoveator] compute_integral_image took {time.perf_counter() - start_time:.4f} seconds")
 
         # self.token_corner_indices is (N, U)
         # self.token_strides is (N)
         # generate_grid_coords_2d return (H, W, U)
         # All get mapped to (N, H, W, U)
+        start_time = time.perf_counter()
         lower_pixel_coords = self.token_corner_indices.view(
             -1, 1, 1, 2
         ) + self.token_strides.view(-1, 1, 1, 1) * self.grid_coords_2d
@@ -148,8 +153,10 @@ class BatchedFoveator(Foveator):
         upper_pixel_coords = upper_pixel_coords.unsqueeze(1).unsqueeze(0).expand(B, N, C, I1, I2, 2)
         b_idx = torch.arange(B).view(B, 1, 1, 1, 1).expand(B, N, C, I1, I2)
         c_idx = torch.arange(C).view(1, 1, C, 1, 1).expand(B, N, C, I1, I2)
+        print(f"[BatchedFoveator] prepare pixel coords took {time.perf_counter() - start_time:.4f} seconds")
 
-        return (
+        start_time = time.perf_counter()
+        ret = (
             integral_image[
                 b_idx, c_idx,
                 upper_pixel_coords[..., 1], upper_pixel_coords[..., 0]
@@ -167,6 +174,9 @@ class BatchedFoveator(Foveator):
                 lower_pixel_coords[..., 1], lower_pixel_coords[..., 0]
             ]
         ) / self.token_strides.square().view(1, -1, 1, 1, 1).float()
+        print(f"[BatchedFoveator] compute foveated image took {time.perf_counter() - start_time:.4f} seconds")
+
+        return ret
 
     def get_in_bounds_tokens(
         self,
