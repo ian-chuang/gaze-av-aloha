@@ -27,8 +27,8 @@ eval_n_episodes: 50
 eval_n_envs: 5
 eval_options:
   iid: {}
-  # ood_light:
-  #   randomize_light: true
+  ood_light:
+    randomize_light: true
   ood_distractors:
     distractors: true
 visualization_steps: 100
