@@ -18,7 +18,7 @@ class FoveatedPolicyConfig(PolicyConfig):
     state_norm_mode: str = "min_max" 
     action_norm_mode: str = "min_max" 
     image_to_gaze_key: dict[str, str] = field(default_factory=lambda: {})
-    input_shape: tuple = (480, 640) #(960, 1280)
+    input_shape: tuple = (480, 640) 
     crop_shape: tuple = (432, 576)
     resize_shape: tuple = (960, 1280)
     
@@ -39,7 +39,7 @@ class FoveatedPolicyConfig(PolicyConfig):
     pool_n_layers: int = 2
 
     # DiT
-    dit_n_layers: int = 6
+    dit_n_layers: int = 8
     dit_time_dim: int = 128
 
     # Flow Matching
