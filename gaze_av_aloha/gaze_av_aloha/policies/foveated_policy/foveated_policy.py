@@ -231,7 +231,7 @@ class FoveatedPolicy(Policy):
             is_pad = batch[gaze_key + "_is_pad"][:, :self.cfg.n_obs_steps]
             batch[gaze_key][:, :self.cfg.n_obs_steps][is_pad] = 0.0
         
-        # pad action obs with state
+        # pad action obs with state TODO not sure this is correct
         is_pad = batch[self.task_cfg.action_key + "_is_pad"][:, :self.cfg.n_obs_steps]
         state_pad = batch[self.task_cfg.state_key][:, :self.cfg.n_obs_steps][is_pad]
         batch[self.task_cfg.action_key][:, self.cfg.n_obs_steps:][is_pad] = state_pad
