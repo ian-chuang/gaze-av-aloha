@@ -249,24 +249,27 @@ class FlowModel(nn.Module):
             task_cfg.action_key: task_cfg.action_dim,
             **{k: 2 for k in policy_cfg.image_to_gaze_key.values() if policy_cfg.use_gaze},
         }
-        self.state_proj = Mlp(
-            in_features=self.task_cfg.state_dim, 
-            hidden_features=policy_cfg.dim_model, 
-            out_features=policy_cfg.dim_model, 
-            drop=policy_cfg.dropout
+        self.state_proj = nn.Sequential(
+            nn.Dropout(policy_cfg.dropout),
+            nn.Linear(task_cfg.state_dim, policy_cfg.dim_model), 
+            nn.GELU(),
+            nn.Dropout(policy_cfg.dropout),
+            nn.Linear(policy_cfg.dim_model, policy_cfg.dim_model),
         )
-        self.action_history_proj = Mlp(
-            in_features=task_cfg.action_dim, 
-            hidden_features=policy_cfg.dim_model, 
-            out_features=policy_cfg.dim_model, 
-            drop=policy_cfg.dropout
-        )
-        self.gaze_proj = Mlp(
-            in_features=2,  # gaze is 2D (x, y)
-            hidden_features=policy_cfg.dim_model,
-            out_features=policy_cfg.dim_model,
-            drop=policy_cfg.dropout,
-        )
+        if policy_cfg.use_action_history:
+            self.action_history_proj = nn.Sequential(
+                nn.Dropout(policy_cfg.dropout),
+                nn.Linear(task_cfg.action_dim, policy_cfg.dim_model), 
+                nn.GELU(),
+                nn.Dropout(policy_cfg.dropout),
+                nn.Linear(policy_cfg.dim_model, policy_cfg.dim_model),
+            )
+        if policy_cfg.use_gaze:
+            self.gaze_proj = nn.Sequential(
+                nn.Linear(2, policy_cfg.dim_model), 
+                nn.GELU(),
+                nn.Linear(policy_cfg.dim_model, policy_cfg.dim_model),
+            )
 
         if policy_cfg.backbone == "dino":
             self.backbone = DINO(
@@ -285,11 +288,11 @@ class FlowModel(nn.Module):
         else:
             raise ValueError(f"Unknown backbone: {policy_cfg.backbone}")
         
-        self.backbone_feat_proj = Mlp(
-            in_features=self.backbone.embed_dim,
-            hidden_features=policy_cfg.dim_model,
-            out_features=policy_cfg.dim_model,
-            drop=policy_cfg.dropout,
+        self.backbone_feat_proj = nn.Sequential(
+            nn.Linear(self.backbone.embed_dim, policy_cfg.dim_model),
+            nn.GELU(),
+            nn.Dropout(policy_cfg.dropout),
+            nn.Linear(policy_cfg.dim_model, policy_cfg.dim_model),
         )
         self.pool = AttentionPooling(
             hidden_size=policy_cfg.dim_model,
