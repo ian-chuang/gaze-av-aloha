@@ -8,7 +8,7 @@ crop_shape: [432, 576]
 resize_shape: [1280, 1280]
 
 backbone: stt
-freeze_n_layers: 6
+freeze_n_layers: 0
 gaze_noise: 0.02
 use_gaze: true
 use_action_history: false
