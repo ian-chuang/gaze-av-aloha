@@ -27,7 +27,6 @@ class DINO(nn.Module):
             for name, param in self.backbone.named_parameters():
                 if any([name.startswith(s) for s in startswith]):
                     param.requires_grad = False
-                    logging.info(f"[DINO] Freezing parameter: {name}")
 
     @property
     def embed_dim(self):
