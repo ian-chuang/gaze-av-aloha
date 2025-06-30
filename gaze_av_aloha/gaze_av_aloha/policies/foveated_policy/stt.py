@@ -14,7 +14,7 @@ from pathlib import Path
 import os
 from tqdm import tqdm
 import logging
-
+import requests
 
 STT_URL = "https://huggingface.co/facebook/segment_this_thing/resolve/main/stt-b-qbkbmb5qsb4q2.pth"
 STT_PATH = Path(os.path.dirname(os.path.dirname(gaze_av_aloha.__file__))) / "cache" / "stt-b.pth"
@@ -325,7 +325,6 @@ class STT(STTEncoder):
         return masks, ious, patches
 
 if __name__ == "__main__":
-    import requests
     from io import BytesIO
     from PIL import Image
     import numpy as np

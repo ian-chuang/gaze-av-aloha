@@ -234,7 +234,7 @@ class FoveatedPolicy(Policy):
         # pad action obs with state TODO not sure this is correct
         is_pad = batch[self.task_cfg.action_key + "_is_pad"][:, :self.cfg.n_obs_steps]
         state_pad = batch[self.task_cfg.state_key][:, :self.cfg.n_obs_steps][is_pad]
-        batch[self.task_cfg.action_key][:, self.cfg.n_obs_steps:][is_pad] = state_pad
+        batch[self.task_cfg.action_key][:, :self.cfg.n_obs_steps][is_pad] = state_pad
 
         loss, loss_dict = self.flow.compute_loss(batch)
         return loss, loss_dict
