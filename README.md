@@ -24,5 +24,5 @@ python train.py policy=gaze_policy task=av_aloha_sim_hook_package wandb.enable=f
 ```
 
 
-python train.py policy=stt_policy task=av_aloha_sim_thread_needle device=cuda:0 wandb.job_name=stt_policy
-python train.py policy=dino_policy task=av_aloha_sim_thread_needle device=cuda:0 wandb.job_name=dino_policy
+python train.py policy=stt_policy task=av_aloha_sim_thread_needle device=cuda:0 wandb.job_name=stt_policy_94_0freeze
+python train.py policy=dino_policy task=av_aloha_sim_thread_needle device=cuda:0 wandb.job_name=dino_policy_94_0freeze
