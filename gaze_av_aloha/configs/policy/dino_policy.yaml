@@ -8,7 +8,7 @@ crop_shape: [432, 576]
 resize_shape: [224, 224] 
 
 backbone: dino
-freeze_n_layers: 6
+freeze_n_layers: 0
 use_gaze: false
 use_action_history: false
 
