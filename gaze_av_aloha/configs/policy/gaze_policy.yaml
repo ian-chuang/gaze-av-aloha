@@ -1,0 +1,17 @@
+defaults:
+  - base_gaze_policy_config
+
+type: gaze_policy
+
+input_shape: [240, 320]
+periph_shape: [70, 70]
+periph_crop_scale: 0.9
+foveal_shape: [70, 70]
+foveal_crop_scale: 0.4
+
+freeze_n_layers: 6
+use_gaze: true
+
+# Gaze
+image_to_gaze_key:
+  observation.images.zed_cam_left: left_eye
