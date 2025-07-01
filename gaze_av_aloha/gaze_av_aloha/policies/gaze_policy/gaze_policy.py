@@ -4,23 +4,22 @@ from gaze_av_aloha.configs import TaskConfig
 from gaze_av_aloha.policies.policy import Policy
 import torch
 from diffusers.optimization import get_scheduler
+from diffusers.training_utils import EMAModel
 from gaze_av_aloha.policies.normalize import Normalize, Unnormalize
 from collections import deque
 from gaze_av_aloha.utils.policy_utils import (
     get_device_from_parameters,
-    get_dtype_from_parameters,
     populate_queues,
 )
-import torchcfm.conditional_flow_matching as cfm
 import torch.nn.functional as F
 import einops
-from gaze_av_aloha.policies.gaze_policy.vision import crop_at_center
+from gaze_av_aloha.policies.gaze_policy.transformer import DiT, AttentionPooling
 from gaze_av_aloha.policies.gaze_policy.dino import DINO
-from gaze_av_aloha.policies.gaze_policy.transformer import DiT, AttentionPooling, get_foveated_pos_embed, get_1d_rotary_embed
 from torchvision.transforms import Resize
+from gaze_av_aloha.policies.gaze_policy.utils import sample_beta, get_foveated_pos_embed, crop_at_kp, random_crop
 import logging
-from torchvision.ops import roi_align
-from diffusers.training_utils import EMAModel
+from timm.layers import Mlp
+import math
 
 class GazePolicy(Policy):
     def __init__(
@@ -34,29 +33,10 @@ class GazePolicy(Policy):
         self.task_cfg = task_cfg
         self.stats = stats
 
-        # hacky add eye mean std to stats of action (eye is already normalized to -1, 1)
-        self.action_dim = task_cfg.action_dim + len(policy_cfg.image_to_gaze_key)*2
-        if len(stats[task_cfg.action_key]["mean"]) == task_cfg.action_dim:
-            stats[task_cfg.action_key]["mean"].extend([0] * len(policy_cfg.image_to_gaze_key) * 2)
-            stats[task_cfg.action_key]["std"].extend([1] * len(policy_cfg.image_to_gaze_key) * 2)
-            stats[task_cfg.action_key]["min"].extend([-1] * len(policy_cfg.image_to_gaze_key) * 2)
-            stats[task_cfg.action_key]["max"].extend([1] * len(policy_cfg.image_to_gaze_key) * 2)
-            stats["action_history"] = stats[task_cfg.action_key]
-
-        assert all(
-            key in task_cfg.image_keys for key in policy_cfg.image_to_gaze_key
-        ), f"All keys in image_to_gaze_key must be in task_cfg.image_keys. Found: {policy_cfg.image_to_gaze_key.keys()} not in {task_cfg.image_keys}"
-
         self.normalize_inputs = Normalize(
             {
-                **{k: policy_cfg.image_norm_mode for k in task_cfg.image_keys},
+                **{k: policy_cfg.image_norm_mode for k in policy_cfg.image_to_gaze_key.keys()},
                 task_cfg.state_key: policy_cfg.state_norm_mode,
-                "action_history": policy_cfg.action_norm_mode,
-            },
-            stats,
-        )
-        self.normalize_targets = Normalize(
-            {
                 task_cfg.action_key: policy_cfg.action_norm_mode,
             },
             stats,
@@ -67,42 +47,34 @@ class GazePolicy(Policy):
             },
             stats,
         )
+
         self.flow = FlowModel(policy_cfg, task_cfg)
 
-        padding = policy_cfg.action_history_padding + [0] * len(policy_cfg.image_to_gaze_key) * 2
-        assert len(padding) == self.action_dim
-        self.register_buffer(
-            "action_history_padding",
-            torch.tensor(padding)
-        )
-
-        self.action_temporal_ensembler = TemporalEnsembler(
-            temporal_ensemble_coeff=policy_cfg.action_temporal_ensemble_coeff,
-            chunk_size=policy_cfg.horizon,
-        )
-        self.gaze_temporal_ensembler = TemporalEnsembler(
-            temporal_ensemble_coeff=policy_cfg.gaze_temporal_ensemble_coeff,
-            chunk_size=policy_cfg.horizon,
-        )
+        if policy_cfg.use_temporal_ensemble:
+            self.temporal_ensembler = TemporalEnsembler(
+                temporal_ensemble_coeff=policy_cfg.temporal_ensemble_coeff,
+                chunk_size=policy_cfg.horizon,
+            )
 
         self.reset()
 
     def get_optimizer(self) -> torch.optim.Optimizer:
         logging.info(f"""
-            [GazePolicy] Initializing AdamW optimizer with the following parameters:
+            [FlowPolicy] Initializing AdamW optimizer with the following parameters:
             - Learning Rate: {self.cfg.optimizer_lr}
             - Learning Rate for Backbone: {self.cfg.optimizer_lr_backbone}
             - Betas: {self.cfg.optimizer_betas}
             - Epsilon: {self.cfg.optimizer_eps}
             - Weight Decay: {self.cfg.optimizer_weight_decay}
         """)
-        backbone_condition = lambda n: "dino" in n
+        backbone_condition = lambda n: "flow.dino_periph." in n or "flow.dino_foveal." in n
         if not any(backbone_condition(n) for n, p in self.named_parameters()):
             raise ValueError(f"No parameters found satifying the condition for vision backbone: {backbone_condition}")
         
+        # TODO REMOVE THIS LOGGING
         for n, p in self.named_parameters():
-            if backbone_condition(n):
-                logging.info(f"[GazePolicy] Backbone parameter: {n} with shape {p.shape}")
+            if backbone_condition(n) and p.requires_grad:
+                logging.info(f"{n}: {self.cfg.optimizer_lr_backbone}.")
 
         params = [
             {
@@ -131,7 +103,7 @@ class GazePolicy(Policy):
     
     def get_scheduler(self, optimizer: torch.optim.Optimizer, num_training_steps: int) -> torch.optim.lr_scheduler.LambdaLR | None:
         logging.info(f"""
-            [GazePolicy] Initializing scheduler '{self.cfg.scheduler_name}' with the following parameters:
+            [FlowPolicy] Initializing scheduler '{self.cfg.scheduler_name}' with the following parameters:
             - Warmup Steps: {self.cfg.scheduler_warmup_steps}
             - Total Training Steps: {num_training_steps}
         """)
@@ -143,361 +115,376 @@ class GazePolicy(Policy):
         )
     
     def get_ema(self) -> EMAModel | None:
-        logging.info(f"[FlowPolicy] Initializing EMA with decay {self.cfg.ema_decay} and use_ema={self.cfg.use_ema}")
-        return EMAModel(
-            parameters=self.parameters(),
-            decay=self.cfg.ema_decay,
-        ) if self.cfg.use_ema else None
+        if self.cfg.use_ema:
+            logging.info(f"[FlowPolicy] Initializing EMA with decay {self.cfg.ema_decay}")
+            return EMAModel(
+                parameters=self.parameters(),
+                decay=self.cfg.ema_decay,
+            ) 
+        else:
+            logging.info(f"[FlowPolicy] EMA is not used.")
+            return None
     
     def get_delta_timestamps(self):
+        # indices
         observation_indices = list(reversed(range(0, -self.cfg.n_obs_steps*self.cfg.obs_step_size, -self.cfg.obs_step_size)))
-        assert len(observation_indices) == self.cfg.n_obs_steps, "Observation indices length mismatch"
         action_indices = [i - 1 for i in observation_indices] + list(range(self.cfg.horizon))
         gaze_indices = observation_indices + list(range(1, self.cfg.horizon+1))
-        logging.info(f"""
-            [GazePolicy] Observation Indices: {observation_indices}
-            [GazePolicy] Action Indices: {action_indices}
-            [GazePolicy] Gaze Indices: {gaze_indices}
-        """)
+        assert len(observation_indices) == self.cfg.n_obs_steps, "Observation indices length mismatch"
+
+        # timestamps
+        observation_timestamps = [i / self.task_cfg.fps for i in observation_indices]
+        action_timestamps = [i / self.task_cfg.fps for i in action_indices]
+        gaze_timestamps = [i / self.task_cfg.fps for i in gaze_indices]
+
         return {
-            # observations
-            **{
-                k: [i / self.task_cfg.fps for i in observation_indices]
-                for k in self.task_cfg.image_keys
-            },
-            self.task_cfg.state_key: [i / self.task_cfg.fps for i in observation_indices],
-            # actions
-            self.task_cfg.action_key: [i / self.task_cfg.fps for i in action_indices],
-            # gaze
-            **{
-                k: [i / self.task_cfg.fps for i in gaze_indices]
-                for k in self.cfg.image_to_gaze_key.values()
-            },
+            **{k: observation_timestamps for k in self.cfg.image_to_gaze_key.keys()}, # images
+            **{k: gaze_timestamps for k in self.cfg.image_to_gaze_key.values()}, # gaze
+            self.task_cfg.state_key: observation_timestamps, # state
+            self.task_cfg.action_key: action_timestamps, # action
         }
     
     def reset(self):
-        """Clear observation and action queues. Should be called on `env.reset()`"""
         obs_queue_size = (self.cfg.n_obs_steps-1)*self.cfg.obs_step_size+1
-        self._queues = {
-            self.task_cfg.action_key: deque(maxlen=self.cfg.n_action_steps),
-            "action_history": deque(maxlen=obs_queue_size),
+        self._obs_queue = {
+            **{key: deque(maxlen=obs_queue_size) for key in self.cfg.image_to_gaze_key.keys()},
+            **{key: deque(maxlen=obs_queue_size) for key in self.cfg.image_to_gaze_key.values()}, # gaze
             self.task_cfg.state_key: deque(maxlen=obs_queue_size),
-            **{key: deque(maxlen=obs_queue_size) for key in self.task_cfg.image_keys},
+            self.task_cfg.action_key: deque(maxlen=self.cfg.n_action_steps),
         }
-        self.action_temporal_ensembler.reset()        
-        self.gaze_temporal_ensembler.reset()
+        self._act_queues = {
+            **{key: deque(maxlen=self.cfg.n_action_steps) for key in self.cfg.image_to_gaze_key.values()}, # gaze
+            self.task_cfg.action_key: deque(maxlen=self.cfg.n_action_steps),
+        }
+        if self.cfg.use_temporal_ensemble:
+            self.temporal_ensembler.reset()   
 
     @torch.no_grad()
     def select_action(self, batch: dict[str, Tensor], return_viz: bool = False) -> Tensor:
         self.eval()
-        assert self.task_cfg.state_key in batch, f"Missing {self.task_cfg.state_key} in batch"
-        assert all(key in batch for key in self.task_cfg.image_keys), f"Missing {self.task_cfg.image_keys} in batch"
-        self._queues = populate_queues(self._queues, batch)
+        self._obs_queue = populate_queues(self._obs_queue, batch)
 
-        # if not full action history fill with padding
-        obs_max_len = self._queues["action_history"].maxlen
-        if len(self._queues["action_history"]) < obs_max_len:
-            batch_size = batch[self.task_cfg.state_key].shape[0]
-            self._queues["action_history"].extend(
-                [self.action_history_padding.unsqueeze(0).expand(batch_size, -1)] * obs_max_len
-            )
+        if len(self._obs_queue[self.task_cfg.action_key]) == 0:
+            state = batch[self.task_cfg.state_key]
+            state_queue = self._obs_queue[self.task_cfg.state_key]
+            maxlen = state_queue.maxlen
+            device = state.device
+            dtype = state.dtype
+            batch_size = state.shape[0]
+            self._obs_queue[self.task_cfg.action_key].extend([state] * maxlen)
+            gaze_padding = torch.zeros((batch_size, 2), dtype=dtype, device=device)
+            for gaze_key in self.cfg.image_to_gaze_key.values():
+                self._obs_queue[gaze_key].extend([gaze_padding] * maxlen)
 
         viz = {}
-        if len(self._queues[self.task_cfg.action_key]) == 0:
+        if len(self._act_queues[self.task_cfg.action_key]) == 0:
             batch = {
-                k: torch.stack(list(self._queues[k])[::self.cfg.obs_step_size], dim=1) 
-                for k in self.task_cfg.image_keys + [self.task_cfg.state_key, "action_history"]
+                k: torch.stack(list(v)[::self.cfg.obs_step_size], dim=1) 
+                for k, v in self._obs_queue.items()
             }
             batch = self.normalize_inputs(batch)
-            actions, viz = self.flow.generate_actions(batch)
-            actions = self.unnormalize_outputs({self.task_cfg.action_key: actions})[self.task_cfg.action_key]
-            weighted_actions = self.action_temporal_ensembler.update(
-                actions[:, :, :self.task_cfg.action_dim],
-                n=self.cfg.n_action_steps
-            )
-            if len(self.cfg.image_to_gaze_key) > 0:
-                weighted_actions = torch.cat(
-                    [
-                        weighted_actions,
-                        self.gaze_temporal_ensembler.update(
-                            actions[:,:, self.task_cfg.action_dim:],
-                            n=self.cfg.n_action_steps
-                        )
-                    ], 
-                    dim=-1
-                )
-            self._queues[self.task_cfg.action_key].extend(weighted_actions.transpose(0, 1))
+            outputs, viz = self.flow.generate_actions(batch)
+            outputs = self.unnormalize_outputs(outputs)
 
-        action = self._queues[self.task_cfg.action_key].popleft()
-        self._queues["action_history"].append(action)
-        
-        action = action[:, :self.task_cfg.action_dim] # remove gaze from action
+            if self.cfg.use_temporal_ensemble:
+                outputs = self.temporal_ensembler.update(outputs, n=self.cfg.n_action_steps)
+            else:
+                outputs = {k: v[:, :self.cfg.n_action_steps] for k, v in outputs.items()}
+
+            for key in outputs:
+                self._act_queues[key].extend(outputs[key].transpose(0, 1))
+
+        for key in self._act_queues:
+            if len(self._act_queues[key]) > 0:
+                item = self._act_queues[key].popleft()
+                self._obs_queue[key].append(item)
+        action = self._obs_queue[self.task_cfg.action_key][-1]  # Get the last action from the queue
 
         if return_viz: return action, viz
         return action
 
-    @torch.no_grad()
-    def get_action(self, batch: dict[str, Tensor]) -> Tensor:
-        batch = self.normalize_inputs(batch)
-        actions, viz = self.flow.generate_actions(batch)
-        actions = self.unnormalize_outputs({self.task_cfg.action_key: actions})[self.task_cfg.action_key]
-        return actions, viz
-
     def forward(self, batch: dict[str, Tensor]) -> tuple[Tensor, None]:
-        # add gazes to action history
-        batch[self.task_cfg.action_key] = torch.cat(
-            [
-                batch[self.task_cfg.action_key],
-                *[batch[key] for key in self.cfg.image_to_gaze_key.values()]
-            ],
-            dim=-1
-        )
-        assert batch[self.task_cfg.action_key].shape[-1] == self.action_dim
-
-        # extract action history
-        batch["action_history"] = batch[self.task_cfg.action_key][:, :self.cfg.n_obs_steps]
-        batch[self.task_cfg.action_key] = batch[self.task_cfg.action_key][:, self.cfg.n_obs_steps:]
-
-        # convert padded history to zeros
-        outside_episode_bound = batch[self.task_cfg.state_key + "_is_pad"]
-        batch["action_history"][outside_episode_bound] = self.action_history_padding
-
         batch = self.normalize_inputs(batch)
-        batch = self.normalize_targets(batch)
+
+        # pad gaze obs with zeros
+        for gaze_key in self.cfg.image_to_gaze_key.values():
+            is_pad = batch[gaze_key + "_is_pad"][:, :self.cfg.n_obs_steps]
+            batch[gaze_key][:, :self.cfg.n_obs_steps][is_pad] = 0.0
+        
+        # pad action obs with state TODO not sure this is correct
+        is_pad = batch[self.task_cfg.action_key + "_is_pad"][:, :self.cfg.n_obs_steps]
+        state_pad = batch[self.task_cfg.state_key][:, :self.cfg.n_obs_steps][is_pad]
+        batch[self.task_cfg.action_key][:, :self.cfg.n_obs_steps][is_pad] = state_pad
 
         loss, loss_dict = self.flow.compute_loss(batch)
         return loss, loss_dict
-    
-def _make_flow_matcher(name: str, **kwargs: dict) -> cfm.ConditionalFlowMatcher:
-    if name == "conditional":
-        return cfm.ConditionalFlowMatcher(**kwargs)
-    elif name == "target":
-        return cfm.TargetConditionalFlowMatcher(**kwargs)
-    else:
-        raise ValueError(f"Unsupported flow matcher type {name}")
-        
+       
 class FlowModel(nn.Module):
     def __init__(self, policy_cfg: GazePolicyConfig, task_cfg: TaskConfig):
         super().__init__()
         self.cfg = policy_cfg
         self.task_cfg = task_cfg
-        self.action_dim = task_cfg.action_dim + len(policy_cfg.image_to_gaze_key)*2
 
-        self.flow_matcher = _make_flow_matcher(
-            policy_cfg.flow_matcher,
-            **policy_cfg.flow_matcher_kwargs,
+        self.target_keys_to_dim = {
+            task_cfg.action_key: task_cfg.action_dim,
+            **{k: 2 for k in policy_cfg.image_to_gaze_key.values() if policy_cfg.use_gaze},
+        }
+        self.state_proj = nn.Sequential(
+            nn.Dropout(policy_cfg.dropout),
+            nn.Linear(task_cfg.state_dim, policy_cfg.dim_model),
         )
-
-        # observation processing
-        
-        self.resize = Resize(policy_cfg.resize_shape)
-        self.input_resize = Resize(policy_cfg.input_shape)
-        self.dino_periph = DINO(6)
-        self.dino_foveal = DINO(6)
-        self.dino_embed = nn.Linear(self.dino_periph.embed_dim, policy_cfg.dim_model)
-        self.gaze_embed = nn.Linear(2, policy_cfg.dim_model)
-        self.state_embed = nn.Linear(task_cfg.state_dim, policy_cfg.dim_model)
-        self.state_dropout = nn.Dropout(policy_cfg.proprio_dropout)
-        self.action_history_embed = nn.Linear(self.action_dim, policy_cfg.dim_model)
-        self.action_history_dropout = nn.Dropout(policy_cfg.proprio_dropout)
-
-        self.attn_pooling = AttentionPooling(
+        self.action_history_proj = nn.Sequential(
+            nn.Dropout(policy_cfg.dropout),
+            nn.Linear(task_cfg.action_dim, policy_cfg.dim_model),
+        )
+        self.gaze_proj = nn.Linear(2, policy_cfg.dim_model)
+        self.dino_periph = DINO(num_freeze_layers=policy_cfg.freeze_n_layers)
+        self.dino_periph_proj = nn.Linear(self.dino_periph.embed_dim, policy_cfg.dim_model)
+        self.periph_feat_shape = (
+            policy_cfg.periph_shape[0] // self.dino_periph.patch_size,
+            policy_cfg.periph_shape[1] // self.dino_periph.patch_size,
+        )
+        self.dino_foveal = DINO(num_freeze_layers=policy_cfg.freeze_n_layers)
+        self.dino_foveal_proj = nn.Linear(self.dino_foveal.embed_dim, policy_cfg.dim_model)
+        self.foveal_feat_shape = (
+            policy_cfg.foveal_shape[0] // self.dino_foveal.patch_size,  
+            policy_cfg.foveal_shape[1] // self.dino_foveal.patch_size,
+        )
+        self.pool = AttentionPooling(
             hidden_size=policy_cfg.dim_model,
-            num_queries=self.cfg.attn_pooling_n_queries,
-            depth=self.cfg.attn_pooling_n_layers,
-            num_heads= self.cfg.n_heads,
-            mlp_ratio= policy_cfg.mlp_ratio,
-            dropout= policy_cfg.dropout,
-        ) 
-
-        self.DiT = DiT(
-            in_dim=self.action_dim,
-            out_dim=self.action_dim,
-            hidden_size=policy_cfg.dim_model,
-            depth=policy_cfg.n_decoder_layers,
+            num_queries=policy_cfg.pool_n_queries,
+            depth=policy_cfg.pool_n_layers,
             num_heads=policy_cfg.n_heads,
             mlp_ratio=policy_cfg.mlp_ratio,
             dropout=policy_cfg.dropout,
-            time_dim=policy_cfg.time_dim,
+        ) 
+
+        # Encoder for the diffusion timestep.
+        self.noise_dim = sum(self.target_keys_to_dim.values())
+        self.noise_proj = nn.Linear(self.noise_dim, policy_cfg.dim_model)
+        self.time_embed = nn.Sequential(
+            SinusoidalPosEmb(policy_cfg.dit_time_dim),
+            nn.Linear(policy_cfg.dit_time_dim, policy_cfg.dit_time_dim * 4),
+            nn.Mish(),
+            nn.Linear(policy_cfg.dit_time_dim * 4, policy_cfg.dim_model),
         )
-        self.register_buffer(
-            "dit_x_pos_embed", 
-            get_1d_rotary_embed(policy_cfg.dim_model // policy_cfg.n_heads, torch.arange(policy_cfg.horizon))
+        self.DiT = DiT(
+            out_dim=self.noise_dim,
+            hidden_size=policy_cfg.dim_model,
+            depth=policy_cfg.dit_n_layers,
+            num_heads=policy_cfg.n_heads,
+            mlp_ratio=policy_cfg.mlp_ratio,
+            dropout=policy_cfg.dropout,
         )
-        self.register_buffer(
-            "dit_c_pos_embed",
-            get_1d_rotary_embed(policy_cfg.dim_model // policy_cfg.n_heads, torch.arange(policy_cfg.attn_pooling_n_queries))
+        self.dit_pos_embed = nn.Embedding(policy_cfg.horizon, policy_cfg.dim_model)
+
+    def sample_noise(self, shape, device):
+        noise = torch.normal(
+            mean=0.0,
+            std=1.0,
+            size=shape,
+            dtype=torch.float32,
+            device=device,
         )
+        return noise
+
+    def sample_time(self, bsize, device):
+        time_beta = sample_beta(1.5, 1.0, bsize, device)
+        time = time_beta * 0.999 + 0.001
+        return time.to(dtype=torch.float32, device=device)
 
     def prepare_global_conditioning(self, batch: dict[str, Tensor]) -> tuple[Tensor, dict]:
         viz = {}
-        cond = []
-        batch = dict(batch)  # make a copy to avoid modifying the original batch
-
-        # hacky extract gaze data from action history
-        gaze_data = torch.split(
-            batch["action_history"],
-            [self.task_cfg.action_dim] + [2] * len(self.cfg.image_to_gaze_key),
-            dim=-1
-        )[1:]
-        for gaze_key, gaze in zip(self.cfg.image_to_gaze_key.values(), gaze_data):
-            if self.training:
-                batch[gaze_key] = gaze + torch.randn_like(gaze) * self.cfg.gaze_noise_factor  # add noise
-            else:
-                batch[gaze_key] = gaze
-
-        # process images
         tokens = []
         pos_embed = []
-        for image_key in self.task_cfg.image_keys:
-            # resize images
-            images = batch[image_key]  # (B, S, C, H, W)
-            batch_size = images.shape[0]
-            images = einops.rearrange(images, 'b s c h w -> (b s) c h w')
-            images = self.resize(images)  # (B, S, C, H, W)
-            images = self.input_resize(images)  # (B, S, C, H, W)
-            images = einops.rearrange(images, '(b s) c h w -> b s c h w', b=batch_size)
+        batch = dict(batch)  
 
-            # peripheral processing
-            peripheral = einops.rearrange(images, 'b s c h w -> (b s) c h w')
-            peripheral_feat = self.dino_periph(peripheral)
-            peripheral_feat = einops.rearrange(peripheral_feat, '(b s) l d -> b (s l) d', b=batch_size)
-            tokens.append(self.dino_embed(peripheral_feat))  # (B, S, D)
-            pos_embed.append(
-                get_foveated_pos_embed(
-                    gaze=torch.zeros((batch_size, self.cfg.n_obs_steps, 2), device=peripheral_feat.device),  # centered for peripheral
-                    image_shape=self.cfg.input_shape,
-                    crop_shape=self.cfg.input_shape,
-                    feat_shape=(int(self.cfg.input_shape[0] / self.dino_periph.patch_size), int(self.cfg.input_shape[1] / self.dino_periph.patch_size)),
-                    n_obs_steps=self.cfg.n_obs_steps,
-                    dim=self.cfg.dim_model // self.cfg.n_heads,
-                )
-            )
-            if not self.training:
-                viz[image_key] = peripheral
-
-            # crop processing
-            if image_key in self.cfg.image_to_gaze_key:
-                gaze_key = self.cfg.image_to_gaze_key[image_key]
-                foveal = crop_at_center(
-                    images=einops.rearrange(images, 'b s c h w -> (b s) c h w'), 
-                    centers=einops.rearrange(batch[gaze_key], "b s c -> (b s) c"), 
-                    crop_shape=self.cfg.foveal_shape, 
-                    out_shape=self.cfg.input_shape,
-                )
-                foveal_feat = self.dino_foveal(foveal)  # (B*S, L, D)
-                foveal_feat = einops.rearrange(foveal_feat, '(b s) l d -> b (s l) d', b=batch_size)
-                tokens.append(self.dino_embed(foveal_feat))  # (B, S, D)
-                pos_embed.append(
-                    get_foveated_pos_embed(
-                        gaze=batch[gaze_key], 
-                        image_shape=self.cfg.input_shape,
-                        crop_shape=self.cfg.foveal_shape,
-                        feat_shape=(int(self.cfg.input_shape[0] / self.dino_foveal.patch_size), int(self.cfg.input_shape[1] / self.dino_foveal.patch_size)),
-                        n_obs_steps=self.cfg.n_obs_steps,
-                        dim=self.cfg.dim_model // self.cfg.n_heads,
-                    )
-                )
-                tokens.append(
-                    self.gaze_embed(batch[gaze_key])  # (B, S, D)
-                )
-                pos_embed.append(
-                    get_foveated_pos_embed(
-                        gaze=batch[gaze_key], 
-                        image_shape=self.cfg.resize_shape,
-                        crop_shape=self.cfg.foveal_shape,
-                        feat_shape=(1,1),
-                        n_obs_steps=self.cfg.n_obs_steps,
-                        dim=self.cfg.dim_model // self.cfg.n_heads,
-                    )
-                )
-                if not self.training:
-                    viz[gaze_key] = foveal
-
+        # load image and resize to input shape
+        img = torch.stack([batch[key] for key in self.cfg.image_to_gaze_key.keys()], dim=2)
+        b, s, n = img.shape[:3]
+        img = einops.rearrange(img, 'b s n c h w -> (b s n) c h w')  
+        img = Resize(self.cfg.input_shape)(img)  
+        
+        # peripheral vision
+        centers = torch.zeros((b*s*n, 2), dtype=img.dtype, device=img.device)
+        periph, centers = random_crop(
+            images=img, 
+            crop_scale=self.cfg.periph_crop_scale, 
+            kp=centers, 
+            out_shape=self.cfg.periph_shape,
+            random=self.training,
+        )
+        if not self.training:
+            viz["periphal"] = periph
         tokens.append(
-            self.state_embed(self.state_dropout(
-                batch[self.task_cfg.state_key] 
-            ))
+            einops.rearrange(
+                self.dino_periph_proj(self.dino_periph(periph)), 
+                '(b s n) l d -> b (s n l) d',
+                b=b, s=s, n=n, l=self.periph_feat_shape[0] * self.periph_feat_shape[1]
+            ) 
         )
         pos_embed.append(
             get_foveated_pos_embed(
-                gaze=torch.zeros((batch_size, self.cfg.n_obs_steps, 2), device=batch[self.task_cfg.state_key].device),  # centered for state
-                image_shape=self.cfg.resize_shape,
-                crop_shape=self.cfg.resize_shape,
-                feat_shape=(1,1),
-                n_obs_steps=self.cfg.n_obs_steps,
-                dim=self.cfg.dim_model // self.cfg.n_heads,
+                centers=einops.rearrange(centers, '(b s n) c -> b s n c', b=b, s=s, n=n),
+                grid_shape=self.cfg.input_shape,
+                crop_scale=self.cfg.periph_crop_scale,
+                feat_shape=self.periph_feat_shape,
+                dim=self.cfg.dim_model // self.cfg.n_heads,  
+            )  
+        ) 
+
+        # foveal vision
+        if self.cfg.use_gaze:
+            gaze = torch.stack([batch[key] for key in self.cfg.image_to_gaze_key.values()], dim=2)
+            gaze = einops.rearrange(gaze, 'b s n c -> (b s n) c') 
+            if self.training:
+                gaze = gaze + torch.randn_like(gaze) * self.cfg.gaze_noise
+            foveal = crop_at_kp(
+                images=img, 
+                crop_scale=self.cfg.foveal_crop_scale,
+                kp=gaze,
+                out_shape=self.cfg.foveal_shape,
             )
-        )
-        if self.cfg.use_action_history:
+            if not self.training:
+                viz["foveal"] = foveal
+
             tokens.append(
-                self.action_history_embed(self.action_history_dropout(
-                    batch["action_history"]
-                ))  # (B, S, D)
+                einops.rearrange(
+                    self.dino_foveal_proj(self.dino_foveal(foveal)), 
+                    '(b s n) l d -> b (s n l) d',   
+                    b=b, s=s, n=n, l=self.foveal_feat_shape[0] * self.foveal_feat_shape[1] 
+                )
             )
             pos_embed.append(
                 get_foveated_pos_embed(
-                    gaze=torch.zeros((batch_size, self.cfg.n_obs_steps, 2), device=batch["action_history"].device),  # centered for action history
-                    image_shape=self.cfg.resize_shape,
-                    crop_shape=self.cfg.resize_shape,
-                    feat_shape=(1,1),
-                    n_obs_steps=self.cfg.n_obs_steps,
-                    dim=self.cfg.dim_model // self.cfg.n_heads,
-                )
+                    centers=einops.rearrange(gaze, '(b s n) c -> b s n c', b=b, s=s, n=n),
+                    grid_shape=self.cfg.input_shape,
+                    crop_scale=self.cfg.foveal_crop_scale,
+                    feat_shape=self.foveal_feat_shape,
+                    dim=self.cfg.dim_model // self.cfg.n_heads,  # dim per head
+                )  # (B, S*N, D)
+            )
+            tokens.append(
+                einops.rearrange(
+                    self.gaze_proj(gaze),  # send in the gaze (frame of ref of robot camera)
+                    '(b s n) d -> b (s n) d',
+                    b=b, s=s, n=n
+                )  
+            )
+            pos_embed.append(
+                get_foveated_pos_embed(
+                    centers=einops.rearrange(gaze, '(b s n) c -> b s n c', b=b, s=s, n=n),
+                    grid_shape=self.cfg.input_shape,
+                    crop_scale=1.0,
+                    feat_shape=(1, 1),
+                    dim=self.cfg.dim_model // self.cfg.n_heads,  # dim per head
+                )  # (B, S*N, D)
             )
 
+        # add state tokens 
+        tokens.append(
+            einops.rearrange(
+                self.state_proj(
+                    batch[self.task_cfg.state_key]
+                ).unsqueeze(2).expand(-1, -1, n, -1),  # (B, S, D) -> (B, S, N, D)
+                'b s n d -> b (s n) d',
+                b=b, s=s, n=n
+            )  
+        )
+        pos_embed.append(
+            get_foveated_pos_embed(
+                centers=torch.zeros((b, s, n, 2), dtype=img.dtype, device=img.device),  # dummy centers
+                grid_shape=self.cfg.input_shape,
+                crop_scale=1.0,
+                feat_shape=(1, 1),
+                dim=self.cfg.dim_model // self.cfg.n_heads,  # dim per head
+            )  # (B, S*N, D)
+        )
+        tokens = torch.cat(tokens, dim=1) 
+        pos_embed = torch.cat(pos_embed, dim=1).unsqueeze(1)  # (B, 1, L, D//n_heads)
 
-
-        tokens = torch.cat(tokens, dim=1)  # (B, S, D)
-        pos_embed = torch.cat(pos_embed, dim=1).unsqueeze(1)  # (B, 1, S, D//n_heads)
-        # tokens = self.transformer_encoder(tokens, pos_embed)  # (B, S, D)
-        cond = self.attn_pooling(tokens, pos_embed)
-
-
-        # cond = torch.cat([
-        #     cond,
-        #     self.state_dropout(batch[self.task_cfg.state_key].flatten(start_dim=1)),  # (B, S, D)
-        #     torch.cat([batch[key].flatten(start_dim=1) for key in self.cfg.image_to_gaze_key.values()], dim=-1)
-        # ], dim=-1)  # (B, S, D + state_dim + gaze_dim)
-
+        cond = self.pool(tokens, pos_embed)
         return cond, viz
+    
+    def predict_velocity(self, noise: Tensor, global_cond: Tensor, timestep: Tensor,) -> Tensor:
+        x = self.noise_proj(noise) + self.dit_pos_embed.weight.unsqueeze(0)
+        t = self.time_embed(timestep)
+        return self.DiT(x=x, c=global_cond, t=t)
 
     # ========= inference  ============
     def conditional_sample(
         self, batch_size: int, global_cond: Tensor | None = None
     ) -> Tensor:
         device = get_device_from_parameters(self)
-        dtype = get_dtype_from_parameters(self)
 
-        num_steps = self.cfg.n_sampling_steps
-        shape = (batch_size, self.cfg.horizon, self.action_dim)
-        x = torch.randn(shape, device=device, dtype=dtype)
-        dt = 1.0 / num_steps
+        actions_shape = (batch_size, self.cfg.horizon, self.noise_dim)
+        noise = self.sample_noise(actions_shape, device=device)
 
-        for n in range(num_steps):
-            timestep = n * dt * torch.ones(x.shape[0], device=x.device)
-            vt = self.DiT(x=x, timestep=timestep, cond=global_cond, x_pos_embed=self.dit_x_pos_embed, c_pos_embed=self.dit_c_pos_embed)
-            x = x + vt * dt
+        dt = -1.0 / self.cfg.n_sampling_steps
+        dt = torch.tensor(dt, dtype=torch.float32, device=device)
 
-        return x
+        xt = noise
+        time = torch.tensor(1.0, dtype=torch.float32, device=device)
+        while time >= -dt / 2:
+            vt = self.predict_velocity(noise=xt, global_cond=global_cond, timestep=time.expand(batch_size))
+            # Euler step
+            xt += dt * vt
+            time += dt
+        return xt
 
     def generate_actions(self, batch: dict[str, Tensor]) -> Tensor:
         batch_size = batch[self.task_cfg.state_key].shape[0]
         global_cond, viz = self.prepare_global_conditioning(batch) 
-        actions = self.conditional_sample(batch_size, global_cond=global_cond)
-        return actions, viz
+        sample = self.conditional_sample(batch_size, global_cond=global_cond)
+        outputs = {
+            k: v
+            for k, v in zip(
+                self.target_keys_to_dim.keys(),
+                torch.split(sample, list(self.target_keys_to_dim.values()), dim=-1),
+            )
+        }
+        return outputs, viz
 
     def compute_loss(self, batch: dict[str, Tensor]) -> Tensor:
+        batch = dict(batch)  
+
+        x1 = []
+        for key in self.target_keys_to_dim:
+            x1.append(batch[key][:, self.cfg.n_obs_steps:])
+            batch[key] = batch[key][:, :self.cfg.n_obs_steps]
+        x1 = torch.cat(x1, dim=-1)
+
         global_cond, _ = self.prepare_global_conditioning(batch) 
-        x0 = torch.randn_like(batch[self.task_cfg.action_key]) 
-        timestep, xt, ut = self.flow_matcher.sample_location_and_conditional_flow(x0, batch[self.task_cfg.action_key])
-        vt = self.DiT(x=xt, timestep=timestep, cond=global_cond, x_pos_embed=self.dit_x_pos_embed, c_pos_embed=self.dit_c_pos_embed)
+
+        noise = self.sample_noise(x1.shape, x1.device)
+        time = self.sample_time(x1.shape[0], x1.device)
+        time_expanded = time[:, None, None]
+        xt = time_expanded * noise + (1 - time_expanded) * x1
+        ut = noise - x1
+
+        vt = self.predict_velocity(noise=xt, global_cond=global_cond, timestep=time)
         flow_matching_loss = F.mse_loss(vt, ut, reduction="none").mean()
         loss = flow_matching_loss
         loss_dict = {
             "flow_matching_loss": flow_matching_loss.item(),
         }
         return loss, loss_dict
+    
+class SinusoidalPosEmb(nn.Module):
+    """1D sinusoidal positional embeddings as in Attention is All You Need."""
+
+    def __init__(self, dim: int):
+        super().__init__()
+        self.dim = dim
+
+    def forward(self, x: Tensor) -> Tensor:
+        device = x.device
+        half_dim = self.dim // 2
+        emb = math.log(10000) / (half_dim - 1)
+        emb = torch.exp(torch.arange(half_dim, device=device) * -emb)
+        emb = x.unsqueeze(-1) * emb.unsqueeze(0)
+        emb = torch.cat((emb.sin(), emb.cos()), dim=-1)
+        return emb
 
 class TemporalEnsembler:
     def __init__(self, temporal_ensemble_coeff: float, chunk_size: int) -> None:
@@ -512,6 +499,7 @@ class TemporalEnsembler:
         self.chunk_size = chunk_size
         self.ensemble_weights = torch.exp(-temporal_ensemble_coeff * torch.arange(chunk_size))
         self.ensemble_weights_cumsum = torch.cumsum(self.ensemble_weights, dim=0)
+        self.keys_to_dim = None
         self.reset()
 
     def reset(self):
@@ -520,11 +508,14 @@ class TemporalEnsembler:
         # (chunk_size,) count of how many actions are in the ensemble for each time step in the sequence.
         self.ensembled_actions_count = None
 
-    def update(self, actions: Tensor, n: int  = 1) -> Tensor:
+    def update(self, outputs: dict[str, Tensor], n: int  = 1) -> Tensor:
         """
-        Takes a (batch, chunk_size, action_dim) sequence of actions, update the temporal ensemble for all
-        time steps, and pop/return the next batch of actions in the sequence.
+        Args:
+            outputs (Tensor): A dictionary of actions
         """
+        if self.keys_to_dim is None: self.keys_to_dim = {k: v.shape[-1] for k, v in outputs.items()}
+        actions = torch.cat([outputs[k] for k in self.keys_to_dim], dim=-1)
+
         assert n <= self.chunk_size, "n must be less than or equal to chunk_size."
         self.ensemble_weights = self.ensemble_weights.to(device=actions.device)
         self.ensemble_weights_cumsum = self.ensemble_weights_cumsum.to(device=actions.device)
@@ -555,25 +546,11 @@ class TemporalEnsembler:
             self.ensembled_actions[:, n:],
             self.ensembled_actions_count[n:],
         )
-        return action
-    
-def crop_at_center(images: Tensor, centers: Tensor, crop_shape: tuple, out_shape: tuple | None = None) -> Tensor:
-    # crop the images around the predicted gaze
-    if out_shape is None:
-        out_shape = crop_shape
-    boxes = torch.zeros(centers.shape[0], 5, device=centers.device)
-    h, w = images.shape[-2:]
-    new_h, new_w = crop_shape
-    eye_pixel_x = ((centers[:, 0] + 1) / 2) * w
-    eye_pixel_y = ((centers[:, 1] + 1) / 2) * h
-    boxes[:, 0] = torch.arange(centers.shape[0], device=centers.device)
-    boxes[:, 1] = eye_pixel_x - new_w / 2
-    boxes[:, 2] = eye_pixel_y - new_h / 2
-    boxes[:, 3] = eye_pixel_x + new_w / 2
-    boxes[:, 4] = eye_pixel_y + new_h / 2     
-    images = roi_align(
-        images,
-        boxes,
-        output_size=out_shape,
-    )   
-    return images
+
+        return {
+            k: v 
+            for k, v in zip(
+                self.keys_to_dim.keys(), 
+                torch.split(action, list(self.keys_to_dim.values()), dim=-1)
+            )
+        }
