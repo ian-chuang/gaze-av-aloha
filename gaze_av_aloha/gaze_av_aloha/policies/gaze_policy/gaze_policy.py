@@ -333,6 +333,26 @@ class FlowModel(nn.Module):
             )  
         ) 
 
+        # state
+        tokens.append(
+            einops.rearrange(
+                self.state_proj(
+                    batch[self.task_cfg.state_key]
+                ).unsqueeze(2).expand(-1, -1, n, -1),  # (B, S, D) -> (B, S, N, D)
+                'b s n d -> b (s n) d',
+                b=b, s=s, n=n
+            )  
+        )
+        pos_embed.append(
+            get_foveated_pos_embed(
+                centers=einops.rearrange(centers, '(b s n) c -> b s n c', b=b, s=s, n=n),
+                grid_shape=self.cfg.input_shape,
+                crop_scale=1.0,
+                feat_shape=(1, 1),
+                dim=self.cfg.dim_model // self.cfg.n_heads,  # dim per head
+            )  # (B, S*N, D)
+        )
+
         # foveal vision
         if self.cfg.use_gaze:
             gaze = torch.stack([batch[key] for key in self.cfg.image_to_gaze_key.values()], dim=2)
@@ -381,25 +401,6 @@ class FlowModel(nn.Module):
                 )  # (B, S*N, D)
             )
 
-        # add state tokens 
-        tokens.append(
-            einops.rearrange(
-                self.state_proj(
-                    batch[self.task_cfg.state_key]
-                ).unsqueeze(2).expand(-1, -1, n, -1),  # (B, S, D) -> (B, S, N, D)
-                'b s n d -> b (s n) d',
-                b=b, s=s, n=n
-            )  
-        )
-        pos_embed.append(
-            get_foveated_pos_embed(
-                centers=torch.zeros((b, s, n, 2), dtype=img.dtype, device=img.device),  # dummy centers
-                grid_shape=self.cfg.input_shape,
-                crop_scale=1.0,
-                feat_shape=(1, 1),
-                dim=self.cfg.dim_model // self.cfg.n_heads,  # dim per head
-            )  # (B, S*N, D)
-        )
         tokens = torch.cat(tokens, dim=1) 
         pos_embed = torch.cat(pos_embed, dim=1).unsqueeze(1)  # (B, 1, L, D//n_heads)
 
