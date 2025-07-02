@@ -5,7 +5,7 @@ type: gaze_policy
 
 n_obs_steps: 3
 obs_step_size: 1
-obs_steps_dropout: 0.0
+obs_steps_dropout: 0.1
 
 use_last_periph_only: true
 input_shape: [240, 320]
