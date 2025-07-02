@@ -357,7 +357,7 @@ class FlowModel(nn.Module):
         )
         pos_embed.append(
             get_foveated_pos_embed(
-                centers=einops.rearrange(centers, '(b s n) c -> b s n c', b=b, s=s, n=n),
+                centers=torch.zeros((b, s, n, 2), dtype=img.dtype, device=img.device),
                 grid_shape=self.cfg.input_shape,
                 crop_scale=1.0,
                 feat_shape=(1, 1),
@@ -405,7 +405,7 @@ class FlowModel(nn.Module):
             )
             pos_embed.append(
                 get_foveated_pos_embed(
-                    centers=einops.rearrange(gaze, '(b s n) c -> b s n c', b=b, s=s, n=n),
+                    centers=torch.zeros((b, s, n, 2), dtype=img.dtype, device=img.device),
                     grid_shape=self.cfg.input_shape,
                     crop_scale=1.0,
                     feat_shape=(1, 1),
