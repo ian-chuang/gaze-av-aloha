@@ -20,7 +20,9 @@ class GazePolicyConfig(PolicyConfig):
     image_to_gaze_key: dict[str, str] = field(default_factory=lambda: {})
     input_shape: tuple = (240, 320)
     freeze_n_layers: int = 6
+    obs_steps_dropout: float = 0.0
 
+    use_last_periph_only: bool = True
     periph_shape: tuple = (70, 70)
     periph_crop_scale: float = 0.95
     foveal_shape: tuple = (70, 70)

@@ -208,7 +208,7 @@ class GazePolicy(Policy):
 
         # pad gaze obs with zeros
         for gaze_key in self.cfg.image_to_gaze_key.values():
-            is_pad = batch[gaze_key + "_is_pad"][:, :self.cfg.n_obs_steps]
+            is_pad = batch[self.task_cfg.action_key + "_is_pad"][:, :self.cfg.n_obs_steps] # use action key since it is 1 behind
             batch[gaze_key][:, :self.cfg.n_obs_steps][is_pad] = 0.0
         
         # pad action obs with state TODO not sure this is correct
@@ -304,11 +304,27 @@ class FlowModel(nn.Module):
         b, s, n = img.shape[:3]
         img = einops.rearrange(img, 'b s n c h w -> (b s n) c h w')  
         img = Resize(self.cfg.input_shape)(img)  
+
+        # Create dropout mask of shape (B, L, 1), broadcasted along D
+        mask = torch.rand(b, s, device=img.device) >= self.cfg.obs_steps_dropout
+        mask = mask.type_as(img).unsqueeze(-1).unsqueeze(-1)  # shape: (B, L, 1, 1)
+
         
         # peripheral vision
-        centers = torch.zeros((b*s*n, 2), dtype=img.dtype, device=img.device)
+        if self.cfg.use_last_periph_only:
+            periph = einops.rearrange(
+                img,'(b s n) c h w -> b s n c h w', b=b, s=s, n=n
+            )[:, -1:].flatten(start_dim=0, end_dim=2) # (b*s*n, c, h, w)
+            s_periph = 1
+            mask_periph = mask[:, -1:]
+        else:
+            periph = img
+            s_periph = s
+            mask_periph = mask
+
+        centers = torch.zeros((b*s_periph*n, 2), dtype=img.dtype, device=img.device)
         periph, centers = random_crop(
-            images=img, 
+            images=periph, 
             crop_scale=self.cfg.periph_crop_scale, 
             kp=centers, 
             out_shape=self.cfg.periph_shape,
@@ -319,29 +335,25 @@ class FlowModel(nn.Module):
         tokens.append(
             einops.rearrange(
                 self.dino_periph_proj(self.dino_periph(periph)), 
-                '(b s n) l d -> b (s n l) d',
-                b=b, s=s, n=n, l=self.periph_feat_shape[0] * self.periph_feat_shape[1]
-            ) 
+                '(b s n) l d -> b s (n l) d',
+                b=b, s=s_periph, n=n, l=self.periph_feat_shape[0] * self.periph_feat_shape[1]
+            ) * mask_periph
         )
         pos_embed.append(
             get_foveated_pos_embed(
-                centers=einops.rearrange(centers, '(b s n) c -> b s n c', b=b, s=s, n=n),
+                centers=einops.rearrange(centers, '(b s n) c -> b s n c', b=b, s=s_periph, n=n),
                 grid_shape=self.cfg.input_shape,
                 crop_scale=self.cfg.periph_crop_scale,
                 feat_shape=self.periph_feat_shape,
                 dim=self.cfg.dim_model // self.cfg.n_heads,  
-            )  
-        ) 
+            ) 
+        )
 
         # state
         tokens.append(
-            einops.rearrange(
-                self.state_proj(
-                    batch[self.task_cfg.state_key]
-                ).unsqueeze(2).expand(-1, -1, n, -1),  # (B, S, D) -> (B, S, N, D)
-                'b s n d -> b (s n) d',
-                b=b, s=s, n=n
-            )  
+            self.state_proj(
+                batch[self.task_cfg.state_key]
+            ).unsqueeze(2).expand(-1, -1, n, -1) * mask   # (B, S, D) -> (B, S, N, D)
         )
         pos_embed.append(
             get_foveated_pos_embed(
@@ -371,9 +383,9 @@ class FlowModel(nn.Module):
             tokens.append(
                 einops.rearrange(
                     self.dino_foveal_proj(self.dino_foveal(foveal)), 
-                    '(b s n) l d -> b (s n l) d',   
+                    '(b s n) l d -> b s (n l) d',   
                     b=b, s=s, n=n, l=self.foveal_feat_shape[0] * self.foveal_feat_shape[1] 
-                )
+                ) * mask
             )
             pos_embed.append(
                 get_foveated_pos_embed(
@@ -387,9 +399,9 @@ class FlowModel(nn.Module):
             tokens.append(
                 einops.rearrange(
                     self.gaze_proj(gaze),  # send in the gaze (frame of ref of robot camera)
-                    '(b s n) d -> b (s n) d',
+                    '(b s n) d -> b s n d',
                     b=b, s=s, n=n
-                )  
+                )  * mask
             )
             pos_embed.append(
                 get_foveated_pos_embed(
@@ -401,7 +413,9 @@ class FlowModel(nn.Module):
                 )  # (B, S*N, D)
             )
 
-        tokens = torch.cat(tokens, dim=1) 
+        tokens = torch.cat([
+            einops.rearrange(t, 'b s n d -> b (s n) d') for t in tokens
+        ], dim=1)  # (B, L, D)
         pos_embed = torch.cat(pos_embed, dim=1).unsqueeze(1)  # (B, 1, L, D//n_heads)
 
         cond = self.pool(tokens, pos_embed)
