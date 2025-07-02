@@ -3,7 +3,7 @@ defaults:
 
 # WandB settings
 enable: true
-project: whole_body_gaze
+project: gaze-av-aloha-final
 entity: ianc-uc-berkeley
 job_name: ${policy.type}_${task.type}
 run_id: ???
