@@ -3,6 +3,11 @@ defaults:
 
 type: gaze_policy
 
+n_obs_steps: 3
+obs_step_size: 1
+obs_steps_dropout: 0.0
+
+use_last_periph_only: true
 input_shape: [240, 320]
 periph_shape: [70, 70]
 periph_crop_scale: 0.9
