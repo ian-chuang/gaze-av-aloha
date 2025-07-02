@@ -308,19 +308,21 @@ class FlowModel(nn.Module):
         # Create dropout mask of shape (B, L, 1), broadcasted along D
         mask = torch.rand(b, s, device=img.device) >= self.cfg.obs_steps_dropout
         mask = mask.type_as(img).unsqueeze(-1).unsqueeze(-1)  # shape: (B, L, 1, 1)
+        obs_step_pos = torch.arange(s, device=img.device, dtype=torch.float32)
 
         
         # peripheral vision
+        periph = img
+        s_periph = s
+        mask_periph = mask
+        obs_step_pos_periph = obs_step_pos
         if self.cfg.use_last_periph_only:
             periph = einops.rearrange(
                 img,'(b s n) c h w -> b s n c h w', b=b, s=s, n=n
             )[:, -1:].flatten(start_dim=0, end_dim=2) # (b*s*n, c, h, w)
             s_periph = 1
             mask_periph = mask[:, -1:]
-        else:
-            periph = img
-            s_periph = s
-            mask_periph = mask
+            obs_step_pos_periph = obs_step_pos[-1:]  # only use the last observation step
 
         centers = torch.zeros((b*s_periph*n, 2), dtype=img.dtype, device=img.device)
         periph, centers = random_crop(
@@ -346,6 +348,7 @@ class FlowModel(nn.Module):
                 crop_scale=self.cfg.periph_crop_scale,
                 feat_shape=self.periph_feat_shape,
                 dim=self.cfg.dim_model // self.cfg.n_heads,  
+                obs_step_pos=obs_step_pos_periph,  # use the observation step positions
             ) 
         )
 
@@ -362,6 +365,7 @@ class FlowModel(nn.Module):
                 crop_scale=1.0,
                 feat_shape=(1, 1),
                 dim=self.cfg.dim_model // self.cfg.n_heads,  # dim per head
+                obs_step_pos=obs_step_pos,  # use the observation step positions
             )  # (B, S*N, D)
         )
 
@@ -394,6 +398,7 @@ class FlowModel(nn.Module):
                     crop_scale=self.cfg.foveal_crop_scale,
                     feat_shape=self.foveal_feat_shape,
                     dim=self.cfg.dim_model // self.cfg.n_heads,  # dim per head
+                    obs_step_pos=obs_step_pos,
                 )  # (B, S*N, D)
             )
             tokens.append(
@@ -410,6 +415,7 @@ class FlowModel(nn.Module):
                     crop_scale=1.0,
                     feat_shape=(1, 1),
                     dim=self.cfg.dim_model // self.cfg.n_heads,  # dim per head
+                    obs_step_pos=obs_step_pos,
                 )  # (B, S*N, D)
             )
 

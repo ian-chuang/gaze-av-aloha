@@ -22,9 +22,21 @@ def get_foveated_pos_embed(
     feat_shape: tuple,
     dim: int = 384,
     base: int = 10000,
+    obs_step_pos: Tensor = None,
+    images_pos: Tensor = None,
 ):
-    batch_size = centers.shape[0]
-    assert centers.shape[-1] == 2, "centers should have shape (B, ..., 2) where last dimension is (x, y) coordinates"
+    b, s, n, d = centers.shape
+    assert len(grid_shape) == 2, "grid_shape should be a tuple of (height, width)"
+    assert len(feat_shape) == 2, "feat_shape should be a tuple of (height, width)"
+    assert d == 2
+    if obs_step_pos is not None:
+        assert obs_step_pos.ndim == 1 and obs_step_pos.shape[0] == s
+    else:
+        obs_step_pos = torch.arange(s, device=centers.device, dtype=torch.float32)
+    if images_pos is not None:
+        assert images_pos.ndim == 1 and images_pos.shape[0] == n
+    else:
+        images_pos = torch.arange(n, device=centers.device, dtype=torch.float32)
 
     crop_shape = (crop_scale * grid_shape[0], crop_scale * grid_shape[1])
     patch_shape = (crop_shape[0] / feat_shape[0], crop_shape[1] / feat_shape[1])
@@ -35,15 +47,16 @@ def get_foveated_pos_embed(
 
     # Create meshgrid along eash axis
     axis_grids = list(torch.meshgrid(
-        *[torch.arange(d, dtype=torch.float32, device=centers.device) for d in centers.shape[1:-1]],
+        obs_step_pos,
+        images_pos,
         torch.linspace(-crop_shape[0]/2 + patch_shape[0]/2, crop_shape[0]/2 - patch_shape[0]/2, feat_shape[0], device=centers.device),
         torch.linspace(-crop_shape[1]/2 + patch_shape[1]/2, crop_shape[1]/2 - patch_shape[1]/2, feat_shape[1], device=centers.device),
         indexing="ij",
     ))
-    for i in range(len(axis_grids) - 2):
-        axis_grids[i] = axis_grids[i].unsqueeze(0).expand(batch_size, *axis_grids[i].shape)
-    axis_grids[-2] = axis_grids[-2].unsqueeze(0) + centers[...,1].unsqueeze(-1).unsqueeze(-1) * grid_shape[0] / 2
-    axis_grids[-1] = axis_grids[-1].unsqueeze(0) + centers[...,0].unsqueeze(-1).unsqueeze(-1) * grid_shape[1] / 2
+    axis_grids[0] = axis_grids[0].unsqueeze(0).expand(b, *axis_grids[0].shape)
+    axis_grids[1] = axis_grids[1].unsqueeze(0).expand(b, *axis_grids[1].shape)
+    axis_grids[2] = axis_grids[2].unsqueeze(0) + centers[...,1].unsqueeze(-1).unsqueeze(-1) * grid_shape[0] / 2
+    axis_grids[3] = axis_grids[3].unsqueeze(0) + centers[...,0].unsqueeze(-1).unsqueeze(-1) * grid_shape[1] / 2
     # Compute position embeddings for each axis and concatenate
     axis_thetas = [
         get_1d_rotary_embed(axis_dim, axis_grid.flatten(start_dim=1), base)

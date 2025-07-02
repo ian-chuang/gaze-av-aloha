@@ -22,7 +22,7 @@ class GazePolicyConfig(PolicyConfig):
     freeze_n_layers: int = 6
     obs_steps_dropout: float = 0.0
 
-    use_last_periph_only: bool = True
+    use_last_periph_only: bool = False
     periph_shape: tuple = (70, 70)
     periph_crop_scale: float = 0.95
     foveal_shape: tuple = (70, 70)

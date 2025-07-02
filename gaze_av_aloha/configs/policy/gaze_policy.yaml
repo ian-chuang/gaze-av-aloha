@@ -5,17 +5,20 @@ type: gaze_policy
 
 n_obs_steps: 3
 obs_step_size: 1
-obs_steps_dropout: 0.1
+obs_steps_dropout: 0.0
 
 use_last_periph_only: true
 input_shape: [240, 320]
 periph_shape: [70, 70]
 periph_crop_scale: 0.9
 foveal_shape: [70, 70]
-foveal_crop_scale: 0.4
+foveal_crop_scale: 0.3
 
 freeze_n_layers: 6
 use_gaze: true
+
+optimizer_lr: 1e-4
+optimizer_lr_backbone: 1e-6
 
 # Gaze
 image_to_gaze_key:
