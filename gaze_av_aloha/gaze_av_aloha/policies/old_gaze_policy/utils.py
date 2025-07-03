@@ -2,6 +2,70 @@ from torch import Tensor, nn
 import torch
 from torchvision.ops import roi_align
 
+def apply_rotary_embed(x, thetas):
+    assert x.shape[-2:] == thetas.shape[-2:]
+    x1, x2 = x.chunk(2, dim=-1)
+    x_rotate_half = torch.cat([-x2, x1], dim=-1)
+    return x * thetas.cos() + x_rotate_half * thetas.sin()
+
+def get_1d_rotary_embed(dim:int, pos: Tensor, base:int=10000):
+    assert dim % 2 == 0
+    thetas = 1.0 / (base ** (torch.arange(0, dim, 2, device=pos.device).float() / dim))
+    thetas = pos.unsqueeze(-1) * thetas  # (N, D/2)
+    thetas = torch.cat((thetas, thetas), dim=-1)  # (N, D)
+    return thetas    
+
+def get_foveated_pos_embed(
+    centers: Tensor,
+    grid_shape: tuple,
+    crop_scale: float,
+    feat_shape: tuple,
+    dim: int = 384,
+    base: int = 10000,
+    obs_step_pos: Tensor = None,
+    images_pos: Tensor = None,
+):
+    b, s, n, d = centers.shape
+    assert len(grid_shape) == 2, "grid_shape should be a tuple of (height, width)"
+    assert len(feat_shape) == 2, "feat_shape should be a tuple of (height, width)"
+    assert d == 2
+    if obs_step_pos is not None:
+        assert obs_step_pos.ndim == 1 and obs_step_pos.shape[0] == s
+    else:
+        obs_step_pos = torch.arange(s, device=centers.device, dtype=torch.float32)
+    if images_pos is not None:
+        assert images_pos.ndim == 1 and images_pos.shape[0] == n
+    else:
+        images_pos = torch.arange(n, device=centers.device, dtype=torch.float32)
+
+    crop_shape = (crop_scale * grid_shape[0], crop_scale * grid_shape[1])
+    patch_shape = (crop_shape[0] / feat_shape[0], crop_shape[1] / feat_shape[1])
+    num_axis = len(centers.shape[1:-1]) + 2
+    assert dim % num_axis == 0
+    axis_dim = dim // num_axis
+    assert axis_dim % 2 == 0
+
+    # Create meshgrid along eash axis
+    axis_grids = list(torch.meshgrid(
+        obs_step_pos,
+        images_pos,
+        torch.linspace(-crop_shape[0]/2 + patch_shape[0]/2, crop_shape[0]/2 - patch_shape[0]/2, feat_shape[0], device=centers.device),
+        torch.linspace(-crop_shape[1]/2 + patch_shape[1]/2, crop_shape[1]/2 - patch_shape[1]/2, feat_shape[1], device=centers.device),
+        indexing="ij",
+    ))
+    axis_grids[0] = axis_grids[0].unsqueeze(0).expand(b, *axis_grids[0].shape)
+    axis_grids[1] = axis_grids[1].unsqueeze(0).expand(b, *axis_grids[1].shape)
+    axis_grids[2] = axis_grids[2].unsqueeze(0) + centers[...,1].unsqueeze(-1).unsqueeze(-1) * grid_shape[0] / 2
+    axis_grids[3] = axis_grids[3].unsqueeze(0) + centers[...,0].unsqueeze(-1).unsqueeze(-1) * grid_shape[1] / 2
+    # Compute position embeddings for each axis and concatenate
+    axis_thetas = [
+        get_1d_rotary_embed(axis_dim, axis_grid.flatten(start_dim=1), base)
+        for axis_grid in axis_grids
+    ]
+    thetas = torch.cat(axis_thetas, dim=-1)
+
+    return thetas
+
 def denormalize_keypoints(
     keypoints: Tensor, image_size: tuple[int, int]
 ) -> Tensor:
