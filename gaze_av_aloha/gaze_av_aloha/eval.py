@@ -51,6 +51,12 @@ def rollout(
         disable=inside_slurm(),  # we dont want progress bar when we use slurm, since it clutters the logs
         leave=False,
     )
+
+    if "prompt" in options:
+        task = [options["prompt"]] * env.num_envs
+    else:
+        task = None
+
     while not np.all(done):
         # Numpy array to tensor and changing dictionary keys to LeRobot policy format.
         observation = preprocess_observation(observation)
@@ -58,6 +64,8 @@ def rollout(
             all_observations.append(deepcopy(observation))
 
         observation = {key: observation[key].to(device, non_blocking=True) for key in observation}
+        if task is not None:
+            observation["task"] = task
 
         with torch.inference_mode():
             action = policy.select_action(observation)
