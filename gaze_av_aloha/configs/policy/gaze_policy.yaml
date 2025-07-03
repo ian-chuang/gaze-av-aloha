@@ -3,7 +3,7 @@ defaults:
 
 type: gaze_policy
 
-n_obs_steps: 3
+n_obs_steps: 1
 obs_step_size: 1
 obs_steps_dropout: 0.0
 

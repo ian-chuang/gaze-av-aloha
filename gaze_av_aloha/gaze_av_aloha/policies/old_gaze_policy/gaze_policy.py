@@ -15,9 +15,8 @@ import torch.nn.functional as F
 import einops
 from gaze_av_aloha.policies.gaze_policy.transformer import DiT, AttentionPooling
 from gaze_av_aloha.policies.gaze_policy.dino import DINO
-from gaze_av_aloha.policies.gaze_policy.bert import CachedDistilBertEmbedder
 from torchvision.transforms import Resize
-from gaze_av_aloha.policies.gaze_policy.utils import sample_beta, crop_at_kp, random_crop
+from gaze_av_aloha.policies.gaze_policy.utils import sample_beta, get_foveated_pos_embed, crop_at_kp, random_crop
 import logging
 from timm.layers import Mlp
 import math
@@ -151,7 +150,7 @@ class GazePolicy(Policy):
             **{key: deque(maxlen=obs_queue_size) for key in self.cfg.image_to_gaze_key.keys()},
             **{key: deque(maxlen=obs_queue_size) for key in self.cfg.image_to_gaze_key.values()}, # gaze
             self.task_cfg.state_key: deque(maxlen=obs_queue_size),
-            self.task_cfg.action_key: deque(maxlen=obs_queue_size),
+            self.task_cfg.action_key: deque(maxlen=self.cfg.n_action_steps),
         }
         self._act_queues = {
             **{key: deque(maxlen=self.cfg.n_action_steps) for key in self.cfg.image_to_gaze_key.values()}, # gaze
@@ -179,12 +178,10 @@ class GazePolicy(Policy):
 
         viz = {}
         if len(self._act_queues[self.task_cfg.action_key]) == 0:
-            task = batch.get("task", None)
             batch = {
                 k: torch.stack(list(v)[::self.cfg.obs_step_size], dim=1) 
                 for k, v in self._obs_queue.items()
             }
-            if task: batch["task"] = task
             batch = self.normalize_inputs(batch)
             outputs, viz = self.flow.generate_actions(batch)
             outputs = self.unnormalize_outputs(outputs)
@@ -232,72 +229,27 @@ class FlowModel(nn.Module):
             task_cfg.action_key: task_cfg.action_dim,
             **{k: 2 for k in policy_cfg.image_to_gaze_key.values() if policy_cfg.use_gaze},
         }
-
-        n_tokens = 0
-        n_obs_steps = policy_cfg.n_obs_steps
-        n_images = len(policy_cfg.image_to_gaze_key)
-
         self.state_proj = nn.Sequential(
             nn.Dropout(policy_cfg.dropout),
             nn.Linear(task_cfg.state_dim, policy_cfg.dim_model),
-            nn.GELU(),
-            nn.Dropout(policy_cfg.dropout),
-            nn.Linear(policy_cfg.dim_model, policy_cfg.dim_model),
         )
-        n_tokens += n_obs_steps
-        
-        if policy_cfg.use_action_history:
-            self.action_history_proj = nn.Sequential(
-                nn.Dropout(policy_cfg.dropout),
-                nn.Linear(task_cfg.action_dim, policy_cfg.dim_model),
-                nn.GELU(),
-                nn.Dropout(policy_cfg.dropout),
-                nn.Linear(policy_cfg.dim_model, policy_cfg.dim_model),
-            )
-            n_tokens += n_obs_steps
-
+        self.action_history_proj = nn.Sequential(
+            nn.Dropout(policy_cfg.dropout),
+            nn.Linear(task_cfg.action_dim, policy_cfg.dim_model),
+        )
+        self.gaze_proj = nn.Linear(2, policy_cfg.dim_model)
         self.dino_periph = DINO(num_freeze_layers=policy_cfg.freeze_n_layers)
-        self.dino_periph_proj = nn.Sequential(
-            nn.Linear(self.dino_periph.embed_dim, policy_cfg.dim_model),
-            nn.GELU(),
-            nn.Dropout(policy_cfg.dropout),
-            nn.Linear(policy_cfg.dim_model, policy_cfg.dim_model),
+        self.dino_periph_proj = nn.Linear(self.dino_periph.embed_dim, policy_cfg.dim_model)
+        self.periph_feat_shape = (
+            policy_cfg.periph_shape[0] // self.dino_periph.patch_size,
+            policy_cfg.periph_shape[1] // self.dino_periph.patch_size,
         )
-        h, w = policy_cfg.periph_shape[0] // self.dino_periph.patch_size, \
-               policy_cfg.periph_shape[1] // self.dino_periph.patch_size
-        n_tokens += (h*w + 1) * (1 if policy_cfg.use_last_periph_only else n_obs_steps) * n_images
-
-        if policy_cfg.use_gaze:
-            self.gaze_proj = nn.Sequential(
-                nn.Dropout(policy_cfg.dropout),
-                nn.Linear(2, policy_cfg.dim_model),
-                nn.GELU(),
-                nn.Dropout(policy_cfg.dropout),
-                nn.Linear(policy_cfg.dim_model, policy_cfg.dim_model),
-            )
-            n_tokens += policy_cfg.n_obs_steps * n_images
-
-            self.dino_foveal = DINO(num_freeze_layers=policy_cfg.freeze_n_layers)
-            self.dino_foveal_proj = nn.Sequential(
-                nn.Linear(self.dino_foveal.embed_dim, policy_cfg.dim_model),
-                nn.GELU(),
-                nn.Dropout(policy_cfg.dropout),
-                nn.Linear(policy_cfg.dim_model, policy_cfg.dim_model),
-            )
-            h, w = policy_cfg.foveal_shape[0] // self.dino_foveal.patch_size, \
-                   policy_cfg.foveal_shape[1] // self.dino_foveal.patch_size
-            n_tokens += (h*w + 1) * policy_cfg.n_obs_steps * n_images
-
-        if policy_cfg.use_prompt:
-            self.bert = CachedDistilBertEmbedder(max_cache_size=policy_cfg.bert_max_cache_size)
-            self.bert_proj = nn.Sequential(
-                nn.Linear(self.bert.embed_dim, policy_cfg.dim_model),
-                nn.GELU(),
-                nn.Dropout(policy_cfg.dropout),
-                nn.Linear(policy_cfg.dim_model, policy_cfg.dim_model),
-            )
-            n_tokens += 1
-        
+        self.dino_foveal = DINO(num_freeze_layers=policy_cfg.freeze_n_layers)
+        self.dino_foveal_proj = nn.Linear(self.dino_foveal.embed_dim, policy_cfg.dim_model)
+        self.foveal_feat_shape = (
+            policy_cfg.foveal_shape[0] // self.dino_foveal.patch_size,  
+            policy_cfg.foveal_shape[1] // self.dino_foveal.patch_size,
+        )
         self.pool = AttentionPooling(
             hidden_size=policy_cfg.dim_model,
             num_queries=policy_cfg.pool_n_queries,
@@ -306,7 +258,6 @@ class FlowModel(nn.Module):
             mlp_ratio=policy_cfg.mlp_ratio,
             dropout=policy_cfg.dropout,
         ) 
-        self.pool_pos_embed = nn.Embedding(n_tokens, policy_cfg.dim_model)
 
         # Encoder for the diffusion timestep.
         self.noise_dim = sum(self.target_keys_to_dim.values())
@@ -356,40 +307,66 @@ class FlowModel(nn.Module):
 
         # Create dropout mask of shape (B, L, 1), broadcasted along D
         mask = torch.rand(b, s, device=img.device) >= self.cfg.obs_steps_dropout
-        mask = mask.type_as(img) # shape: (B, L)
+        mask = mask.type_as(img).unsqueeze(-1).unsqueeze(-1)  # shape: (B, L, 1, 1)
+        obs_step_pos = torch.arange(s, device=img.device, dtype=torch.float32)
 
-        # state
-        tokens.append(
-            self.state_proj(
-                batch[self.task_cfg.state_key]
-            ) * mask.unsqueeze(-1)   # (B, S, D) -> (B, S, N, D)
-        )
         
-        # periph 
-        p_img = img
-        p_mask = mask
+        # peripheral vision
+        periph = img
+        s_periph = s
+        mask_periph = mask
+        obs_step_pos_periph = obs_step_pos
         if self.cfg.use_last_periph_only:
-            p_img = einops.rearrange(
+            periph = einops.rearrange(
                 img,'(b s n) c h w -> b s n c h w', b=b, s=s, n=n
-            )[:, -1:].flatten(start_dim=0, end_dim=2) # (b*1*n, c, h, w)
-            p_mask = mask[:, -1:] # (b, 1)
-        periph, _ = random_crop(
-            images=p_img, 
+            )[:, -1:].flatten(start_dim=0, end_dim=2) # (b*s*n, c, h, w)
+            s_periph = 1
+            mask_periph = mask[:, -1:]
+            obs_step_pos_periph = obs_step_pos[-1:]  # only use the last observation step
+
+        centers = torch.zeros((b*s_periph*n, 2), dtype=img.dtype, device=img.device)
+        periph, centers = random_crop(
+            images=periph, 
             crop_scale=self.cfg.periph_crop_scale, 
+            kp=centers, 
             out_shape=self.cfg.periph_shape,
             random=self.training,
         )
         if not self.training:
             viz["periphal"] = periph
         tokens.append(
-            torch.flatten(
-                einops.rearrange(
-                    self.dino_periph_proj(self.dino_periph(periph)), 
-                    '(b s n) l d -> b s (n l) d',
-                    b=b, n=n
-                ) * p_mask.unsqueeze(-1).unsqueeze(-1),
-                start_dim=1, end_dim=2
-            )
+            einops.rearrange(
+                self.dino_periph_proj(self.dino_periph(periph)), 
+                '(b s n) l d -> b s (n l) d',
+                b=b, s=s_periph, n=n, l=self.periph_feat_shape[0] * self.periph_feat_shape[1]
+            ) * mask_periph
+        )
+        pos_embed.append(
+            get_foveated_pos_embed(
+                centers=einops.rearrange(centers, '(b s n) c -> b s n c', b=b, s=s_periph, n=n),
+                grid_shape=self.cfg.input_shape,
+                crop_scale=self.cfg.periph_crop_scale,
+                feat_shape=self.periph_feat_shape,
+                dim=self.cfg.dim_model // self.cfg.n_heads,  
+                obs_step_pos=obs_step_pos_periph,  # use the observation step positions
+            ) 
+        )
+
+        # state
+        tokens.append(
+            self.state_proj(
+                batch[self.task_cfg.state_key]
+            ).unsqueeze(2).expand(-1, -1, n, -1) * mask   # (B, S, D) -> (B, S, N, D)
+        )
+        pos_embed.append(
+            get_foveated_pos_embed(
+                centers=torch.zeros((b, s, n, 2), dtype=img.dtype, device=img.device),
+                grid_shape=self.cfg.input_shape,
+                crop_scale=1.0,
+                feat_shape=(1, 1),
+                dim=self.cfg.dim_model // self.cfg.n_heads,  # dim per head
+                obs_step_pos=obs_step_pos,  # use the observation step positions
+            )  # (B, S*N, D)
         )
 
         # foveal vision
@@ -408,33 +385,45 @@ class FlowModel(nn.Module):
                 viz["foveal"] = foveal
 
             tokens.append(
-                torch.flatten(
-                    einops.rearrange(
-                        self.dino_foveal_proj(self.dino_foveal(foveal)), 
-                        '(b s n) l d -> b s (n l) d',   
-                        b=b, s=s, n=n
-                    ) * mask.unsqueeze(-1).unsqueeze(-1),
-                    start_dim=1, end_dim=2
-                )
+                einops.rearrange(
+                    self.dino_foveal_proj(self.dino_foveal(foveal)), 
+                    '(b s n) l d -> b s (n l) d',   
+                    b=b, s=s, n=n, l=self.foveal_feat_shape[0] * self.foveal_feat_shape[1] 
+                ) * mask
+            )
+            pos_embed.append(
+                get_foveated_pos_embed(
+                    centers=einops.rearrange(gaze, '(b s n) c -> b s n c', b=b, s=s, n=n),
+                    grid_shape=self.cfg.input_shape,
+                    crop_scale=self.cfg.foveal_crop_scale,
+                    feat_shape=self.foveal_feat_shape,
+                    dim=self.cfg.dim_model // self.cfg.n_heads,  # dim per head
+                    obs_step_pos=obs_step_pos,
+                )  # (B, S*N, D)
             )
             tokens.append(
-                torch.flatten(
-                    einops.rearrange(
-                        self.gaze_proj(gaze),  # send in the gaze (frame of ref of robot camera)
-                        '(b s n) d -> b s n d',
-                        b=b, s=s, n=n
-                    ) * mask.unsqueeze(-1).unsqueeze(-1),
-                    start_dim=1, end_dim=2
-                )
+                einops.rearrange(
+                    self.gaze_proj(gaze),  # send in the gaze (frame of ref of robot camera)
+                    '(b s n) d -> b s n d',
+                    b=b, s=s, n=n
+                )  * mask
+            )
+            pos_embed.append(
+                get_foveated_pos_embed(
+                    centers=torch.zeros((b, s, n, 2), dtype=img.dtype, device=img.device),
+                    grid_shape=self.cfg.input_shape,
+                    crop_scale=1.0,
+                    feat_shape=(1, 1),
+                    dim=self.cfg.dim_model // self.cfg.n_heads,  # dim per head
+                    obs_step_pos=obs_step_pos,
+                )  # (B, S*N, D)
             )
 
-        if self.cfg.use_prompt:
-            tokens.append(
-                self.bert_proj(self.bert(batch["task"])).unsqueeze(1)  # (B, 1, D)
-            )
+        tokens = torch.cat([
+            einops.rearrange(t, 'b s n d -> b (s n) d') for t in tokens
+        ], dim=1)  # (B, L, D)
+        pos_embed = torch.cat(pos_embed, dim=1).unsqueeze(1)  # (B, 1, L, D//n_heads)
 
-        tokens = torch.cat(tokens, dim=1)
-        pos_embed = self.pool_pos_embed.weight.unsqueeze(0)
         cond = self.pool(tokens, pos_embed)
         return cond, viz
     

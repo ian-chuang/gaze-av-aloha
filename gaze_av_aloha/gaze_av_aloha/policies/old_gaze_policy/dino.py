@@ -43,6 +43,7 @@ class DINO(nn.Module):
     def forward(self, x: Tensor, masks: Tensor = None) -> Tensor:
         feat = self.backbone.forward_features(x, masks)
         return torch.cat([
-            feat["x_norm_clstoken"].unsqueeze(1),
+            # feat["x_norm_clstoken"].unsqueeze(1),
+            # feat["x_norm_regtokens"],
             feat["x_norm_patchtokens"],
         ], dim=1)

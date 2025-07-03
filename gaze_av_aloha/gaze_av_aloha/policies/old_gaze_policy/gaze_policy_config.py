@@ -22,17 +22,15 @@ class GazePolicyConfig(PolicyConfig):
     freeze_n_layers: int = 6
     obs_steps_dropout: float = 0.0
 
-    use_prompt: bool = True
-    bert_max_cache_size: int = 1000
-
     use_last_periph_only: bool = False
     periph_shape: tuple = (70, 70)
     periph_crop_scale: float = 0.95
+    foveal_shape: tuple = (70, 70)
+    foveal_crop_scale: float = 0.4
 
     gaze_noise: float = 0.02
     use_gaze: bool = True
-    foveal_shape: tuple = (70, 70)
-    foveal_crop_scale: float = 0.3
+    
     use_action_history: bool = False
 
     # Transformer Layers
@@ -43,7 +41,7 @@ class GazePolicyConfig(PolicyConfig):
 
     # Attention Pooling
     pool_n_queries: int = 16
-    pool_n_layers: int = 4
+    pool_n_layers: int = 2
 
     # DiT
     dit_n_layers: int = 8
@@ -60,5 +58,5 @@ class GazePolicyConfig(PolicyConfig):
     optimizer_weight_decay: float = 1e-6
     scheduler_name: str = "cosine"
     scheduler_warmup_steps: int = 500
-    use_ema: bool = False
+    use_ema: bool = True
     ema_decay: float = 0.99

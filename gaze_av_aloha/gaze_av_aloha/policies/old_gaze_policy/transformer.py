@@ -4,6 +4,69 @@ import math
 import torch.nn.functional as F
 from timm.layers import Mlp
 import numpy as np
+from gaze_av_aloha.policies.gaze_policy.utils import apply_rotary_embed
+
+class Attention(nn.Module):
+    def __init__(self, dim, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0.):
+        super().__init__()
+        self.num_heads = num_heads
+        self.head_dim = dim // num_heads
+        assert dim % num_heads == 0, "dim must be divisible by num_heads"
+
+        self.scale = self.head_dim ** -0.5
+        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj = nn.Linear(dim, dim)
+        self.proj_drop = nn.Dropout(proj_drop)
+
+    def forward(self, x, x_pos_emb=None):
+        B, N, C = x.shape
+
+        # qkv: (B, N, 3, num_heads, head_dim)
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
+        q, k, v = qkv[0], qkv[1], qkv[2]  # each: (B, num_heads, N, head_dim)
+
+        if x_pos_emb is not None:
+            q = apply_rotary_embed(q, x_pos_emb)
+            k = apply_rotary_embed(k, x_pos_emb)
+
+        # SDPA expects (B, num_heads, N, head_dim)
+        attn_output = F.scaled_dot_product_attention(q, k, v, dropout_p=self.attn_drop.p if self.training else 0.0)
+        attn_output = attn_output.transpose(1, 2).reshape(B, N, C)  # (B, N, C)
+
+        return self.proj_drop(self.proj(attn_output))
+
+class CrossAttention(nn.Module):
+    def __init__(self, dim_q, dim_kv, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0.):
+        super().__init__()
+        self.num_heads = num_heads
+        self.head_dim = dim_q // num_heads
+        assert dim_q % num_heads == 0, "dim_q must be divisible by num_heads"
+
+        self.scale = self.head_dim ** -0.5
+        self.q = nn.Linear(dim_q, dim_q, bias=qkv_bias)
+        self.kv = nn.Linear(dim_kv, 2 * dim_q, bias=qkv_bias)  # project kv into q-dim space
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj = nn.Linear(dim_q, dim_q)
+        self.proj_drop = nn.Dropout(proj_drop)
+
+    def forward(self, x_q, x_kv, x_pos_emb=None, c_pos_emb=None):
+        B, Nq, Cq = x_q.shape
+        _, Nk, _ = x_kv.shape
+
+        q = self.q(x_q).reshape(B, Nq, self.num_heads, self.head_dim).transpose(1, 2)  # (B, heads, Nq, head_dim)
+        kv = self.kv(x_kv).reshape(B, Nk, 2, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
+        k, v = kv[0], kv[1]  # (B, heads, Nk, head_dim)
+
+        if x_pos_emb is not None:
+            q = apply_rotary_embed(q, x_pos_emb)
+        if c_pos_emb is not None:
+            k = apply_rotary_embed(k, c_pos_emb)
+
+        attn_output = F.scaled_dot_product_attention(q, k, v, dropout_p=self.attn_drop.p if self.training else 0.0)
+        attn_output = attn_output.transpose(1, 2).reshape(B, Nq, Cq)
+
+        return self.proj_drop(self.proj(attn_output))
     
 def modulate(x, shift, scale):
     return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
@@ -118,25 +181,16 @@ class AttentionPoolingBlock(nn.Module):
     def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, dropout=0.1):
         super().__init__()
         self.norm1 = nn.LayerNorm(hidden_size)
-        self.attn = nn.MultiheadAttention(hidden_size, num_heads, batch_first=True, dropout=dropout)
+        self.attn = Attention(dim=hidden_size, num_heads=num_heads, attn_drop=dropout, proj_drop=dropout)
         self.norm2 = nn.LayerNorm(hidden_size)
-        self.xattn = nn.MultiheadAttention(hidden_size, num_heads, batch_first=True, dropout=dropout)
+        self.xattn = CrossAttention(dim_q=hidden_size, dim_kv=hidden_size, num_heads=num_heads, attn_drop=dropout, proj_drop=dropout)
         self.norm3 = nn.LayerNorm(hidden_size)
         self.mlp = Mlp(in_features=hidden_size, hidden_features=int(hidden_size * mlp_ratio), drop=dropout)
 
     def forward(self, x, c, x_pos_emb=None, c_pos_emb=None):
-        x_norm = self.norm1(x)
-        q = k = maybe_add_pos_embed(x_norm, x_pos_emb)
-        v = x_norm
-        x = x + self.attn(q, k, v, need_weights=False)[0]
-
-        q = maybe_add_pos_embed(self.norm2(x), x_pos_emb)
-        k = maybe_add_pos_embed(c, c_pos_emb)
-        v = c
-        x = x + self.xattn(q, k, v, need_weights=False)[0]
-
+        x = x + self.attn(self.norm1(x), x_pos_emb=x_pos_emb)
+        x = x + self.xattn(self.norm2(x), c, x_pos_emb=x_pos_emb, c_pos_emb=c_pos_emb)
         x = x + self.mlp(self.norm3(x))
-
         return x
 
 class AttentionPooling(nn.Module):
@@ -188,4 +242,5 @@ class AttentionPooling(nn.Module):
             x = block(x=x, c=c, c_pos_emb=c_pos_emb)
         x = self.norm2(x)
         return x 
+    
 
