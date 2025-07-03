@@ -42,7 +42,12 @@ def visualize_policy(
     )
 
     viz_videos = {}
-    max_height = 480
+    max_height = 240
+
+    if "prompt" in options:
+        task = [options["prompt"]] * env.num_envs
+    else:
+        task = None
     
     # features_video = []
     while step < steps:
@@ -52,6 +57,8 @@ def visualize_policy(
         observation = {
             key: observation[key].to(device, non_blocking=device.type == "cuda") for key in observation
         }
+        if task is not None:
+            observation["task"] = task
 
         with torch.inference_mode():
             action, viz = policy.select_action(observation, return_viz=True)

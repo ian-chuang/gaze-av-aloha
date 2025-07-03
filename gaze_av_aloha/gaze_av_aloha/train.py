@@ -107,41 +107,47 @@ def train(cfg: Config):
     )
 
     # create eval env
-    eval_env = None
-    if cfg.train.eval_freq > 0:
-        logging.info(f"""
-            Creating {cfg.task.eval_n_envs} evaluation environments
-            id={cfg.task.env_package}/{cfg.task.env_name}
-            kwargs={pformat(cfg.task.env_kwargs, indent=4)}
-        """)
-        importlib.import_module(cfg.task.env_package)
-        eval_env = gym.vector.SyncVectorEnv(
-            [
-                lambda: gym.make(
-                    f"{cfg.task.env_package}/{cfg.task.env_name}",
-                    **cfg.task.env_kwargs
-                ) 
-                for _ in range(cfg.task.eval_n_envs)
-            ]
-        )
+    eval_envs = None
+    if cfg.train.eval_freq > 0 and len(cfg.task.envs) > 0:
+        eval_envs = {}
+        for env_name, env_cfg in cfg.task.envs.items():
+            logging.info(f"""
+                Creating {env_cfg.eval_n_envs} {env_name} environments
+                id={env_cfg.env_package}/{env_cfg.env_name}
+                kwargs={pformat(env_cfg.env_kwargs, indent=4)}
+            """)
+            importlib.import_module(env_cfg.env_package)
+            eval_env = gym.vector.SyncVectorEnv(
+                [
+                    lambda: gym.make(
+                        f"{env_cfg.env_package}/{env_cfg.env_name}",
+                        **env_cfg.env_kwargs
+                    ) 
+                    for _ in range(env_cfg.eval_n_envs)
+                ]
+            )
+            eval_envs[env_name] = eval_env
 
     # create vis env
-    viz_env = None
-    if cfg.train.viz_freq > 0:
-        logging.info(f"""
-            Creating 1 visualization environment
-            id={cfg.task.env_package}/{cfg.task.env_name}
-            kwargs={pformat(cfg.task.env_kwargs, indent=4)}
-        """)
-        importlib.import_module(cfg.task.env_package)
-        viz_env = gym.vector.SyncVectorEnv(
-            [
-                lambda: NoTerminationWrapper(gym.make(
-                    f"{cfg.task.env_package}/{cfg.task.env_name}",
-                    **cfg.task.env_kwargs
-                ))
-            ]
-        )
+    viz_envs = None
+    if cfg.train.viz_freq > 0 and len(cfg.task.envs) > 0:
+        viz_envs = {}
+        for env_name, env_cfg in cfg.task.envs.items():
+            logging.info(f"""
+                Creating 1 visualization environment for {env_name}
+                id={env_cfg.env_package}/{env_cfg.env_name}
+                kwargs={pformat(env_cfg.env_kwargs, indent=4)}
+            """)
+            importlib.import_module(env_cfg.env_package)
+            viz_env = gym.vector.SyncVectorEnv(
+                [
+                    lambda: NoTerminationWrapper(gym.make(
+                        f"{env_cfg.env_package}/{env_cfg.env_name}",
+                        **env_cfg.env_kwargs
+                    ))
+                ]
+            )
+            viz_envs[env_name] = viz_env
 
     # create optimizer and lr scheduler
     logging.info(f"Creating optimizer, scheduler,")
@@ -301,45 +307,53 @@ def train(cfg: Config):
                 ema.store(policy.parameters())
                 ema.copy_to(policy.parameters())
 
-            if eval_env and is_eval_step:
+            if eval_envs and is_eval_step:
                 step_id = str(step).zfill(10)
-                for name, options in cfg.task.eval_options.items():
-                    logging.info(f"Eval policy at step {step} with options: {name}={pformat(options, indent=4)}")
-                    with torch.no_grad():
-                        eval_info = eval_policy(
-                            eval_env,
-                            policy,
-                            cfg.task.eval_n_episodes,
-                            videos_dir=run_dir / "eval" / name / f"videos_step_{step_id}",
-                            max_episodes_rendered=4,
-                            start_seed=cfg.seed,
-                            options=options,
+                for env_name, env_cfg in cfg.task.envs.items():
+                    eval_env = eval_envs[env_name]
+                    for options_name, options in env_cfg.eval_options.items():
+                        logging.info(f"Eval policy at step {step} on {env_name} with {options_name} options: {options_name}={pformat(options, indent=4)}")
+                        with torch.no_grad():
+                            eval_info = eval_policy(
+                                eval_env,
+                                policy,
+                                env_cfg.eval_n_episodes,
+                                videos_dir=run_dir / "eval" / env_name / options_name / f"videos_step_{step_id}",
+                                max_episodes_rendered=4,
+                                start_seed=cfg.seed,
+                                options=options,
+                            )
+
+                        logging.info(eval_info["aggregated"])
+                        if cfg.wandb.enable and step >= wandb.run.step:
+                            for k, v in eval_info["aggregated"].items():
+                                if not isinstance(v, (int, float, str)): continue
+                                wandb.log({f"eval/{k}_{env_name}_{options_name}": v}, step=step)
+                            wandb_video = wandb.Video(eval_info['video_paths'][0], fps=cfg.task.fps, format="mp4")
+                            wandb.log({f"eval/video_{env_name}_{options_name}": wandb_video}, step=step)
+
+            if viz_envs and is_viz_step:
+                step_id = str(step).zfill(10)
+                for env_name, env_cfg in cfg.task.envs.items():
+                    viz_env = viz_envs[env_name]
+                    for options_name, options in env_cfg.eval_options.items():
+                        logging.info(
+                            f"Visualize policy at step {step} on {env_name} with {options_name} options: {options_name}={pformat(options, indent=4)}"
                         )
-
-                    logging.info(eval_info["aggregated"])
-                    if cfg.wandb.enable and step >= wandb.run.step:
-                        for k, v in eval_info["aggregated"].items():
-                            if not isinstance(v, (int, float, str)): continue
-                            wandb.log({f"eval/{k}_{name}": v}, step=step)
-                        wandb_video = wandb.Video(eval_info['video_paths'][0], fps=cfg.task.fps, format="mp4")
-                        wandb.log({f"eval/video_{name}": wandb_video}, step=step)
-
-            if viz_env and is_viz_step:
-                step_id = str(step).zfill(10)
-                logging.info(f"Visualize policy at step {step}")
-                with torch.no_grad():
-                    video_paths = visualize_policy(
-                        viz_env,
-                        policy,
-                        videos_dir=run_dir / "visualize" / f"videos_step_{step_id}",
-                        seed=step,
-                        steps=cfg.task.visualization_steps,
-                    )
-                if cfg.wandb.enable and step >= wandb.run.step:
-                    for video_path in video_paths:
-                        name = Path(video_path).stem
-                        wandb_video = wandb.Video(video_path, fps=cfg.task.fps, format="mp4")
-                        wandb.log({f"visualize/{name}": wandb_video}, step=step)
+                        with torch.no_grad():
+                            video_paths = visualize_policy(
+                                viz_env,
+                                policy,
+                                videos_dir=run_dir / "visualize" / env_name / options_name / f"videos_step_{step_id}",
+                                seed=step,
+                                steps=env_cfg.visualization_steps,
+                                options=options,
+                            )
+                        if cfg.wandb.enable and step >= wandb.run.step:
+                            for video_path in video_paths:
+                                name = Path(video_path).stem
+                                wandb_video = wandb.Video(video_path, fps=cfg.task.fps, format="mp4")
+                                wandb.log({f"visualize/{name}_{env_name}_{options_name}": wandb_video}, step=step)
 
             if ema is not None:
                 ema.restore(policy.parameters())

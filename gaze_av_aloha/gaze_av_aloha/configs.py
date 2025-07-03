@@ -8,6 +8,16 @@ class WandBConfig:
     job_name: str = ""
     run_id: str = ""
 
+@dataclass 
+class EnvConfig:
+    env_package: str = "gym_pusht"
+    env_name: str = "PushT-v0"
+    env_kwargs: dict = field(default_factory=lambda: {})
+    eval_n_episodes: int = 50
+    eval_n_envs: int = 10
+    eval_options: dict = field(default_factory=lambda: {})
+    visualization_steps: int = 300
+
 @dataclass
 class TaskConfig:
     type: str = "pusht"
@@ -15,17 +25,8 @@ class TaskConfig:
     dataset_root: str = "" 
     dataset_episodes: list[int] = field(default_factory=lambda: [])
     override_stats: dict = field(default_factory=lambda: {})
-
-    env_package: str = "gym_pusht"
-    env_name: str = "PushT-v0"
-    env_kwargs: dict = field(default_factory=lambda: {})
-
-    eval_n_episodes: int = 50
-    eval_n_envs: int = 10
-    eval_options: dict = field(default_factory=lambda: {})
-
+    envs: dict[str, EnvConfig] = field(default_factory=lambda: {})
     fps: float = 10
-    visualization_steps: int = 300
     image_keys: list[str] = field(default_factory=lambda: [])
     state_key: str = ""
     action_key: str = ""
