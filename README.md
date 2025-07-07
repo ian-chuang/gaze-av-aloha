@@ -25,7 +25,7 @@ python train.py policy=gaze_policy task=av_aloha_sim_hook_package wandb.enable=f
 
 
 python train.py policy=no_gaze_policy task=av_aloha_sim device=cuda:0 wandb.job_name=thread_1obs policy.n_obs_steps=1
-python train.py policy=gaze_policy task=av_aloha_sim device=cuda:0 wandb.job_name=thread_gaze_1obs policy.n_obs_steps=1
-python train.py policy=gaze_policy task=av_aloha_sim device=cuda:1 wandb.job_name=thread_gaze_2-2obs policy.n_obs_steps=2 policy.obs_step_size=2
-python train.py policy=gaze_policy task=av_aloha_sim device=cuda:1 wandb.job_name=thread_gaze_4-2obs policy.n_obs_steps=4 policy.obs_step_size=2
+python train.py policy=gaze_policy task=av_aloha_sim device=cuda:0 wandb.job_name=norandcrop_gaze_1obs policy.n_obs_steps=1 policy.periph_crop_scale=1.0
+python train.py policy=gaze_policy task=av_aloha_sim device=cuda:0 wandb.job_name=norandcrop_gaze_2-2obs policy.n_obs_steps=2 policy.obs_step_size=2 policy.periph_crop_scale=1.0
+python train.py policy=gaze_policy task=av_aloha_sim device=cuda:1 wandb.job_name=norandcrop_gaze_4-2obs policy.n_obs_steps=4 policy.obs_step_size=2 policy.periph_crop_scale=1.0
 

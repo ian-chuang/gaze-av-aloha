@@ -31,7 +31,6 @@ class GazePolicyConfig(PolicyConfig):
 
     gaze_noise: float = 0.02
     use_gaze: bool = True
-    spatial_mdn_path: str = "iantc104/spatial_mdn_av_aloha_sim_4c"
     foveal_shape: tuple = (70, 70)
     foveal_crop_scale: float = 0.3
     use_action_history: bool = False
