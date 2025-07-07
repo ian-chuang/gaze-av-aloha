@@ -14,7 +14,7 @@ from gaze_av_aloha.utils.policy_utils import (
 import torch.nn.functional as F
 import einops
 from gaze_av_aloha.policies.gaze_policy.transformer import DiT, AttentionPooling
-from gaze_av_aloha.policies.gaze_policy.dino import DINO
+from gaze_av_aloha.policies.gaze_policy.vision_encoders import get_vision_encoder
 from gaze_av_aloha.policies.gaze_policy.spatial_mdn import SpatialMDN, gmm_highest_probability_mean
 from gaze_av_aloha.policies.gaze_policy.bert import CachedDistilBertEmbedder
 from torchvision.transforms import Resize
@@ -69,7 +69,7 @@ class GazePolicy(Policy):
             - Epsilon: {self.cfg.optimizer_eps}
             - Weight Decay: {self.cfg.optimizer_weight_decay}
         """)
-        backbone_condition = lambda n: "flow.dino_periph." in n or "flow.dino_foveal." in n
+        backbone_condition = lambda n: "flow.periph_encoder." in n or "flow.foveal_encoder." in n
         if not any(backbone_condition(n) for n, p in self.named_parameters()):
             raise ValueError(f"No parameters found satifying the condition for vision backbone: {backbone_condition}")
         
@@ -257,19 +257,23 @@ class FlowModel(nn.Module):
             )
             n_tokens += n_obs_steps
 
-        self.dino_periph = DINO(num_freeze_layers=policy_cfg.freeze_n_layers)
-        self.dino_periph_proj = nn.Sequential(
-            nn.Linear(self.dino_periph.embed_dim, policy_cfg.dim_model),
+        self.periph_encoder = get_vision_encoder(
+            policy_cfg.vision_encoder,
+            **policy_cfg.vision_encoder_kwargs,
+        )
+        self.periph_proj = nn.Sequential(
+            nn.Linear(self.periph_encoder.embed_dim, policy_cfg.dim_model),
             nn.GELU(),
             nn.Dropout(policy_cfg.dropout),
             nn.Linear(policy_cfg.dim_model, policy_cfg.dim_model),
         )
-        h, w = policy_cfg.periph_shape[0] // self.dino_periph.patch_size, \
-               policy_cfg.periph_shape[1] // self.dino_periph.patch_size
-        n_tokens += (h*w + 1) * (1 if policy_cfg.use_last_periph_only else n_obs_steps) * n_images
+        n_tokens += self.periph_encoder.num_tokens(*policy_cfg.periph_shape) * (1 if policy_cfg.use_last_periph_only else n_obs_steps) * n_images
 
         if policy_cfg.use_gaze:
             self.spatial_mdn = SpatialMDN.from_pretrained(policy_cfg.spatial_mdn_path)
+            self.spatial_mdn.eval()
+            for param in self.spatial_mdn.parameters():
+                param.requires_grad = False
 
             self.gaze_proj = nn.Sequential(
                 nn.Dropout(policy_cfg.dropout),
@@ -280,16 +284,17 @@ class FlowModel(nn.Module):
             )
             n_tokens += policy_cfg.n_obs_steps * n_images
 
-            self.dino_foveal = DINO(num_freeze_layers=policy_cfg.freeze_n_layers)
-            self.dino_foveal_proj = nn.Sequential(
-                nn.Linear(self.dino_foveal.embed_dim, policy_cfg.dim_model),
+            self.foveal_encoder = get_vision_encoder(
+                policy_cfg.vision_encoder,
+                **policy_cfg.vision_encoder_kwargs,
+            )
+            self.foveal_proj = nn.Sequential(
+                nn.Linear(self.foveal_encoder.embed_dim, policy_cfg.dim_model),
                 nn.GELU(),
                 nn.Dropout(policy_cfg.dropout),
                 nn.Linear(policy_cfg.dim_model, policy_cfg.dim_model),
             )
-            h, w = policy_cfg.foveal_shape[0] // self.dino_foveal.patch_size, \
-                   policy_cfg.foveal_shape[1] // self.dino_foveal.patch_size
-            n_tokens += (h*w + 1) * policy_cfg.n_obs_steps * n_images
+            n_tokens += self.foveal_encoder.num_tokens(*policy_cfg.foveal_shape) * policy_cfg.n_obs_steps * n_images
 
         self.bert = CachedDistilBertEmbedder(max_cache_size=policy_cfg.bert_max_cache_size)
         self.bert_proj = nn.Sequential(
@@ -391,7 +396,7 @@ class FlowModel(nn.Module):
         tokens.append(
             torch.flatten(
                 einops.rearrange(
-                    self.dino_periph_proj(self.dino_periph(periph)), 
+                    self.periph_proj(self.periph_encoder(periph)), 
                     '(b s n) l d -> b s (n l) d',
                     b=b, n=n
                 ) * p_mask.unsqueeze(-1).unsqueeze(-1),
@@ -405,8 +410,7 @@ class FlowModel(nn.Module):
                 img,
                 einops.repeat(text_cond, "b d -> (b s n) d", b=b, s=s, n=n)
             )
-
-            if self.training:
+            if self.training and torch.rand(1).item() < self.cfg.sample_prob:
                 gaze = gmm.sample((1,)).squeeze(0)  # Sample from the GMM
             else:
                 gaze = gmm_highest_probability_mean(gmm)
@@ -423,7 +427,7 @@ class FlowModel(nn.Module):
             tokens.append(
                 torch.flatten(
                     einops.rearrange(
-                        self.dino_foveal_proj(self.dino_foveal(foveal)), 
+                        self.foveal_proj(self.foveal_encoder(foveal)), 
                         '(b s n) l d -> b s (n l) d',   
                         b=b, s=s, n=n
                     ) * mask.unsqueeze(-1).unsqueeze(-1),
@@ -440,8 +444,6 @@ class FlowModel(nn.Module):
                     start_dim=1, end_dim=2
                 )
             )
-
-        
 
         tokens = torch.cat(tokens, dim=1)
         pos_embed = self.pool_pos_embed.weight.unsqueeze(0)

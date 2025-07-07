@@ -19,8 +19,9 @@ class GazePolicyConfig(PolicyConfig):
     action_norm_mode: str = "min_max" 
     image_to_gaze_key: dict[str, str] = field(default_factory=lambda: {})
     input_shape: tuple = (240, 320)
-    freeze_n_layers: int = 6
     obs_steps_dropout: float = 0.0
+    vision_encoder: str = "resnet"
+    vision_encoder_kwargs: dict = field(default_factory=lambda: {})
 
     use_prompt: bool = True
     bert_max_cache_size: int = 1000
@@ -29,8 +30,8 @@ class GazePolicyConfig(PolicyConfig):
     periph_shape: tuple = (70, 70)
     periph_crop_scale: float = 0.95
 
-    gaze_noise: float = 0.02
     use_gaze: bool = True
+    sample_prob: float = 0.5
     spatial_mdn_path: str = "iantc104/spatial_mdn_av_aloha_sim_4c"
     foveal_shape: tuple = (70, 70)
     foveal_crop_scale: float = 0.3

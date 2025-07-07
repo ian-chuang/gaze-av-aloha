@@ -7,12 +7,15 @@ n_obs_steps: 1
 obs_step_size: 1
 obs_steps_dropout: 0.0
 
+vision_encoder: resnet
+vision_encoder_kwargs:
+  pool: true
+
 use_last_periph_only: false
 input_shape: [240, 320]
 periph_shape: [224, 224]
 periph_crop_scale: 0.9
 
-freeze_n_layers: 6
 use_gaze: false
 
 optimizer_lr: 1e-4
