@@ -15,7 +15,6 @@ import torch.nn.functional as F
 import einops
 from gaze_av_aloha.policies.gaze_policy.transformer import DiT, AttentionPooling
 from gaze_av_aloha.policies.gaze_policy.dino import DINO
-from gaze_av_aloha.policies.gaze_policy.spatial_mdn import SpatialMDN, gmm_highest_probability_mean
 from gaze_av_aloha.policies.gaze_policy.bert import CachedDistilBertEmbedder
 from torchvision.transforms import Resize
 from gaze_av_aloha.policies.gaze_policy.utils import sample_beta, crop_at_kp, random_crop
@@ -231,7 +230,7 @@ class FlowModel(nn.Module):
 
         self.target_keys_to_dim = {
             task_cfg.action_key: task_cfg.action_dim,
-            # **{k: 2 for k in policy_cfg.image_to_gaze_key.values() if policy_cfg.use_gaze},
+            **{k: 2 for k in policy_cfg.image_to_gaze_key.values() if policy_cfg.use_gaze},
         }
 
         n_tokens = 0
@@ -269,8 +268,6 @@ class FlowModel(nn.Module):
         n_tokens += (h*w + 1) * (1 if policy_cfg.use_last_periph_only else n_obs_steps) * n_images
 
         if policy_cfg.use_gaze:
-            self.spatial_mdn = SpatialMDN.from_pretrained(policy_cfg.spatial_mdn_path)
-
             self.gaze_proj = nn.Sequential(
                 nn.Dropout(policy_cfg.dropout),
                 nn.Linear(2, policy_cfg.dim_model),
@@ -291,14 +288,15 @@ class FlowModel(nn.Module):
                    policy_cfg.foveal_shape[1] // self.dino_foveal.patch_size
             n_tokens += (h*w + 1) * policy_cfg.n_obs_steps * n_images
 
-        self.bert = CachedDistilBertEmbedder(max_cache_size=policy_cfg.bert_max_cache_size)
-        self.bert_proj = nn.Sequential(
-            nn.Linear(self.bert.embed_dim, policy_cfg.dim_model),
-            nn.GELU(),
-            nn.Dropout(policy_cfg.dropout),
-            nn.Linear(policy_cfg.dim_model, policy_cfg.dim_model),
-        )
-        n_tokens += 1
+        if policy_cfg.use_prompt:
+            self.bert = CachedDistilBertEmbedder(max_cache_size=policy_cfg.bert_max_cache_size)
+            self.bert_proj = nn.Sequential(
+                nn.Linear(self.bert.embed_dim, policy_cfg.dim_model),
+                nn.GELU(),
+                nn.Dropout(policy_cfg.dropout),
+                nn.Linear(policy_cfg.dim_model, policy_cfg.dim_model),
+            )
+            n_tokens += 1
         
         self.pool = AttentionPooling(
             hidden_size=policy_cfg.dim_model,
@@ -360,11 +358,6 @@ class FlowModel(nn.Module):
         mask = torch.rand(b, s, device=img.device) >= self.cfg.obs_steps_dropout
         mask = mask.type_as(img) # shape: (B, L)
 
-        text_cond = self.bert(batch["task"])
-        tokens.append(
-            self.bert_proj(text_cond).unsqueeze(1)  # (B, 1, D)
-        )
-
         # state
         tokens.append(
             self.state_proj(
@@ -401,16 +394,10 @@ class FlowModel(nn.Module):
 
         # foveal vision
         if self.cfg.use_gaze:
-            gmm = self.spatial_mdn.forward(
-                img,
-                einops.repeat(text_cond, "b d -> (b s n) d", b=b, s=s, n=n)
-            )
-
+            gaze = torch.stack([batch[key] for key in self.cfg.image_to_gaze_key.values()], dim=2)
+            gaze = einops.rearrange(gaze, 'b s n c -> (b s n) c') 
             if self.training:
-                gaze = gmm.sample((1,)).squeeze(0)  # Sample from the GMM
-            else:
-                gaze = gmm_highest_probability_mean(gmm)
-
+                gaze = gaze + torch.randn_like(gaze) * self.cfg.gaze_noise
             foveal = crop_at_kp(
                 images=img, 
                 crop_scale=self.cfg.foveal_crop_scale,
@@ -441,7 +428,10 @@ class FlowModel(nn.Module):
                 )
             )
 
-        
+        if self.cfg.use_prompt:
+            tokens.append(
+                self.bert_proj(self.bert(batch["task"])).unsqueeze(1)  # (B, 1, D)
+            )
 
         tokens = torch.cat(tokens, dim=1)
         pos_embed = self.pool_pos_embed.weight.unsqueeze(0)
