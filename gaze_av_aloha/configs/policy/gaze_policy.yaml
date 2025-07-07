@@ -7,15 +7,20 @@ n_obs_steps: 1
 obs_step_size: 1
 obs_steps_dropout: 0.0
 
+vision_encoder: resnet
+vision_encoder_kwargs:
+  pool: true
+
 use_last_periph_only: true
 input_shape: [240, 320]
 periph_shape: [70, 70]
 periph_crop_scale: 0.9
+
+use_gaze: true
+spatial_mdn_path: "iantc104/spatial_mdn_av_aloha_sim_4c"
+sample_prob: 0.5
 foveal_shape: [70, 70]
 foveal_crop_scale: 0.3
-
-freeze_n_layers: 6
-use_gaze: true
 
 optimizer_lr: 1e-4
 optimizer_lr_backbone: 1e-5
