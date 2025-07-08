@@ -23,7 +23,7 @@ envs:
       enable_av: True
       max_episode_steps: 100
     eval_n_episodes: 50
-    eval_n_envs: 2
+    eval_n_envs: 5
     eval_options:
       iid:
         prompt: "thread needle through wall"

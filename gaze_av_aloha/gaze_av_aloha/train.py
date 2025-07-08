@@ -2,6 +2,8 @@ import logging
 import time
 from pprint import pformat
 import torch
+from torch.amp import GradScaler
+from contextlib import nullcontext
 from gaze_av_aloha.utils.dataset_utils import cycle, EpisodeAwareSampler
 from gaze_av_aloha.utils.logging_utils import AverageMeter, MetricsTracker, format_big_number
 import hydra
@@ -153,6 +155,7 @@ def train(cfg: Config):
     logging.info(f"Creating optimizer, scheduler,")
     optimizer = policy.get_optimizer()
     lr_scheduler = policy.get_scheduler(optimizer, cfg.train.steps)
+    grad_scaler = GradScaler(device.type, enabled=cfg.train.use_amp)
     ema = policy.get_ema()
     step = 0  # number of policy updates (forward + backward + optim)
 
@@ -238,15 +241,24 @@ def train(cfg: Config):
 
         start_time = time.perf_counter()
         policy.train()
-        optimizer.zero_grad()
-        loss, output_dict = policy.forward(batch)
-        loss.backward()
+
+
+        with torch.autocast(device_type=device.type) if cfg.train.use_amp else nullcontext():
+            loss, output_dict = policy.forward(batch)
+            # TODO(rcadene): policy.unnormalize_outputs(out_dict)
+        grad_scaler.scale(loss).backward()
+        # Unscale the gradient of the optimizer's assigned params in-place **prior to gradient clipping**.
+        grad_scaler.unscale_(optimizer)
         grad_norm = torch.nn.utils.clip_grad_norm_(
             policy.parameters(),
             cfg.train.grad_clip_norm,
             error_if_nonfinite=False,
         )
-        optimizer.step()
+        grad_scaler.step(optimizer)
+        # Updates the scale for next iteration.
+        grad_scaler.update()
+        optimizer.zero_grad()
+
         if lr_scheduler is not None:
             lr_scheduler.step()
         if ema is not None:

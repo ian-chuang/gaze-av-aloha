@@ -47,6 +47,7 @@ class TrainConfig:
     batch_size: int = 64
 
     grad_clip_norm: float = 1.0
+    use_amp: bool = False
 
 @dataclass
 class PolicyConfig:
