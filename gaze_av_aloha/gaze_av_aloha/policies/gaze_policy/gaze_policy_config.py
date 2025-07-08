@@ -29,7 +29,7 @@ class GazePolicyConfig(PolicyConfig):
     grid_sizes: tuple[int] = (2, 3, 3)
     gaze_noise: float = 0.0
 
-    crop_scale: float = 0.9 # only when gaze is not used
+    crop_shape: tuple[int] = (216, 288) # only when gaze is not used
 
     # Transformer Layers
     dim_model: int = 512
