@@ -22,7 +22,7 @@ from gaze_av_aloha.policies.gaze_policy.transformer import DiT, AttentionPooling
 from gaze_av_aloha.policies.gaze_policy.vit import create_vit_b
 from gaze_av_aloha.policies.gaze_policy.tokenizer import FoveatedImageTokenizer, BaseImageTokenizer
 from gaze_av_aloha.policies.gaze_policy.utils import sample_beta, crop_at_kp, random_crop
-from torchvision.transforms import Resize
+from torchvision.transforms import Resize, CenterCrop, RandomCrop
 
 import logging
 
@@ -345,13 +345,10 @@ class FlowModel(nn.Module):
                 ) 
             )
         else:
-            if self.cfg.crop_scale < 1.0 - 1e-4:
-                img, _ = random_crop(
-                    images = img,
-                    crop_scale = self.cfg.crop_scale,
-                    out_shape = self.cfg.vit_input_shape,
-                    random = self.training,
-                )
+            if self.training:
+                img = RandomCrop(self.cfg.crop_shape)(img)  # random crop if not using gaze
+            else:
+                img = CenterCrop(self.cfg.crop_shape)(img)
             gaze = None
         
         patch_tokens, masks = self.tokenizer.tokenize(img, gaze)

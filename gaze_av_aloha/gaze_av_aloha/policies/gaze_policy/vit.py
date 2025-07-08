@@ -46,6 +46,26 @@ def extend_valid_token_mask(
         dim=1,
     )
 
+def drop_path(x: torch.Tensor, drop_prob: float = 0.0, training: bool = False):
+    if drop_prob == 0.0 or not training:
+        return x
+    keep_prob = 1 - drop_prob
+    shape = (x.shape[0],) + (1,) * (x.ndim - 1)  # work with diff dim tensors, not just 2D ConvNets
+    random_tensor = x.new_empty(shape).bernoulli_(keep_prob)
+    if keep_prob > 0.0:
+        random_tensor.div_(keep_prob)
+    return x * random_tensor
+
+class DropPath(torch.nn.Module):
+    """Drop paths (Stochastic Depth) per sample  (when applied in main path of residual blocks)."""
+
+    def __init__(self, drop_prob: float = 0.0):
+        super(DropPath, self).__init__()
+        self.drop_prob = drop_prob
+
+    def forward(self, x):
+        return drop_path(x, self.drop_prob, self.training)
+
 class Block(torch.nn.Module):
     def __init__(
         self,
@@ -53,24 +73,26 @@ class Block(torch.nn.Module):
         num_heads: int,
         act_layer: Type[torch.nn.Module],
         mlp_dim: Optional[int] = None,
-        dropout: float = 0.0,
+        drop: float = 0.0,
+        drop_path: float = 0.0,
     ) -> None:
         super().__init__()
 
         if mlp_dim is None:
             mlp_dim = 4 * dim
 
+        self.drop_path = DropPath(drop_path) if drop_path > 0.0 else torch.nn.Identity()
         self.norm1 = torch.nn.LayerNorm(dim)
         self.norm2 = torch.nn.LayerNorm(dim)
         self.attn = torch.nn.MultiheadAttention(
-            embed_dim=dim, num_heads=num_heads, batch_first=True, dropout=dropout
+            embed_dim=dim, num_heads=num_heads, batch_first=True, dropout=drop
         )
         self.mlp = Mlp(
             in_features=dim,
             hidden_features=mlp_dim,
             out_features=dim,
             act_layer=act_layer,
-            drop=dropout,
+            drop=drop,
         )
 
     def forward(
@@ -80,9 +102,9 @@ class Block(torch.nn.Module):
         x = self.norm1(x)
 
         x = self.attn(x, x, x, key_padding_mask=invalid_token_mask)[0]
-        x = shortcut + x
+        x = shortcut + self.drop_path(x)
 
-        x = x + self.mlp(self.norm2(x))
+        x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x
 
 class ImageEncoder(torch.nn.Module):
@@ -95,7 +117,8 @@ class ImageEncoder(torch.nn.Module):
         embedding_dim: int,
         num_heads: int,
         act_layer: Type[torch.nn.Module],
-        dropout: float = 0.0,
+        drop: float = 0.0,
+        drop_path: float = 0.0,
     ):
         super().__init__()
 
@@ -113,7 +136,8 @@ class ImageEncoder(torch.nn.Module):
                     dim=embedding_dim,
                     num_heads=num_heads,
                     act_layer=act_layer,
-                    dropout=dropout,
+                    drop=drop,
+                    drop_path=drop_path,
                 )
             )
 
@@ -177,7 +201,8 @@ def create_vit_s(num_tokens, patch_size) -> ImageEncoder:
         embedding_dim=384,
         num_heads=6,
         act_layer=torch.nn.GELU,
-        dropout=0.1,
+        drop=0.1,
+        drop_path=0.1,
     )
 
 def create_vit_b(num_tokens, patch_size) -> ImageEncoder:
@@ -189,6 +214,7 @@ def create_vit_b(num_tokens, patch_size) -> ImageEncoder:
         embedding_dim=768,
         num_heads=12,
         act_layer=torch.nn.GELU,
-        dropout=0.1,
+        drop=0.1,
+        drop_path=0.1,
     )
 
