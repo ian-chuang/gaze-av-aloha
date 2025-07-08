@@ -29,7 +29,11 @@ class GazePolicyConfig(PolicyConfig):
     grid_sizes: tuple[int] = (2, 3, 3)
     gaze_noise: float = 0.0
 
-    crop_shape: tuple[int] = (216, 288) # only when gaze is not used
+    use_crop: bool = False # only when gaze is not used
+    crop_shape: tuple[int] = (216, 288) 
+
+    use_language: bool = True
+    bert_cache_size: int = 1000
 
     # Transformer Layers
     dim_model: int = 512
@@ -53,7 +57,7 @@ class GazePolicyConfig(PolicyConfig):
     optimizer_lr_backbone: float = 1e-4
     optimizer_betas: tuple = (0.95, 0.999)
     optimizer_eps: float = 1e-8
-    optimizer_weight_decay: float = 1e-6
+    optimizer_weight_decay: float = 1e-3
     scheduler_name: str = "cosine"
     scheduler_warmup_steps: int = 500
     use_ema: bool = True

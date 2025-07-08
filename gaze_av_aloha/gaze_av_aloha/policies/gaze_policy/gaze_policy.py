@@ -20,6 +20,7 @@ from collections import deque
 
 from gaze_av_aloha.policies.gaze_policy.transformer import DiT, AttentionPooling
 from gaze_av_aloha.policies.gaze_policy.vit import create_vit_b
+from gaze_av_aloha.policies.gaze_policy.bert import CachedDistilBertEmbedder
 from gaze_av_aloha.policies.gaze_policy.tokenizer import FoveatedImageTokenizer, BaseImageTokenizer
 from gaze_av_aloha.policies.gaze_policy.utils import sample_beta, crop_at_kp, random_crop
 from torchvision.transforms import Resize, CenterCrop, RandomCrop
@@ -247,6 +248,11 @@ class FlowModel(nn.Module):
         )
         n_tokens += n_obs_steps
 
+        if policy_cfg.use_language:
+            self.bert = CachedDistilBertEmbedder(max_cache_size=policy_cfg.bert_cache_size)
+            self.bert_proj = nn.Linear(self.bert.embed_dim, policy_cfg.dim_model)
+            n_tokens += 1
+
         if policy_cfg.use_gaze:
             self.tokenizer = FoveatedImageTokenizer(
                 token_size=policy_cfg.patch_size,
@@ -331,6 +337,11 @@ class FlowModel(nn.Module):
         # state
         tokens.append(self.state_proj(batch[self.task_cfg.state_key]))
 
+        if self.cfg.use_language:
+            tokens.append(
+                self.bert_proj(self.bert(batch["task"])).unsqueeze(1)  # (B, 1, D)
+            )
+
         # foveal vision
         if self.cfg.use_gaze:
             gaze = torch.stack([batch[key] for key in self.cfg.image_to_gaze_key.values()], dim=2)
@@ -345,10 +356,11 @@ class FlowModel(nn.Module):
                 ) 
             )
         else:
-            if self.training:
-                img = RandomCrop(self.cfg.crop_shape)(img)  # random crop if not using gaze
-            else:
-                img = CenterCrop(self.cfg.crop_shape)(img)
+            if self.cfg.use_crop:
+                if self.training:
+                    img = RandomCrop(self.cfg.crop_shape)(img)  # random crop if not using gaze
+                else:
+                    img = CenterCrop(self.cfg.crop_shape)(img)
             gaze = None
         
         patch_tokens, masks = self.tokenizer.tokenize(img, gaze)
