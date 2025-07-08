@@ -1,5 +1,6 @@
 from typing import Optional, Type, Callable
 import torch
+from timm.layers import Mlp
 
 def named_apply(fn: Callable, module: torch.nn.Module, name="", depth_first=True, include_root=False) -> torch.nn.Module:
     if not depth_first and include_root:
@@ -45,28 +46,6 @@ def extend_valid_token_mask(
         dim=1,
     )
 
-class MLPBlock(torch.nn.Module):
-    def __init__(
-        self,
-        input_dim: int,
-        hidden_dim: int,
-        output_dim: int,
-        num_layers: int,
-        act_layer: Type[torch.nn.Module],
-    ) -> None:
-        super().__init__()
-        h = [hidden_dim] * (num_layers - 1)
-        self.layers = torch.nn.ModuleList(
-            torch.nn.Sequential(torch.nn.Linear(n, k), act_layer())
-            for n, k in zip([input_dim] + h, [hidden_dim] * num_layers)
-        )
-        self.fc = torch.nn.Linear(hidden_dim, output_dim)
-
-    def forward(self, x):
-        for layer in self.layers:
-            x = layer(x)
-        return self.fc(x)
-
 class Block(torch.nn.Module):
     def __init__(
         self,
@@ -74,6 +53,7 @@ class Block(torch.nn.Module):
         num_heads: int,
         act_layer: Type[torch.nn.Module],
         mlp_dim: Optional[int] = None,
+        dropout: float = 0.0,
     ) -> None:
         super().__init__()
 
@@ -83,14 +63,14 @@ class Block(torch.nn.Module):
         self.norm1 = torch.nn.LayerNorm(dim)
         self.norm2 = torch.nn.LayerNorm(dim)
         self.attn = torch.nn.MultiheadAttention(
-            embed_dim=dim, num_heads=num_heads, batch_first=True
+            embed_dim=dim, num_heads=num_heads, batch_first=True, dropout=dropout
         )
-        self.mlp = MLPBlock(
-            input_dim=dim,
-            hidden_dim=mlp_dim,
-            output_dim=dim,
-            num_layers=1,
+        self.mlp = Mlp(
+            in_features=dim,
+            hidden_features=mlp_dim,
+            out_features=dim,
             act_layer=act_layer,
+            drop=dropout,
         )
 
     def forward(
@@ -115,6 +95,7 @@ class ImageEncoder(torch.nn.Module):
         embedding_dim: int,
         num_heads: int,
         act_layer: Type[torch.nn.Module],
+        dropout: float = 0.0,
     ):
         super().__init__()
 
@@ -132,6 +113,7 @@ class ImageEncoder(torch.nn.Module):
                     dim=embedding_dim,
                     num_heads=num_heads,
                     act_layer=act_layer,
+                    dropout=dropout,
                 )
             )
 
@@ -186,6 +168,18 @@ class ImageEncoder(torch.nn.Module):
 
         return features.split([features.shape[1] - num_registers, num_registers], dim=1)
 
+def create_vit_s(num_tokens, patch_size) -> ImageEncoder:
+    return ImageEncoder(
+        num_tokens=num_tokens,
+        num_registers=1,
+        patch_size=patch_size,
+        depth=12,
+        embedding_dim=384,
+        num_heads=6,
+        act_layer=torch.nn.GELU,
+        dropout=0.1,
+    )
+
 def create_vit_b(num_tokens, patch_size) -> ImageEncoder:
     return ImageEncoder(
         num_tokens=num_tokens,
@@ -194,6 +188,7 @@ def create_vit_b(num_tokens, patch_size) -> ImageEncoder:
         depth=12,
         embedding_dim=768,
         num_heads=12,
-        act_layer=torch.nn.ReLU,
+        act_layer=torch.nn.GELU,
+        dropout=0.1,
     )
 
