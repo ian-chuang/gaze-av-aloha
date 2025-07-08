@@ -3,8 +3,8 @@ defaults:
 
 # Training settings
 steps: 200_000
-eval_freq: 30_000
-viz_freq: 30_000
+eval_freq: 20_000
+viz_freq: 10_000
 log_freq: 100
 save_checkpoint: true
 save_freq: 5_000
@@ -12,3 +12,4 @@ keep_freq: 100_000
 num_workers: 4
 batch_size: 64
 grad_clip_norm: 1.0
+use_amp: true

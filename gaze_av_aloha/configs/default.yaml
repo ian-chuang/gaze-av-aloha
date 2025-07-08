@@ -3,7 +3,7 @@ defaults:
   - base_config
   - policy: gaze_policy
   - task: av_aloha_sim_thread_needle
-  - train: short
+  - train: default
   - wandb: gaze
 
 hydra:
