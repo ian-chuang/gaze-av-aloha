@@ -32,4 +32,7 @@ MUJOCO_EGL_DEVICE_ID=0 python train.py policy=gaze_policy task=av_aloha_sim_thre
 MUJOCO_EGL_DEVICE_ID=0 python train.py policy=no_gaze_policy task=av_aloha_sim_thread_needle policy.n_obs_steps=1 wandb.job_name=1obs device=cuda:0
 MUJOCO_EGL_DEVICE_ID=1 python train.py policy=gaze_policy task=av_aloha_sim_thread_needle policy.n_obs_steps=1 wandb.job_name=gaze_1obs device=cuda:1 
 
+MUJOCO_EGL_DEVICE_ID=2 python train.py policy=no_gaze_policy task=av_aloha_sim_thread_needle policy.n_obs_steps=1 policy.crop_scale=0.9 wandb.job_name=1obs_crop device=cuda:2
+
+MUJOCO_EGL_DEVICE_ID=3 python train.py policy=gaze_policy task=av_aloha_sim_thread_needle policy.n_obs_steps=1 policy.gaze_noise=0.02 wandb.job_name=gaze_1obs_noise0.02 device=cuda:3
 <!-- MUJOCO_EGL_DEVICE_ID=2 python train.py policy=no_gaze_policy task=av_aloha_sim_thread_needle policy.n_obs_steps=1 wandb.job_name=1obs_amp device=cuda:2 train.use_amp=true -->

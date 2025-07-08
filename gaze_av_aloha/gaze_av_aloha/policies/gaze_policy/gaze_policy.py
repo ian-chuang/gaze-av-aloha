@@ -346,8 +346,6 @@ class FlowModel(nn.Module):
             )
         else:
             if self.cfg.crop_scale < 1.0 - 1e-4:
-                # TODO REMOVE THIS
-                print("Using random crop for non-gaze policy. This is not recommended and may lead to unexpected results.")
                 img, _ = random_crop(
                     images = img,
                     crop_scale = self.cfg.crop_scale,
