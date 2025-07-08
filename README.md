@@ -24,7 +24,12 @@ python train.py policy=gaze_policy task=av_aloha_sim_hook_package wandb.enable=f
 ```
 
 
-MUJOCO_EGL_DEVICE_ID=0 python train.py policy=no_gaze_policy task=av_aloha_sim policy.n_obs_steps=1 wandb.job_name=1obs device=cuda:0
-MUJOCO_EGL_DEVICE_ID=1 python train.py policy=gaze_policy task=av_aloha_sim policy.n_obs_steps=1 wandb.job_name=gaze_1obs device=cuda:1
-MUJOCO_EGL_DEVICE_ID=2 python train.py policy=gaze_policy task=av_aloha_sim policy.n_obs_steps=4 wandb.job_name=gaze_4obs device=cuda:2
+MUJOCO_EGL_DEVICE_ID=0 python train.py policy=no_gaze_policy task=av_aloha_sim_thread_needle policy.n_obs_steps=1 wandb.job_name=1obs device=cuda:0 wandb.enable=false train.eval_freq=100 train.viz_freq=99
+MUJOCO_EGL_DEVICE_ID=0 python train.py policy=gaze_policy task=av_aloha_sim_thread_needle policy.n_obs_steps=1 wandb.job_name=1obs device=cuda:0 wandb.enable=false train.eval_freq=100 train.viz_freq=99
 
+
+
+MUJOCO_EGL_DEVICE_ID=0 python train.py policy=no_gaze_policy task=av_aloha_sim_thread_needle policy.n_obs_steps=1 wandb.job_name=1obs device=cuda:0
+MUJOCO_EGL_DEVICE_ID=1 python train.py policy=gaze_policy task=av_aloha_sim_thread_needle policy.n_obs_steps=1 wandb.job_name=gaze_1obs device=cuda:1 
+
+<!-- MUJOCO_EGL_DEVICE_ID=2 python train.py policy=no_gaze_policy task=av_aloha_sim_thread_needle policy.n_obs_steps=1 wandb.job_name=1obs_amp device=cuda:2 train.use_amp=true -->

@@ -1,0 +1,7 @@
+defaults:
+  - base_gaze_policy_config
+
+type: gaze_policy
+
+# Gaze
+image_to_gaze_key: {}

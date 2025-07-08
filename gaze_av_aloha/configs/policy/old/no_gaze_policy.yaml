@@ -3,5 +3,24 @@ defaults:
 
 type: gaze_policy
 
+n_obs_steps: 1
+obs_step_size: 1
+obs_steps_dropout: 0.0
+
+vision_encoder: resnet
+vision_encoder_kwargs:
+  pool: true
+
+use_last_periph_only: false
+input_shape: [240, 320]
+periph_shape: [224, 224]
+periph_crop_scale: 0.9
+
+use_gaze: false
+
+optimizer_lr: 1e-4
+optimizer_lr_backbone: 1e-5
+
 # Gaze
-image_to_gaze_key: {}
+image_to_gaze_key:
+  observation.images.zed_cam_left: left_eye
