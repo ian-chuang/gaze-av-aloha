@@ -248,7 +248,7 @@ class FlowModel(nn.Module):
         }
         self.state_keys_to_dim = {
             task_cfg.state_key: task_cfg.state_dim,
-            **{k: 2 for k in policy_cfg.image_to_gaze_key.keys() if policy_cfg.use_gaze},
+            **{k: 2 for k in policy_cfg.image_to_gaze_key.values() if policy_cfg.use_gaze},
         }
         self.noise_dim = sum(self.target_keys_to_dim.values())
         self.proprio_dim = sum(self.state_keys_to_dim.values())
@@ -305,9 +305,7 @@ class FlowModel(nn.Module):
         img_feat = einops.rearrange(img_feat, 'b s n l d -> b (s n l) d')
         img_feat = self.pool(img_feat)
 
-        proprio = torch.cat(
-            [batch[key] for key in self.state_keys_to_dim.keys()], dim=-1
-        )
+        proprio = torch.cat([batch[key] for key in self.state_keys_to_dim.keys()], dim=-1)
 
         cond = {
             "img_feat": img_feat,
