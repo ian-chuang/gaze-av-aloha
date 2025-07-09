@@ -45,3 +45,13 @@ MUJOCO_EGL_DEVICE_ID=1 python train.py policy=flow_policy task=av_aloha_sim_pour
 MUJOCO_EGL_DEVICE_ID=2 python train.py policy=flow_policy task=av_aloha_sim_slot_insertion wandb.job_name=slot_flow_1obs device=cuda:2 
 
 MUJOCO_EGL_DEVICE_ID=3 python train.py policy=flow_policy task=av_aloha_sim_hook_package wandb.job_name=hook_flow_1obs device=cuda:3
+
+# flare policy 
+
+MUJOCO_EGL_DEVICE_ID=0 python train.py policy=flare_policy task=av_aloha_sim_peg_insertion policy.flow_matcher_name=conditional wandb.job_name=peg_flare_conditional device=cuda:0 
+
+MUJOCO_EGL_DEVICE_ID=1 python train.py policy=flare_policy task=av_aloha_sim_pour_test_tube policy.flow_matcher_name=conditional wandb.job_name=pour_flare_conditional device=cuda:1 
+
+MUJOCO_EGL_DEVICE_ID=2 python train.py policy=flare_policy task=av_aloha_sim_slot_insertion policy.flow_matcher_name=conditional wandb.job_name=slot_flare_conditional device=cuda:2 
+
+MUJOCO_EGL_DEVICE_ID=3 python train.py policy=flare_policy task=av_aloha_sim_hook_package policy.flow_matcher_name=conditional wandb.job_name=hook_flare_conditional device=cuda:3

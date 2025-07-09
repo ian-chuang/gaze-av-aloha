@@ -78,9 +78,9 @@ def train(cfg: Config):
     if cfg.policy.type == "gaze_policy":
         from gaze_av_aloha.policies.gaze_policy.gaze_policy import GazePolicy
         policy = GazePolicy(policy_cfg=cfg.policy, task_cfg=cfg.task, stats=stats)
-    elif cfg.policy.type == "foveated_policy":
-        from gaze_av_aloha.policies.foveated_policy.foveated_policy import FoveatedPolicy
-        policy = FoveatedPolicy(policy_cfg=cfg.policy, task_cfg=cfg.task, stats=stats)
+    elif cfg.policy.type == "flare_policy":
+        from gaze_av_aloha.policies.flare_policy.flare_policy import FlarePolicy
+        policy = FlarePolicy(policy_cfg=cfg.policy, task_cfg=cfg.task, stats=stats)
     elif cfg.policy.type == "diffusion_policy":
         from gaze_av_aloha.policies.diffusion_policy.diffusion_policy import DiffusionPolicy
         policy = DiffusionPolicy(policy_cfg=cfg.policy, task_cfg=cfg.task, stats=stats)
