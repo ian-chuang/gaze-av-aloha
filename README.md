@@ -52,6 +52,11 @@ MUJOCO_EGL_DEVICE_ID=0 python train.py policy=flare_policy task=av_aloha_sim_peg
 
 MUJOCO_EGL_DEVICE_ID=1 python train.py policy=flare_policy task=av_aloha_sim_pour_test_tube policy.flow_matcher_name=conditional wandb.job_name=pour_flare_conditional device=cuda:1 
 
-MUJOCO_EGL_DEVICE_ID=2 python train.py policy=flare_policy task=av_aloha_sim_slot_insertion policy.flow_matcher_name=conditional wandb.job_name=slot_flare_conditional device=cuda:2 
+MUJOCO_EGL_DEVICE_ID=2 python train.py policy=gaze_policy task=av_aloha_sim_slot_insertion policy.flow_matcher_name=conditional wandb.job_name=slot_gaze_conditional_dino device=cuda:2 
 
-MUJOCO_EGL_DEVICE_ID=3 python train.py policy=flare_policy task=av_aloha_sim_hook_package policy.flow_matcher_name=conditional wandb.job_name=hook_flare_conditional device=cuda:3
+MUJOCO_EGL_DEVICE_ID=3 python train.py policy=gaze_policy task=av_aloha_sim_hook_package policy.flow_matcher_name=conditional wandb.job_name=hook_gaze_conditional device=cuda:3 policy.use_gaze=true train.eval_freq=100
+
+
+MUJOCO_EGL_DEVICE_ID=2 python train.py policy=gaze_policy task=av_aloha_sim_slot_insertion policy.flow_matcher_name=conditional wandb.job_name=slot_gaze_conditional_resnet_notempens device=cuda:2 
+
+MUJOCO_EGL_DEVICE_ID=3 python train.py policy=gaze_policy task=av_aloha_sim_slot_insertion policy.flow_matcher_name=conditional wandb.job_name=slot_gaze_conditional_resnet_tempens device=cuda:3

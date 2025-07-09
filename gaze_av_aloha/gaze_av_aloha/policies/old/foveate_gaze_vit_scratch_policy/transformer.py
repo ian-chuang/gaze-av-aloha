@@ -40,7 +40,7 @@ class DiTBlock(nn.Module):
         k = v = c
         x = x + self.xattn(q, k, v, need_weights=False)[0]
 
-        x = x + gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
+        x = x + gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm3(x), shift_mlp, scale_mlp))
 
         return x
 
