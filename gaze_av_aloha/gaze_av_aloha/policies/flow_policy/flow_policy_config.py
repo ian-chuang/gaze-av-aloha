@@ -1,58 +1,83 @@
-from dataclasses import field, dataclass
+#!/usr/bin/env python
+
+# Copyright 2024 Columbia Artificial Intelligence, Robotics Lab,
+# and The HuggingFace Inc. team. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+from dataclasses import dataclass
 from gaze_av_aloha.configs import PolicyConfig
 
 @dataclass
 class FlowPolicyConfig(PolicyConfig):
     type: str = "flow_policy"
 
+    # Inputs / output structure.
     n_obs_steps: int = 1
-    obs_step_size: int = 1
-    n_action_steps: int = 8
     horizon: int = 16
-    use_temporal_ensemble: bool = False
-    temporal_ensemble_coeff: float = 0.0
-    drop_n_last_frames: int = 24
-    
-    # Observation
+    n_action_steps: int = 8
+
     image_norm_mode: str = "mean_std"
-    state_norm_mode: str = "min_max" 
-    action_norm_mode: str = "min_max" 
-    image_to_gaze_key: dict[str, str] = field(default_factory=lambda: {})
-    resize_shape: tuple = (240, 320)
-    crop_shape: tuple = (224, 294)
+    state_norm_mode: str = "mean_std"
+    action_norm_mode: str = "mean_std"
+
+    # The original implementation doesn't sample frames for the last 7 steps,
+    # which avoids excessive padding and leads to improved training results.
+    drop_n_last_frames: int = 21  # horizon - n_action_steps - n_obs_steps + 1
+
+    # Architecture / modeling.
+    # Vision backbone.
+    vision_backbone: str = "resnet18"
+    image_shape: tuple[int, int] = (240, 320)
+    crop_shape: tuple[int, int] | None = (216, 288)
     crop_is_random: bool = True
-    dino_freeze_n_layers: int = 6
-    state_dropout: float = 0.1
+    pretrained_backbone_weights: str | None = None
+    use_group_norm: bool = True
+    spatial_softmax_num_keypoints: int = 32
+    use_separate_rgb_encoder_per_camera: bool = False
+    # Unet.
+    down_dims: tuple[int, ...] = (512, 1024, 2048)
+    kernel_size: int = 5
+    n_groups: int = 8
+    diffusion_step_embed_dim: int = 128
+    use_film_scale_modulation: bool = True
 
-    # gaze
-    gaze_sigma = 0.1
-    gaze_k: int = 40
-    gaze_prob: float = 0.5
+    # Inference
+    num_inference_steps: int = 8
 
-    # Transformer Layers
-    dim_model: int = 512
-    n_heads: int = 8
-    mlp_ratio: float = 4.0
-    dropout: float = 0.1
+    # Loss computation
+    do_mask_loss_for_padding: bool = False
 
-    # Attention Pooling
-    pool_n_queries: int = 16
-    pool_n_layers: int = 2
-
-    # DiT
-    dit_n_layers: int = 8
-    time_dim: int = 128
-
-    # Flow Matching
-    n_sampling_steps: int = 6
-
-    # Training
+    # Training presets
     optimizer_lr: float = 1e-4
-    optimizer_lr_backbone: float = 1e-5
     optimizer_betas: tuple = (0.95, 0.999)
     optimizer_eps: float = 1e-8
     optimizer_weight_decay: float = 1e-6
     scheduler_name: str = "cosine"
     scheduler_warmup_steps: int = 500
-    use_ema: bool = True
-    ema_decay: float = 0.99
+
+    def __post_init__(self):
+        """Input validation (not exhaustive)."""
+        if not self.vision_backbone.startswith("resnet"):
+            raise ValueError(
+                f"`vision_backbone` must be one of the ResNet variants. Got {self.vision_backbone}."
+            )
+
+        # Check that the horizon size and U-Net downsampling is compatible.
+        # U-Net downsamples by 2 with each stage.
+        downsampling_factor = 2 ** len(self.down_dims)
+        if self.horizon % downsampling_factor != 0:
+            raise ValueError(
+                "The horizon should be an integer multiple of the downsampling factor (which is determined "
+                f"by `len(down_dims)`). Got {self.horizon=} and {self.down_dims=}"
+            )
+    

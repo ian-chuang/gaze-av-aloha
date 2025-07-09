@@ -3,7 +3,7 @@ defaults:
 
 # WandB settings
 enable: true
-project: foveated-vit
+project: foveated-vit-sim
 entity: ianc-uc-berkeley
 job_name: ${policy.type}_${task.type}
 run_id: ???
