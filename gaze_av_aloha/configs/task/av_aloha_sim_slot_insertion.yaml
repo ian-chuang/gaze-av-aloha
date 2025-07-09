@@ -25,7 +25,7 @@ envs:
         # zed_cam_right: [480, 640]
       render_camera: zed_cam_left
       enable_av: True
-      max_episode_steps: 75
+      max_episode_steps: 100
     eval_n_episodes: 50
     eval_n_envs: 5
     eval_options:
@@ -37,7 +37,7 @@ envs:
       # ood_lighting:
       #   prompt: "insert stick into slot"
       #   randomize_light: true
-    visualization_steps: 75
+    visualization_steps: 100
 
 fps: 8.333333333333
 image_keys:
