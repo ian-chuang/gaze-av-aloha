@@ -1,0 +1,23 @@
+defaults:
+  - base_gaze_policy_config
+
+type: gaze_policy
+
+n_obs_steps: 1
+obs_step_size: 1
+
+image_to_gaze_key:
+  observation.images.zed_cam_left: left_eye
+input_shape: [240, 320]
+
+patch_size: 16
+vit_input_shape: [288, 288]
+use_gaze: true
+strides: [1, 2, 6]
+grid_sizes: [2, 3, 3]
+gaze_noise: 0.0
+
+use_language: false
+
+optimizer_lr: 1e-4
+optimizer_lr_backbone: 1e-4
