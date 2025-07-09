@@ -17,7 +17,7 @@ use_gaze: false
 use_crop: false
 crop_shape: [216, 288]
 
-use_language: true
+use_language: false
 
 optimizer_lr: 1e-4
 optimizer_lr_backbone: 1e-4

@@ -22,13 +22,13 @@ class DiffusionPolicyConfig(PolicyConfig):
     type: str = "diffusion_policy"
 
     # Inputs / output structure.
-    n_obs_steps: int = 2
+    n_obs_steps: int = 1
     horizon: int = 16
     n_action_steps: int = 8
 
     image_norm_mode: str = "mean_std"
-    state_norm_mode: str = "min_max"
-    action_norm_mode: str = "min_max"
+    state_norm_mode: str = "mean_std"
+    action_norm_mode: str = "mean_std"
 
     # The original implementation doesn't sample frames for the last 7 steps,
     # which avoids excessive padding and leads to improved training results.

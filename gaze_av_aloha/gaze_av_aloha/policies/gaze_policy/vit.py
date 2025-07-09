@@ -202,7 +202,7 @@ def create_vit_s(num_tokens, patch_size) -> ImageEncoder:
         num_heads=6,
         act_layer=torch.nn.GELU,
         drop=0.1,
-        drop_path=0.1,
+        drop_path=0.0,
     )
 
 def create_vit_b(num_tokens, patch_size) -> ImageEncoder:
@@ -215,6 +215,6 @@ def create_vit_b(num_tokens, patch_size) -> ImageEncoder:
         num_heads=12,
         act_layer=torch.nn.GELU,
         drop=0.1,
-        drop_path=0.1,
+        drop_path=0.0,
     )
 

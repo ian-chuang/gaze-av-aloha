@@ -10,13 +10,13 @@ class GazePolicyConfig(PolicyConfig):
     n_action_steps: int = 2
     horizon: int = 16
     use_temporal_ensemble: bool = True
-    temporal_ensemble_coeff: float = 0.0
+    temporal_ensemble_coeff: float = -0.01
     drop_n_last_frames: int = 6
     
     # Observation
     image_norm_mode: str = "mean_std"
-    state_norm_mode: str = "min_max" 
-    action_norm_mode: str = "min_max" 
+    state_norm_mode: str = "mean_std" 
+    action_norm_mode: str = "mean_std" 
     image_to_gaze_key: dict[str, str] = field(default_factory=lambda: {})
     input_shape: tuple = (240, 320)
 
@@ -32,7 +32,7 @@ class GazePolicyConfig(PolicyConfig):
     use_crop: bool = False # only when gaze is not used
     crop_shape: tuple[int] = (216, 288) 
 
-    use_language: bool = True
+    use_language: bool = False
     bert_cache_size: int = 1000
 
     # Transformer Layers
@@ -57,7 +57,7 @@ class GazePolicyConfig(PolicyConfig):
     optimizer_lr_backbone: float = 1e-4
     optimizer_betas: tuple = (0.95, 0.999)
     optimizer_eps: float = 1e-8
-    optimizer_weight_decay: float = 1e-3
+    optimizer_weight_decay: float = 1e-4
     scheduler_name: str = "cosine"
     scheduler_warmup_steps: int = 500
     use_ema: bool = True

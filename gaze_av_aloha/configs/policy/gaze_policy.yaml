@@ -17,7 +17,7 @@ strides: [1, 2, 6]
 grid_sizes: [2, 3, 3]
 gaze_noise: 0.0
 
-use_language: true
+use_language: false
 
 optimizer_lr: 1e-4
 optimizer_lr_backbone: 1e-4
