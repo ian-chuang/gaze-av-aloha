@@ -67,13 +67,23 @@ class AttentionPooling(nn.Module):
         self.blocks = nn.ModuleList([
             TransformerBlock(
                 dim=dim, 
-                cond_dim=cond_dim if i % 2 == 0 else None, 
+                cond_dim=cond_dim, 
                 num_heads=num_heads, 
                 dropout=dropout,
                 cross_attn_only=True if i == 0 else False,
             ) for i in range(layers)
         ])
         self.norm2 = nn.LayerNorm(dim)
+        self.initialize_weights()
+
+    def initialize_weights(self):
+        # Initialize transformer layers:
+        def _basic_init(module):
+            if isinstance(module, nn.Linear):
+                torch.nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0)
+        self.apply(_basic_init)
 
     def forward(self, cond):
         x = self.queries.expand(cond.shape[0], -1, -1)
