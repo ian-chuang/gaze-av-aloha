@@ -31,9 +31,9 @@ envs:
     eval_options:
       iid:
         prompt: "pick red cube"
-      # ood_distractors:
-      #   prompt: "pick red cube"
-      #   distractors: true
+      ood_distractors:
+        prompt: "pick red cube"
+        distractors: true
       # ood_lighting:
       #   prompt: "pick red cube"
       #   randomize_light: true

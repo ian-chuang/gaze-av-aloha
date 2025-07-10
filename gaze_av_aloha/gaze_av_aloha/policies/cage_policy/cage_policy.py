@@ -241,32 +241,26 @@ class FlowModel(nn.Module):
             task_cfg.action_key: task_cfg.action_dim,
             **{k: 2 for k in policy_cfg.image_to_gaze_key.values() if policy_cfg.use_gaze},
         }
-        self.state_keys_to_dim = {
-            task_cfg.state_key: task_cfg.state_dim,
-            **{k: 2 for k in policy_cfg.image_to_gaze_key.values() if policy_cfg.use_gaze},
-        }
         self.noise_dim = sum(self.target_keys_to_dim.values())
-        self.proprio_dim = sum(self.state_keys_to_dim.values())
 
         self.noise_proj = nn.Linear(self.noise_dim, policy_cfg.dim_model)
-        self.proprio_proj = nn.Sequential(
+        self.state_proj = nn.Sequential(
             nn.Dropout(policy_cfg.dropout),
-            nn.Linear(self.proprio_dim, policy_cfg.dim_model),
+            nn.Linear(task_cfg.state_dim, policy_cfg.dim_model),
         )
+        self.gaze_proj = nn.Sequential(
+            nn.Dropout(policy_cfg.dropout),
+            nn.Linear(2, policy_cfg.dim_model),
+        ) if policy_cfg.use_gaze else None
         self.backbone = get_vision_encoder(
             name=policy_cfg.vision_encoder,
             **policy_cfg.vision_encoder_kwargs,
         )
         self.backbone_proj = nn.Linear(self.backbone.embed_dim, policy_cfg.dim_model)
-        self.gaze_proj = nn.Sequential(
-            nn.Dropout(policy_cfg.dropout),
-            nn.Linear(2, policy_cfg.dim_model),
-        ) if policy_cfg.use_gaze else None
         self.pool = AttentionPooling(
-            dim=policy_cfg.dim_model,
-            cond_dim=policy_cfg.dim_model,
             num_queries=policy_cfg.pool_n_queries,
-            layers=policy_cfg.pool_n_layers,
+            hidden_size=policy_cfg.dim_model,
+            depth=policy_cfg.pool_n_layers,
             num_heads=policy_cfg.n_heads,
             dropout=policy_cfg.dropout,
         )
@@ -279,65 +273,73 @@ class FlowModel(nn.Module):
             time_dim=policy_cfg.dit_time_dim,
         )
 
-        n_obs_steps = policy_cfg.n_obs_steps
-        n_images = len(policy_cfg.image_to_gaze_key)
-        horizon = policy_cfg.horizon
-        self.obs_time_emb = nn.Parameter(
-            get_timestep_embedding(
-                torch.arange(n_obs_steps), policy_cfg.dim_model
-            ).reshape(1, 1, n_obs_steps, 1, policy_cfg.dim_model)
-        )
-        self.obs_type_emb = nn.Parameter(
-            torch.zeros(1, n_images, 1, 1,  policy_cfg.dim_model)
-        )
-        self.dit_pos_emb = nn.Parameter(
-            get_timestep_embedding(
-                torch.arange(n_obs_steps + horizon), policy_cfg.dim_model
-            ).unsqueeze(0)
-        )
+        self.obs_step_pos_emb = nn.Parameter(torch.randn(policy_cfg.n_obs_steps, policy_cfg.dim_model))
+        self.image_pos_emb = nn.Parameter(torch.randn(len(policy_cfg.image_to_gaze_key), policy_cfg.dim_model))
+        self.dit_pos_emb = nn.Parameter(torch.randn(policy_cfg.horizon, policy_cfg.dim_model))
         
         self.flow_matcher = ConditionalFlowMatcher(sigma=0.0)
 
     def prepare_global_conditioning(self, batch: dict[str, Tensor]) -> tuple[Tensor, dict]:
+        tokens = []
+        pos_emb = []
+
         img = torch.stack([batch[key] for key in self.cfg.image_to_gaze_key.keys()], dim=2)
         b, s, n = img.shape[:3]
         img = einops.rearrange(img, 'b s n c h w -> (b s n) c h w')  
         img = Resize(self.cfg.input_shape)(img)  
 
+        tokens.append(self.state_proj(batch[self.task_cfg.state_key])) # (B, S, D)
+        pos_emb.append(self.obs_step_pos_emb.unsqueeze(0))
+
         if self.cfg.use_gaze:
             gaze = torch.stack([batch[key] for key in self.cfg.image_to_gaze_key.values()], dim=2)
+            gaze = einops.rearrange(gaze, 'b s n d -> (b s n) d') 
             if self.training:
                 gaze = gaze + torch.randn_like(gaze) * self.cfg.gaze_noise
-            gaze = einops.rearrange(gaze, 'b s n c -> (b s n) c') 
+
+            tokens.append(
+                einops.rearrange(
+                    self.gaze_proj(gaze), 
+                    '(b s n) d -> b (s n) d',
+                    b=b, s=s, n=n
+                )
+            )
+            pos_emb.append(
+                einops.rearrange(
+                    self.obs_step_pos_emb.unsqueeze(1) + self.image_pos_emb.unsqueeze(0),
+                    's n d -> 1 (s n) d', 
+                    s=s, n=n
+                )
+            )
         else:
             gaze = None
 
-        img_feat, viz = self.backbone(img, centers=gaze)
-        img_feat = self.backbone_proj(img_feat)
-        img_feat = einops.rearrange(img_feat, '(b s n) l d -> b s n l d', b=b, s=s, n=n)
-        if gaze is not None:
-            gaze = einops.rearrange(gaze, '(b s n) d -> b s n 1 d', b=b, s=s, n=n)
-            img_feat = torch.cat([img_feat, self.gaze_proj(gaze)], dim=-2)  # Concatenate gaze features
-        img_feat = img_feat + self.obs_time_emb + self.obs_type_emb
-        img_feat = einops.rearrange(img_feat, 'b s n l d -> b (s n l) d')
-
-        img_feat = self.pool(img_feat)
-
-        proprio_feat = self.proprio_proj(
-            torch.cat([batch[key] for key in self.state_keys_to_dim.keys()], dim=-1)
+        img_tokens, viz = self.backbone(img, centers=gaze)
+        tokens.append(
+            einops.rearrange(
+                self.backbone_proj(img_tokens),
+                '(b s n) l d -> b (s n l) d',
+                b=b, s=s, n=n,
+            )
+        )
+        pos_emb.append(
+            einops.repeat(
+                self.obs_step_pos_emb.unsqueeze(1) + self.image_pos_emb.unsqueeze(0),
+                's n d -> 1 (s n l) d',
+                s=s, n=n, l=img_tokens.shape[1]
+            )
         )
 
-        cond = {
-            "img_feat": img_feat,
-            "proprio": proprio_feat,
-        }
+        tokens = torch.cat(tokens, dim=1)  # (B, L, D)
+        pos_emb = torch.cat(pos_emb, dim=1)  # (1, L, D)
+        cond = self.pool(tokens, pos_emb)
 
         return cond, viz
     
     def predict_velocity(self, noise: Tensor, global_cond: dict, timestep: Tensor) -> Tensor:
         vt = self.dit.forward(
-            sample=torch.cat([self.noise_proj(noise), global_cond["proprio"]], dim=1) + self.dit_pos_emb,
-            condition=global_cond["img_feat"],
+            sample=self.noise_proj(noise) + self.dit_pos_emb.unsqueeze(0),
+            condition=global_cond,
             timestep=timestep, 
         )
         return vt[:, :self.cfg.horizon]

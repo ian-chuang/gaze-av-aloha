@@ -31,9 +31,9 @@ envs:
     eval_options:
       iid:
         prompt: "hook package"
-      # ood_distractors:
-      #   prompt: "hook package"
-      #   distractors: true
+      ood_distractors:
+        prompt: "hook package"
+        distractors: true
       # ood_lighting:
       #   prompt: "hook package"
       #   randomize_light: true

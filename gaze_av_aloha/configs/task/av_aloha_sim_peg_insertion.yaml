@@ -31,9 +31,9 @@ envs:
     eval_options:
       iid:
         prompt: "insert peg into socket"
-      # ood_distractors:
-      #   prompt: "insert peg into socket"
-      #   distractors: true
+      ood_distractors:
+        prompt: "insert peg into socket"
+        distractors: true
       # ood_lighting:
       #   prompt: "insert peg into socket"
       #   randomize_light: true

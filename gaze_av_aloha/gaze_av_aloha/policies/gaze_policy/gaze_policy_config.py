@@ -24,7 +24,7 @@ class GazePolicyConfig(PolicyConfig):
     vision_encoder_kwargs: dict = field(default_factory=lambda: {})
 
     use_gaze: bool = True
-    gaze_noise: float = 0.0
+    gaze_noise: float = 0.02
 
     # Transformer Layers
     dim_model: int = 512

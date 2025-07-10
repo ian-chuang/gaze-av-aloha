@@ -1,79 +1,59 @@
 import torch
-import torch.nn as nn
-from diffusers.models.attention import FeedForward
-from diffusers.models.attention_processor import Attention
+from torch import nn, Tensor
+from timm.layers import Mlp
 
-class TransformerBlock(nn.Module):
-    def __init__(self, dim, cond_dim=None, num_heads=8, dropout=0., cross_attn_only=False):
+def maybe_add_pos_embed(tensor: Tensor, pos_embed: Tensor | None) -> Tensor:
+    return tensor if pos_embed is None else tensor + pos_embed
+
+class AttentionPoolingBlock(nn.Module):
+    def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, dropout=0.1):
         super().__init__()
-        self.cross_attn_only = cross_attn_only
-        assert not cross_attn_only or cond_dim is not None, 'If only do cross attention, cond_dim must NOT be None!'
+        self.norm1 = nn.LayerNorm(hidden_size)
+        self.attn = nn.MultiheadAttention(hidden_size, num_heads, batch_first=True, dropout=dropout)
+        self.norm2 = nn.LayerNorm(hidden_size)
+        self.xattn = nn.MultiheadAttention(hidden_size, num_heads, batch_first=True, dropout=dropout)
+        self.norm3 = nn.LayerNorm(hidden_size)
+        self.mlp = Mlp(in_features=hidden_size, hidden_features=int(hidden_size * mlp_ratio), drop=dropout)
 
-        # self attn
-        if not cross_attn_only:
-            self.norm1 = nn.LayerNorm(dim)
-            self.attn1 = Attention(
-                dim,
-                heads=num_heads,
-                dim_head=dim // num_heads,
-                dropout=dropout,
-            )
+    def forward(self, x, c, x_pos_emb=None, c_pos_emb=None):
+        x_norm = self.norm1(x)
+        q = k = maybe_add_pos_embed(x_norm, x_pos_emb)
+        v = x_norm
+        x = x + self.attn(q, k, v, need_weights=False)[0]
 
-        # cross attn
-        self.attn2 = None
-        if cond_dim is not None:
-            self.norm2 = nn.LayerNorm(dim)
-            self.attn2 = Attention(
-                dim,
-                cross_attention_dim=cond_dim,
-                heads=num_heads,
-                dim_head=dim // num_heads,
-                dropout=dropout,
-            )
+        q = maybe_add_pos_embed(self.norm2(x), x_pos_emb)
+        k = maybe_add_pos_embed(c, c_pos_emb)
+        v = c
+        x = x + self.xattn(q, k, v, need_weights=False)[0]
 
-        # feedforward
-        self.norm3 = nn.LayerNorm(dim)
-        self.ff = FeedForward(dim, dropout=dropout)
-
-    def forward(self, x, cond=None, mask=None, cond_mask=None):
-        """
-        Parameters:
-            x: (B, L, D)
-            cond: (B, L, D)
-            mask: (B, L, L)
-            cond_mask: (B, L, L)
-
-        Returns:
-            out: (B, L, D)
-        """
-        if not self.cross_attn_only:
-            norm_x = self.norm1(x)
-            x = self.attn1(norm_x, attention_mask=mask) + x
-
-        if self.attn2 is not None:
-            norm_x = self.norm2(x)
-            x = self.attn2(norm_x, cond, attention_mask=cond_mask) + x
-
-        norm_x = self.norm3(x)
-        x = self.ff(norm_x) + x
+        x = x + self.mlp(self.norm3(x))
 
         return x
 
 class AttentionPooling(nn.Module):
-    def __init__(self, dim, cond_dim, num_queries=4, layers=4, num_heads=8, dropout=0.1):
+    """
+    Attention pooling layer that uses DiT as the backbone.
+    """
+    def __init__(self, 
+        num_queries, 
+        hidden_size=512,
+        depth=8,
+        num_heads=8,
+        mlp_ratio=4.0,
+        dropout=0.0
+    ):
         super().__init__()
-        self.queries = nn.Parameter(torch.randn(1, num_queries, dim))
-        self.norm1 = nn.LayerNorm(cond_dim)
+        self.query_tokens = nn.Embedding(num_queries, hidden_size)
+        self.norm1 = nn.LayerNorm(hidden_size)
         self.blocks = nn.ModuleList([
-            TransformerBlock(
-                dim=dim, 
-                cond_dim=cond_dim, 
+            AttentionPoolingBlock(
+                hidden_size=hidden_size,
                 num_heads=num_heads, 
+                mlp_ratio=mlp_ratio,
                 dropout=dropout,
-                cross_attn_only=True if i == 0 else False,
-            ) for i in range(layers)
+            ) for _ in range(depth)
         ])
-        self.norm2 = nn.LayerNorm(dim)
+        self.norm2 = nn.LayerNorm(hidden_size)
         self.initialize_weights()
 
     def initialize_weights(self):
@@ -83,39 +63,20 @@ class AttentionPooling(nn.Module):
                 torch.nn.init.xavier_uniform_(module.weight)
                 if module.bias is not None:
                     nn.init.constant_(module.bias, 0)
+            elif isinstance(module, nn.LayerNorm):
+                nn.init.constant_(module.bias, 0)
+                nn.init.constant_(module.weight, 1.0)
         self.apply(_basic_init)
 
-    def forward(self, cond):
-        x = self.queries.expand(cond.shape[0], -1, -1)
-        c = self.norm1(cond)
+    def forward(self, c, c_pos_emb=None):
+        """
+        context: (B, N, D) - Input features, where B is batch size, N is sequence length, and D is feature dimension.
+        """
+        B = c.size(0)
+        x = self.query_tokens.weight.unsqueeze(0).expand(B, -1, -1)
+        c = self.norm1(c)
         for block in self.blocks:
-            x = block(x, c)
+            x = block(x=x, c=c, c_pos_emb=c_pos_emb)
         x = self.norm2(x)
-        return x
+        return x 
     
-# class CAGEPooling(nn.Module):
-#     def __init__(self, dim, obs_dim, num_queries=1, layers=4, num_heads=8, dropout=0.1):
-#         super().__init__()
-
-#         self.latents = nn.Parameter(torch.randn(1, num_queries, dim))
-#         self.obs_norm = nn.LayerNorm(obs_dim)
-#         self.x_attn = TransformerBlock(dim, cond_dim=obs_dim, dropout=dropout, cross_attn_only=True)
-#         self.blocks = nn.ModuleList([
-#             TransformerBlock(dim, num_heads=num_heads, dropout=dropout) for _ in range(layers)
-#         ])
-
-#     def forward(self, obs_emb):
-#         B, L, D = obs_emb.shape
-#         obs_emb = self.obs_norm(obs_emb)
-
-#         # mask = torch.ones(T, T, dtype=torch.bool).tril()
-#         # mask = mask.unsqueeze(0).expand(B, T, T).to(device=obs_emb.device)
-#         # cond_mask = mask.reshape(B, T, T, 1).repeat(1, 1, N, L).reshape(B, T, N*T*L)
-
-#         latents = self.latents.expand(B, -1, -1)
-#         latents = self.x_attn(latents, obs_emb) #cond_mask=cond_mask)
-        
-#         for block in self.blocks:
-#             latents = block(latents) #mask=mask)
-
-#         return latents
