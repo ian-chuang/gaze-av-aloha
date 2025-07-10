@@ -31,9 +31,9 @@ envs:
     eval_options:
       iid:
         prompt: "pour ball into test tube"
-      # ood_distractors:
-      #   prompt: "pour ball into test tube"
-      #   distractors: true
+      ood_distractors:
+        prompt: "pour ball into test tube"
+        distractors: true
       # ood_lighting:
       #   prompt: "pour ball into test tube"
       #   randomize_light: true
