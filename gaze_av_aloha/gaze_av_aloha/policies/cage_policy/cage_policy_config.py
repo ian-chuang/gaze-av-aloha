@@ -15,8 +15,8 @@ class CAGEPolicyConfig(PolicyConfig):
     
     # Observation
     image_norm_mode: str = "mean_std"
-    state_norm_mode: str = "mean_std" 
-    action_norm_mode: str = "mean_std"  # min_max was better TODO
+    state_norm_mode: str = "min_max" 
+    action_norm_mode: str = "min_max"  # min_max was better TODO
     image_to_gaze_key: dict[str, str] = field(default_factory=lambda: {})
 
     # vision
@@ -38,11 +38,11 @@ class CAGEPolicyConfig(PolicyConfig):
     pool_n_layers: int = 4
 
     # DiT
-    dit_time_dim: int = 256
+    dit_time_dim: int = 128
     dit_n_layers: int = 8
 
     # Flow Matching
-    n_sampling_steps: int = 6
+    n_sampling_steps: int = 8
 
     # Training
     optimizer_lr: float = 1e-4
