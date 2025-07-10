@@ -1,5 +1,0 @@
-defaults:
-  - base_gaze_policy_config
-
-image_to_gaze_key:
-  observation.images.zed_cam_left: left_eye

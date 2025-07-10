@@ -1,6 +1,0 @@
-defaults:
-  - base_flow_policy_config
-
-# Gaze
-image_to_gaze_key:
-  observation.images.zed_cam_left: left_eye
