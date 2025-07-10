@@ -277,8 +277,6 @@ class FlowModel(nn.Module):
         self.image_pos_emb = nn.Parameter(torch.randn(len(policy_cfg.image_to_gaze_key), policy_cfg.dim_model))
         self.dit_pos_emb = nn.Parameter(torch.randn(policy_cfg.horizon, policy_cfg.dim_model))
         
-        self.flow_matcher = ConditionalFlowMatcher(sigma=0.0)
-
     def prepare_global_conditioning(self, batch: dict[str, Tensor]) -> tuple[Tensor, dict]:
         tokens = []
         pos_emb = []
@@ -342,27 +340,42 @@ class FlowModel(nn.Module):
             condition=global_cond,
             timestep=timestep, 
         )
-        return vt[:, :self.cfg.horizon]
+        return vt
+    
+    def sample_noise(self, shape, device):
+        noise = torch.normal(
+            mean=0.0,
+            std=1.0,
+            size=shape,
+            dtype=torch.float32,
+            device=device,
+        )
+        return noise
 
+    def sample_time(self, bsize, device):
+        time_beta = sample_beta(1.5, 1.0, bsize, device)
+        time = time_beta * 0.999 + 0.001
+        return time.to(dtype=torch.float32, device=device)
+
+    # ========= inference  ============
     def conditional_sample(
         self, batch_size: int, global_cond: Tensor | None = None
     ) -> Tensor:
         device = get_device_from_parameters(self)
-        dtype = get_dtype_from_parameters(self)
 
         actions_shape = (batch_size, self.cfg.horizon, self.noise_dim)
-        xt = torch.randn(actions_shape, dtype=dtype, device=device)
+        noise = self.sample_noise(actions_shape, device=device)
 
-        n_steps = self.cfg.n_sampling_steps
-        dt = torch.tensor(1.0 / n_steps, dtype=dtype, device=device)
+        dt = -1.0 / self.cfg.n_sampling_steps
+        dt = torch.tensor(dt, dtype=torch.float32, device=device)
 
-        for i in range(n_steps):
-            timestep = (i * dt).expand(batch_size)
-            vt = self.predict_velocity(
-                noise=xt, global_cond=global_cond, timestep=timestep
-            )
-            xt = xt + vt * dt
-
+        xt = noise
+        time = torch.tensor(1.0, dtype=torch.float32, device=device)
+        while time >= -dt / 2:
+            vt = self.predict_velocity(noise=xt, global_cond=global_cond, timestep=time.expand(batch_size))
+            # Euler step
+            xt += dt * vt
+            time += dt
         return xt
 
     def generate_actions(self, batch: dict[str, Tensor]) -> Tensor:
@@ -389,15 +402,24 @@ class FlowModel(nn.Module):
 
         global_cond, _ = self.prepare_global_conditioning(batch) 
 
-        x0 = torch.randn_like(x1)
-        timestep, xt, ut = self.flow_matcher.sample_location_and_conditional_flow(x0, x1)
-        vt = self.predict_velocity(noise=xt, global_cond=global_cond, timestep=timestep)
+        noise = self.sample_noise(x1.shape, x1.device)
+        time = self.sample_time(x1.shape[0], x1.device)
+        time_expanded = time[:, None, None]
+        xt = time_expanded * noise + (1 - time_expanded) * x1
+        ut = noise - x1
+
+        vt = self.predict_velocity(noise=xt, global_cond=global_cond, timestep=time)
         flow_matching_loss = F.mse_loss(vt, ut, reduction="none").mean()
         loss = flow_matching_loss
         loss_dict = {
             "flow_matching_loss": flow_matching_loss.item(),
         }
         return loss, loss_dict
+    
+def sample_beta(alpha, beta, bsize, device):
+    gamma1 = torch.empty((bsize,), device=device).uniform_(0, 1).pow(1 / alpha)
+    gamma2 = torch.empty((bsize,), device=device).uniform_(0, 1).pow(1 / beta)
+    return gamma1 / (gamma1 + gamma2)
 
 class TemporalEnsembler:
     def __init__(self, temporal_ensemble_coeff: float, chunk_size: int) -> None:

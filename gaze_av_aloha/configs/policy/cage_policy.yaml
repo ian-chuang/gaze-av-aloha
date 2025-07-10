@@ -11,6 +11,18 @@ vision_encoder_kwargs:
   height: 288
   width: 288
 
+# vision_encoder: vit
+# vision_encoder_kwargs:
+#   crop_shape: [216, 288]
+#   token_size: 16
+#   height: 288
+#   width: 288
+
+# vision_encoder: resnet
+# vision_encoder_kwargs:
+#   crop_shape: [216, 288]
+#   pool: true
+
 optimizer_lr: 1e-4
 optimizer_lr_backbone: 1e-4
 
