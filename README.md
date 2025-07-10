@@ -27,8 +27,10 @@ wandb.enable=false train.eval_freq=100 train.viz_freq=99
 
 # cage policy 
 
-MUJOCO_EGL_DEVICE_ID=0 python train.py policy=cage_policy task=av_aloha_sim_slot_insertion wandb.job_name=slot_cage_foveated_vit device=cuda:0 
+MUJOCO_EGL_DEVICE_ID=0 python train.py policy=resnet_policy task=av_aloha_sim_slot_insertion wandb.job_name=slot_dit_resnet device=cuda:0 
 
-MUJOCO_EGL_DEVICE_ID=1 python train.py policy=cage_policy task=av_aloha_sim_slot_insertion wandb.job_name=slot_cage_vit device=cuda:1
+MUJOCO_EGL_DEVICE_ID=1 python train.py policy=dino_policy task=av_aloha_sim_slot_insertion wandb.job_name=slot_dit_dino device=cuda:1
 
-MUJOCO_EGL_DEVICE_ID=2 python train.py policy=cage_policy task=av_aloha_sim_slot_insertion wandb.job_name=slot_cage_dino device=cuda:2
+MUJOCO_EGL_DEVICE_ID=2 python train.py policy=vit_policy task=av_aloha_sim_slot_insertion wandb.job_name=slot_dit_vit device=cuda:2
+
+MUJOCO_EGL_DEVICE_ID=3 python train.py policy=foveated_vit_policy task=av_aloha_sim_slot_insertion wandb.job_name=slot_dit_foveated_vit device=cuda:3

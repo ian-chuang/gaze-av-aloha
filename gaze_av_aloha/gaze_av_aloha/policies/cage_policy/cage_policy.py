@@ -249,11 +249,18 @@ class FlowModel(nn.Module):
         self.proprio_dim = sum(self.state_keys_to_dim.values())
 
         self.noise_proj = nn.Linear(self.noise_dim, policy_cfg.dim_model)
-        self.proprio_proj = nn.Linear(self.proprio_dim, policy_cfg.dim_model)
+        self.proprio_proj = nn.Sequential(
+            nn.Dropout(policy_cfg.dropout),
+            nn.Linear(self.proprio_dim, policy_cfg.dim_model),
+        )
         self.backbone = get_vision_encoder(
             name=policy_cfg.vision_encoder,
             **policy_cfg.vision_encoder_kwargs,
         )
+        self.gaze_proj = nn.Sequential(
+            nn.Dropout(policy_cfg.dropout),
+            nn.Linear(2, self.backbone.embed_dim),
+        ) if policy_cfg.use_gaze else None
         self.pool = AttentionPooling(
             dim=policy_cfg.dim_model,
             cond_dim=self.backbone.embed_dim,
@@ -282,7 +289,11 @@ class FlowModel(nn.Module):
         self.obs_type_emb = nn.Parameter(
             torch.zeros(1, n_images, 1, 1,  self.backbone.embed_dim)
         )
-        self.dit_pos_emb = nn.Parameter(torch.randn(1, horizon + n_obs_steps, policy_cfg.dim_model))
+        self.dit_pos_emb = nn.Parameter(
+            get_timestep_embedding(
+                torch.arange(n_obs_steps + horizon), policy_cfg.dim_model
+            ).unsqueeze(0)
+        )
         
         self.flow_matcher = ConditionalFlowMatcher(sigma=0.0)
 
@@ -294,16 +305,24 @@ class FlowModel(nn.Module):
 
         if self.cfg.use_gaze:
             gaze = torch.stack([batch[key] for key in self.cfg.image_to_gaze_key.values()], dim=2)
-            gaze = einops.rearrange(gaze, 'b s n c -> (b s n) c') 
             if self.training:
                 gaze = gaze + torch.randn_like(gaze) * self.cfg.gaze_noise
+            gaze = einops.rearrange(gaze, 'b s n c -> (b s n) c') 
         else:
             gaze = None
+            gaze_feat = None
 
         img_feat, viz = self.backbone(img, centers=gaze)
         img_feat = einops.rearrange(img_feat, '(b s n) l d -> b s n l d', b=b, s=s, n=n)
         img_feat = img_feat + self.obs_time_emb + self.obs_type_emb
         img_feat = einops.rearrange(img_feat, 'b s n l d -> b (s n l) d')
+
+        if gaze is not None:
+            gaze = einops.rearrange(gaze, '(b s n) d -> b s n d', b=b, s=s, n=n)
+            gaze_feat = self.gaze_proj(gaze).unsqueeze(-2) + self.obs_time_emb + self.obs_type_emb
+            gaze_feat = einops.rearrange(gaze_feat, 'b s n l d -> b (s n l) d')
+            img_feat = torch.cat([img_feat, gaze_feat], dim=1)
+
         img_feat = self.pool(img_feat)
 
         proprio_feat = self.proprio_proj(
@@ -312,14 +331,14 @@ class FlowModel(nn.Module):
 
         cond = {
             "img_feat": img_feat,
-            "proprio_feat": proprio_feat,
+            "proprio": proprio_feat,
         }
 
         return cond, viz
     
     def predict_velocity(self, noise: Tensor, global_cond: dict, timestep: Tensor) -> Tensor:
         vt = self.dit.forward(
-            sample=torch.cat([self.noise_proj(noise), global_cond["proprio_feat"]], dim=1) + self.dit_pos_emb,
+            sample=torch.cat([self.noise_proj(noise), global_cond["proprio"]], dim=1) + self.dit_pos_emb,
             condition=global_cond["img_feat"],
             timestep=timestep, 
         )

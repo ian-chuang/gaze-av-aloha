@@ -3,9 +3,10 @@ defaults:
 
 use_gaze: true
 
-vision_encoder: dino
+vision_encoder: resnet
 vision_encoder_kwargs:
-  crop_shape: [224, 308]
+  crop_shape: [216, 288]
+  pool: true
 
 optimizer_lr: 1e-4
 optimizer_lr_backbone: 1e-4

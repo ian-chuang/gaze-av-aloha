@@ -8,7 +8,7 @@ from torchvision.ops.misc import FrozenBatchNorm2d
 import einops
 from typing import List, Optional, Tuple
 from torchvision.transforms import CenterCrop, RandomCrop
-from gaze_av_aloha.policies.cage_policy.vit import create_vit_s
+from gaze_av_aloha.policies.cage_policy.vit import create_vit_s, create_vit_b
 from gaze_av_aloha.policies.cage_policy.tokenizer import FoveatedImageTokenizer, BaseImageTokenizer
 
 class VisionEncoder(abc.ABC, nn.Module):
@@ -27,6 +27,7 @@ class ResNet(VisionEncoder):
     def __init__(
         self, 
         crop_shape: Tuple[int, int] = (216, 288),
+        pool: bool = True,
     ):
         super().__init__()
         self.random_crop = RandomCrop(crop_shape)
@@ -37,6 +38,10 @@ class ResNet(VisionEncoder):
         )
         self.backbone = IntermediateLayerGetter(backbone_model, return_layers={"layer4": "feature_map"})
         self._embed_dim = backbone_model.fc.in_features
+        if pool:
+            self.pool = nn.AdaptiveAvgPool2d((1, 1))
+        else:
+            self.pool = nn.Identity()
 
     @property
     def embed_dim(self) -> int:
@@ -53,6 +58,7 @@ class ResNet(VisionEncoder):
         viz["input"] = x
 
         x = self.backbone(x)["feature_map"]
+        x = self.pool(x)
         x = einops.rearrange(x, "b c h w -> b (h w) c")
 
         return x, viz

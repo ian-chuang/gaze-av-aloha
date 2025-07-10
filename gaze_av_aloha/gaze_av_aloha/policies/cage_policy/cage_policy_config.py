@@ -32,7 +32,6 @@ class CAGEPolicyConfig(PolicyConfig):
     # Attention
     dim_model: int = 512
     n_heads: int = 8
-    mlp_ratio: float = 4.0
     dropout: float = 0.1
 
     # Pool
@@ -43,13 +42,6 @@ class CAGEPolicyConfig(PolicyConfig):
     dit_time_dim: int = 256
     dit_n_layers: int = 8
 
-    # Unet 
-    # down_dims: tuple[int] = (256,512,1024)
-    # layers_per_block: int = 2
-    # conv_kernel_size: int = 3
-    # num_norm_groups: int = 8
-    # num_attn_heads: int = 8
-
     # Flow Matching
     n_sampling_steps: int = 6
 
@@ -58,7 +50,7 @@ class CAGEPolicyConfig(PolicyConfig):
     optimizer_lr_backbone: float = 1e-4
     optimizer_betas: tuple = (0.95, 0.999)
     optimizer_eps: float = 1e-8
-    optimizer_weight_decay: float = 1e-4
+    optimizer_weight_decay: float = 1e-6
     scheduler_name: str = "cosine"
     scheduler_warmup_steps: int = 500
     use_ema: bool = True
