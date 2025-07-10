@@ -21,7 +21,6 @@ class CAGEPolicyConfig(PolicyConfig):
 
     # vision
     input_shape: tuple = (240, 320)
-    crop_shape: tuple[int] = (216, 288) # only applied if no gaze
     vision_encoder: str = "vit"  # options: resnet, dino, vit
     vision_encoder_kwargs: dict = field(default_factory=lambda: {})
 

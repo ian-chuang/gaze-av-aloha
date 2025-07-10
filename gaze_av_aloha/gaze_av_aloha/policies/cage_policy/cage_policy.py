@@ -257,13 +257,14 @@ class FlowModel(nn.Module):
             name=policy_cfg.vision_encoder,
             **policy_cfg.vision_encoder_kwargs,
         )
+        self.backbone_proj = nn.Linear(self.backbone.embed_dim, policy_cfg.dim_model)
         self.gaze_proj = nn.Sequential(
             nn.Dropout(policy_cfg.dropout),
-            nn.Linear(2, self.backbone.embed_dim),
+            nn.Linear(2, policy_cfg.dim_model),
         ) if policy_cfg.use_gaze else None
         self.pool = AttentionPooling(
             dim=policy_cfg.dim_model,
-            cond_dim=self.backbone.embed_dim,
+            cond_dim=policy_cfg.dim_model,
             num_queries=policy_cfg.pool_n_queries,
             layers=policy_cfg.pool_n_layers,
             num_heads=policy_cfg.n_heads,
@@ -283,11 +284,11 @@ class FlowModel(nn.Module):
         horizon = policy_cfg.horizon
         self.obs_time_emb = nn.Parameter(
             get_timestep_embedding(
-                torch.arange(n_obs_steps), self.backbone.embed_dim
-            ).reshape(1, 1, n_obs_steps, 1, self.backbone.embed_dim)
+                torch.arange(n_obs_steps), policy_cfg.dim_model
+            ).reshape(1, 1, n_obs_steps, 1, policy_cfg.dim_model)
         )
         self.obs_type_emb = nn.Parameter(
-            torch.zeros(1, n_images, 1, 1,  self.backbone.embed_dim)
+            torch.zeros(1, n_images, 1, 1,  policy_cfg.dim_model)
         )
         self.dit_pos_emb = nn.Parameter(
             get_timestep_embedding(
@@ -310,18 +311,15 @@ class FlowModel(nn.Module):
             gaze = einops.rearrange(gaze, 'b s n c -> (b s n) c') 
         else:
             gaze = None
-            gaze_feat = None
 
         img_feat, viz = self.backbone(img, centers=gaze)
+        img_feat = self.backbone_proj(img_feat)
         img_feat = einops.rearrange(img_feat, '(b s n) l d -> b s n l d', b=b, s=s, n=n)
+        if gaze is not None:
+            gaze = einops.rearrange(gaze, '(b s n) d -> b s n 1 d', b=b, s=s, n=n)
+            img_feat = torch.cat([img_feat, self.gaze_proj(gaze)], dim=-2)  # Concatenate gaze features
         img_feat = img_feat + self.obs_time_emb + self.obs_type_emb
         img_feat = einops.rearrange(img_feat, 'b s n l d -> b (s n l) d')
-
-        if gaze is not None:
-            gaze = einops.rearrange(gaze, '(b s n) d -> b s n d', b=b, s=s, n=n)
-            gaze_feat = self.gaze_proj(gaze).unsqueeze(-2) + self.obs_time_emb + self.obs_type_emb
-            gaze_feat = einops.rearrange(gaze_feat, 'b s n l d -> b (s n l) d')
-            img_feat = torch.cat([img_feat, gaze_feat], dim=1)
 
         img_feat = self.pool(img_feat)
 

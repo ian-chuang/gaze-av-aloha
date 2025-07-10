@@ -1,23 +1,28 @@
 import torch
-from torch import Tensor, nn
+from torch import nn, Tensor
 import torch.nn.functional as F
-from collections import deque
-import matplotlib.pyplot as plt
-from diffusers.optimization import get_scheduler
-from diffusers.training_utils import EMAModel
-from huggingface_hub import PyTorchModelHubMixin
+import einops
+import math
 
+from gaze_av_aloha.policies.gaze_policy.gaze_policy_config import GazePolicyConfig
 from gaze_av_aloha.configs import TaskConfig
 from gaze_av_aloha.policies.policy import Policy
-from gaze_av_aloha.policies.gaze_policy.gaze_policy_config import GazePolicyConfig
-from gaze_av_aloha.policies.gaze_policy.flow import FlowTransformer
-from gaze_av_aloha.policies.gaze_policy.flow_matchers import get_flow_matcher
-from gaze_av_aloha.policies.gaze_policy.observer import ResNetObserver, ViTObserver
-from gaze_av_aloha.policies.normalize import Normalize, Unnormalize
 
+from diffusers.optimization import get_scheduler
+from diffusers.training_utils import EMAModel
+
+from gaze_av_aloha.policies.normalize import Normalize, Unnormalize
 from gaze_av_aloha.utils.policy_utils import (
+    get_device_from_parameters,
     populate_queues,
 )
+from collections import deque
+
+from gaze_av_aloha.policies.gaze_policy.transformer import DiT, AttentionPooling
+from gaze_av_aloha.policies.gaze_policy.vision import get_vision_encoder
+from torchvision.transforms import Resize, CenterCrop, RandomCrop
+
+import logging
 
 class GazePolicy(Policy):
     def __init__(
@@ -27,13 +32,9 @@ class GazePolicy(Policy):
         stats: dict[str, dict[str, Tensor]],
     ):
         super().__init__()
-
         self.cfg = policy_cfg
         self.task_cfg = task_cfg
         self.stats = stats
-        self.num_sampling_steps = policy_cfg.flow_matcher_num_sampling_steps
-        self.pred_horizon = policy_cfg.horizon
-        self.action_dim = task_cfg.action_dim
 
         self.normalize_inputs = Normalize(
             {
@@ -50,34 +51,7 @@ class GazePolicy(Policy):
             stats,
         )
 
-        self.target_keys_to_dim = {
-            task_cfg.action_key: task_cfg.action_dim,
-            **{k: 2 for k in policy_cfg.image_to_gaze_key.values() if policy_cfg.use_gaze},
-        }
-        self.noise_dim = sum(self.target_keys_to_dim.values())
-
-        self._action_queue = None
-        if policy_cfg.observer_name == "resnet":
-            self.observer = ResNetObserver(
-                state_key=task_cfg.state_key,
-                image_keys=list(policy_cfg.image_to_gaze_key.keys()),
-                resize_shape=policy_cfg.resize_shape,
-                crop_shape=policy_cfg.crop_shape,
-                state_dim=task_cfg.state_dim,
-                tokenize=policy_cfg.observer_tokenize,
-            )
-        elif policy_cfg.observer_name == "vit":
-            self.observer = ViTObserver(policy_cfg, task_cfg)
-        else:
-            raise ValueError(f"Unknown observer name: {policy_cfg.observer_name}")
-        self.obs_dim = len(policy_cfg.image_to_gaze_key) * 512 + task_cfg.state_dim
-        self.FM = get_flow_matcher(
-            name=policy_cfg.flow_matcher_name,
-            sigma=policy_cfg.flow_matcher_sigma,
-            num_sampling_steps=self.num_sampling_steps,
-        )
-        
-        self.flow_net = self._init_flow_net(condition_dim=self.obs_dim)
+        self.flow = FlowModel(policy_cfg, task_cfg)
 
         if policy_cfg.use_temporal_ensemble:
             self.temporal_ensembler = TemporalEnsembler(
@@ -87,58 +61,109 @@ class GazePolicy(Policy):
 
         self.reset()
 
-    def _init_flow_net(self, condition_dim):
-        """
-        Initialize the velocity prediction network
-        """
-        return FlowTransformer(
-            input_dim=self.noise_dim,
-            condition_dim=condition_dim,
-            output_dim=self.noise_dim,
-            hidden_dim=self.cfg.flow_net_hidden_dim,
-            num_layers=self.cfg.flow_net_num_layers,
-            num_heads=self.cfg.flow_net_num_heads,
-            block_type=self.cfg.flow_net_block_type,
+    def get_optimizer(self) -> torch.optim.Optimizer:
+        logging.info(f"""
+            [FlowPolicy] Initializing AdamW optimizer with the following parameters:
+            - Learning Rate: {self.cfg.optimizer_lr}
+            - Learning Rate for Backbone: {self.cfg.optimizer_lr_backbone}
+            - Betas: {self.cfg.optimizer_betas}
+            - Epsilon: {self.cfg.optimizer_eps}
+            - Weight Decay: {self.cfg.optimizer_weight_decay}
+        """)
+        backbone_condition = lambda n: "flow.backbone." in n
+        if not any(backbone_condition(n) for n, p in self.named_parameters()):
+            raise ValueError(f"No parameters found satifying the condition for vision backbone: {backbone_condition}")
+        
+        # TODO REMOVE THIS LOGGING
+        for n, p in self.named_parameters():
+            if backbone_condition(n) and p.requires_grad:
+                logging.info(f"{n}: {self.cfg.optimizer_lr_backbone}.")
+
+        params = [
+            {
+                "params": [
+                    p
+                    for n, p in self.named_parameters()
+                    if not backbone_condition(n) and p.requires_grad
+                ]
+            },
+            {
+                "params": [
+                    p
+                    for n, p in self.named_parameters()
+                    if backbone_condition(n) and p.requires_grad
+                ],
+                "lr": self.cfg.optimizer_lr_backbone,
+            },
+        ]
+        return torch.optim.AdamW(
+            params=params,
+            lr=self.cfg.optimizer_lr,
+            betas=self.cfg.optimizer_betas,
+            eps=self.cfg.optimizer_eps,
+            weight_decay=self.cfg.optimizer_weight_decay
         )
-
-    def compute_loss(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
-
-        x1 = []
-        for key in self.target_keys_to_dim:
-            x1.append(batch[key][:, self.cfg.n_obs_steps:])
-            batch[key] = batch[key][:, :self.cfg.n_obs_steps]
-        x1 = torch.cat(x1, dim=-1)
-
-        features = self.observer(batch)
-        target = x1
-        loss, metrics = self.FM.compute_loss(self.flow_net, target=target, cond=features)
-        metrics['flow_loss'] = loss.item()
-        return loss, metrics
-
-    def generate_actions(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
-        batch_size = batch[self.task_cfg.state_key].shape[0]
-        features = self.observer(batch)
-        actions = self.FM.sample(
-            self.flow_net,
-            (batch_size, self.pred_horizon, self.noise_dim),
-            features.device,
-            self.num_sampling_steps,
-            cond=features,
-            return_traces=False
+    
+    def get_scheduler(self, optimizer: torch.optim.Optimizer, num_training_steps: int) -> torch.optim.lr_scheduler.LambdaLR | None:
+        logging.info(f"""
+            [FlowPolicy] Initializing scheduler '{self.cfg.scheduler_name}' with the following parameters:
+            - Warmup Steps: {self.cfg.scheduler_warmup_steps}
+            - Total Training Steps: {num_training_steps}
+        """)
+        return get_scheduler(
+            name=self.cfg.scheduler_name,
+            optimizer=optimizer,
+            num_warmup_steps=self.cfg.scheduler_warmup_steps,
+            num_training_steps=num_training_steps,
         )
+    
+    def get_ema(self) -> EMAModel | None:
+        if self.cfg.use_ema:
+            logging.info(f"[FlowPolicy] Initializing EMA with decay {self.cfg.ema_decay}")
+            return EMAModel(
+                parameters=self.parameters(),
+                decay=self.cfg.ema_decay,
+            ) 
+        else:
+            logging.info(f"[FlowPolicy] EMA is not used.")
+            return None
+    
+    def get_delta_timestamps(self):
+        # indices
+        observation_indices = list(reversed(range(0, -self.cfg.n_obs_steps*self.cfg.obs_step_size, -self.cfg.obs_step_size)))
+        action_indices = [i - 1 for i in observation_indices] + list(range(self.cfg.horizon))
+        gaze_indices = observation_indices + list(range(1, self.cfg.horizon+1))
+        assert len(observation_indices) == self.cfg.n_obs_steps, "Observation indices length mismatch"
 
-        outputs = {
-            k: v
-            for k, v in zip(
-                self.target_keys_to_dim.keys(),
-                torch.split(actions, list(self.target_keys_to_dim.values()), dim=-1),
-            )
+        # timestamps
+        observation_timestamps = [i / self.task_cfg.fps for i in observation_indices]
+        action_timestamps = [i / self.task_cfg.fps for i in action_indices]
+        gaze_timestamps = [i / self.task_cfg.fps for i in gaze_indices]
+
+        return {
+            **{k: observation_timestamps for k in self.cfg.image_to_gaze_key.keys()}, # images
+            **{k: gaze_timestamps for k in self.cfg.image_to_gaze_key.values()}, # gaze
+            self.task_cfg.state_key: observation_timestamps, # state
+            self.task_cfg.action_key: action_timestamps, # action
         }
+    
+    def reset(self):
+        obs_queue_size = (self.cfg.n_obs_steps-1)*self.cfg.obs_step_size+1
+        self._obs_queue = {
+            **{key: deque(maxlen=obs_queue_size) for key in self.cfg.image_to_gaze_key.keys()},
+            **{key: deque(maxlen=obs_queue_size) for key in self.cfg.image_to_gaze_key.values()}, # gaze
+            self.task_cfg.state_key: deque(maxlen=obs_queue_size),
+            self.task_cfg.action_key: deque(maxlen=obs_queue_size),
+        }
+        self._act_queues = {
+            **{key: deque(maxlen=self.cfg.n_action_steps) for key in self.cfg.image_to_gaze_key.values()}, # gaze
+            self.task_cfg.action_key: deque(maxlen=self.cfg.n_action_steps),
+        }
+        if self.cfg.use_temporal_ensemble:
+            self.temporal_ensembler.reset()   
 
-        return outputs, {}
-
-    @torch.no_grad
-    def select_action(self, batch: dict[str, torch.Tensor], return_viz: bool = False) -> torch.Tensor:
+    @torch.no_grad()
+    def select_action(self, batch: dict[str, Tensor], return_viz: bool = False) -> Tensor:
         self.eval()
         self._obs_queue = populate_queues(self._obs_queue, batch)
 
@@ -163,7 +188,7 @@ class GazePolicy(Policy):
             }
             if task: batch["task"] = task
             batch = self.normalize_inputs(batch)
-            outputs, viz = self.generate_actions(batch)
+            outputs, viz = self.flow.generate_actions(batch)
             outputs = self.unnormalize_outputs(outputs)
 
             if self.cfg.use_temporal_ensemble:
@@ -183,8 +208,7 @@ class GazePolicy(Policy):
         if return_viz: return action, viz
         return action
 
-    def forward(self, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, None]:
-        """Run the batch through the model and compute the loss for training or validation."""
+    def forward(self, batch: dict[str, Tensor]) -> tuple[Tensor, None]:
         batch = self.normalize_inputs(batch)
 
         # pad gaze obs with zeros
@@ -197,75 +221,218 @@ class GazePolicy(Policy):
         state_pad = batch[self.task_cfg.state_key][:, :self.cfg.n_obs_steps][is_pad]
         batch[self.task_cfg.action_key][:, :self.cfg.n_obs_steps][is_pad] = state_pad
 
-        loss, loss_dict = self.compute_loss(batch)
+        loss, loss_dict = self.flow.compute_loss(batch)
         return loss, loss_dict
+       
+class FlowModel(nn.Module):
+    def __init__(self, policy_cfg: GazePolicyConfig, task_cfg: TaskConfig):
+        super().__init__()
+        self.cfg = policy_cfg
+        self.task_cfg = task_cfg
 
-    def get_optimizer(self) -> torch.optim.Optimizer:
-        return torch.optim.AdamW(
-            params=self.parameters(),
-            lr=self.cfg.optimizer_lr,
-            betas=self.cfg.optimizer_betas,
-            eps=self.cfg.optimizer_eps,
-            weight_decay= self.cfg.optimizer_weight_decay,
+        self.target_keys_to_dim = {
+            task_cfg.action_key: task_cfg.action_dim,
+            **{k: 2 for k in policy_cfg.image_to_gaze_key.values() if policy_cfg.use_gaze},
+        }
+
+        n_tokens = 0
+        n_obs_steps = policy_cfg.n_obs_steps
+        n_images = len(policy_cfg.image_to_gaze_key)
+
+        self.state_proj = nn.Sequential(
+            nn.Dropout(policy_cfg.dropout),
+            nn.Linear(task_cfg.state_dim, policy_cfg.dim_model),
+        )
+        n_tokens += n_obs_steps
+
+        self.backbone = get_vision_encoder(
+            name=policy_cfg.vision_encoder,
+            **policy_cfg.vision_encoder_kwargs,
+        )
+        self.backbone_proj = nn.Linear(self.backbone.embed_dim, policy_cfg.dim_model)
+        n_tokens += self.backbone.get_num_tokens(*policy_cfg.input_shape) * n_obs_steps * n_images
+
+        if policy_cfg.use_gaze:
+            self.gaze_proj = nn.Sequential(
+                nn.Dropout(policy_cfg.dropout),
+                nn.Linear(2, policy_cfg.dim_model),
+            )
+            n_tokens += policy_cfg.n_obs_steps * n_images
+        
+        self.pool = AttentionPooling(
+            hidden_size=policy_cfg.dim_model,
+            num_queries=policy_cfg.pool_n_queries,
+            depth=policy_cfg.pool_n_layers,
+            num_heads=policy_cfg.n_heads,
+            mlp_ratio=policy_cfg.mlp_ratio,
+            dropout=policy_cfg.dropout,
+        ) 
+        self.pool_pos_embed = nn.Embedding(n_tokens, policy_cfg.dim_model)
+
+        # Encoder for the diffusion timestep.
+        self.noise_dim = sum(self.target_keys_to_dim.values())
+        self.noise_proj = nn.Linear(self.noise_dim, policy_cfg.dim_model)
+        self.time_embed = nn.Sequential(
+            SinusoidalPosEmb(policy_cfg.dit_time_dim),
+            nn.Linear(policy_cfg.dit_time_dim, policy_cfg.dit_time_dim * 4),
+            nn.Mish(),
+            nn.Linear(policy_cfg.dit_time_dim * 4, policy_cfg.dim_model),
+        )
+        self.DiT = DiT(
+            out_dim=self.noise_dim,
+            hidden_size=policy_cfg.dim_model,
+            depth=policy_cfg.dit_n_layers,
+            num_heads=policy_cfg.n_heads,
+            mlp_ratio=policy_cfg.mlp_ratio,
+            dropout=policy_cfg.dropout,
+        )
+        self.dit_pos_embed = nn.Embedding(policy_cfg.horizon, policy_cfg.dim_model)
+
+    def sample_noise(self, shape, device):
+        noise = torch.normal(
+            mean=0.0,
+            std=1.0,
+            size=shape,
+            dtype=torch.float32,
+            device=device,
+        )
+        return noise
+
+    def sample_time(self, bsize, device):
+        time_beta = sample_beta(1.5, 1.0, bsize, device)
+        time = time_beta * 0.999 + 0.001
+        return time.to(dtype=torch.float32, device=device)
+
+    def prepare_global_conditioning(self, batch: dict[str, Tensor]) -> tuple[Tensor, dict]:
+        tokens = []
+        pos_embed = []
+        batch = dict(batch)  
+
+        # load image and resize to input shape
+        img = torch.stack([batch[key] for key in self.cfg.image_to_gaze_key.keys()], dim=2)
+        b, s, n = img.shape[:3]
+        img = einops.rearrange(img, 'b s n c h w -> (b s n) c h w')  
+        img = Resize(self.cfg.input_shape)(img)  
+
+        # state
+        tokens.append(self.state_proj(batch[self.task_cfg.state_key]))
+
+        # foveal vision
+        if self.cfg.use_gaze:
+            gaze = torch.stack([batch[key] for key in self.cfg.image_to_gaze_key.values()], dim=2)
+            gaze = einops.rearrange(gaze, 'b s n c -> (b s n) c') 
+            if self.training:
+                gaze = gaze + torch.randn_like(gaze) * self.cfg.gaze_noise
+            tokens.append(
+                einops.rearrange(
+                    self.gaze_proj(gaze),  # send in the gaze (frame of ref of robot camera)
+                    '(b s n) d -> b (s n) d',
+                    b=b, s=s, n=n
+                ) 
+            )
+        else:
+            gaze = None
+
+        img_feat, viz = self.backbone(img, centers=gaze)
+        
+        tokens.append(
+            einops.rearrange(
+                self.backbone_proj(img_feat),  
+                '(b s n) l d -> b (s n l) d',   
+                b=b, s=s, n=n
+            )
         )
 
-    def get_scheduler(self, optimizer: torch.optim.Optimizer, num_training_steps: int) -> torch.optim.lr_scheduler.LambdaLR | None:
-        return get_scheduler(
-            name=self.cfg.scheduler_name,
-            optimizer=optimizer,
-            num_warmup_steps=self.cfg.scheduler_warmup_steps,
-            num_training_steps=num_training_steps,
-        )
-
-    def get_ema(self):
-        return None
+        tokens = torch.cat(tokens, dim=1)
+        pos_embed = self.pool_pos_embed.weight.unsqueeze(0)
+        cond = self.pool(tokens, pos_embed)
+        return cond, viz
     
-    def get_delta_timestamps(self):
-        # indices
-        observation_indices = list(reversed(range(0, -self.cfg.n_obs_steps*self.cfg.obs_step_size, -self.cfg.obs_step_size)))
-        action_indices = [i - 1 for i in observation_indices] + list(range(self.cfg.horizon))
-        gaze_indices = observation_indices + list(range(1, self.cfg.horizon+1))
-        assert len(observation_indices) == self.cfg.n_obs_steps, "Observation indices length mismatch"
+    def predict_velocity(self, noise: Tensor, global_cond: Tensor, timestep: Tensor,) -> Tensor:
+        x = self.noise_proj(noise) + self.dit_pos_embed.weight.unsqueeze(0)
+        t = self.time_embed(timestep)
+        return self.DiT(x=x, c=global_cond, t=t)
 
-        # timestamps
-        observation_timestamps = [i / self.task_cfg.fps for i in observation_indices]
-        action_timestamps = [i / self.task_cfg.fps for i in action_indices]
-        gaze_timestamps = [i / self.task_cfg.fps for i in gaze_indices]
+    # ========= inference  ============
+    def conditional_sample(
+        self, batch_size: int, global_cond: Tensor | None = None
+    ) -> Tensor:
+        device = get_device_from_parameters(self)
 
-        return {
-            **{k: observation_timestamps for k in self.cfg.image_to_gaze_key.keys()}, # images
-            **{k: gaze_timestamps for k in self.cfg.image_to_gaze_key.values()}, # gaze
-            self.task_cfg.state_key: observation_timestamps, # state
-            self.task_cfg.action_key: action_timestamps, # action
+        actions_shape = (batch_size, self.cfg.horizon, self.noise_dim)
+        noise = self.sample_noise(actions_shape, device=device)
+
+        dt = -1.0 / self.cfg.n_sampling_steps
+        dt = torch.tensor(dt, dtype=torch.float32, device=device)
+
+        xt = noise
+        time = torch.tensor(1.0, dtype=torch.float32, device=device)
+        while time >= -dt / 2:
+            vt = self.predict_velocity(noise=xt, global_cond=global_cond, timestep=time.expand(batch_size))
+            # Euler step
+            xt += dt * vt
+            time += dt
+        return xt
+
+    def generate_actions(self, batch: dict[str, Tensor]) -> Tensor:
+        batch_size = batch[self.task_cfg.state_key].shape[0]
+        global_cond, viz = self.prepare_global_conditioning(batch) 
+        sample = self.conditional_sample(batch_size, global_cond=global_cond)
+        outputs = {
+            k: v
+            for k, v in zip(
+                self.target_keys_to_dim.keys(),
+                torch.split(sample, list(self.target_keys_to_dim.values()), dim=-1),
+            )
         }
-        # action_indices = list(range(self.pred_horizon))
-        # observation_indices = [0]
-        # return {
-        #     **{
-        #         k: [i / self.task_cfg.fps for i in observation_indices]
-        #         for k in self.task_cfg.image_keys
-        #     },
-        #     self.task_cfg.state_key: [i / self.task_cfg.fps for i in observation_indices],
-        #     self.task_cfg.action_key: [i / self.task_cfg.fps for i in action_indices],
-        # }
+        return outputs, viz
 
-    def reset(self):
-        obs_queue_size = (self.cfg.n_obs_steps-1)*self.cfg.obs_step_size+1
-        self._obs_queue = {
-            **{key: deque(maxlen=obs_queue_size) for key in self.cfg.image_to_gaze_key.keys()},
-            **{key: deque(maxlen=obs_queue_size) for key in self.cfg.image_to_gaze_key.values()}, # gaze
-            self.task_cfg.state_key: deque(maxlen=obs_queue_size),
-            self.task_cfg.action_key: deque(maxlen=obs_queue_size),
+    def compute_loss(self, batch: dict[str, Tensor]) -> Tensor:
+        batch = dict(batch)  
+
+        x1 = []
+        for key in self.target_keys_to_dim:
+            x1.append(batch[key][:, self.cfg.n_obs_steps:])
+            batch[key] = batch[key][:, :self.cfg.n_obs_steps]
+        x1 = torch.cat(x1, dim=-1)
+
+        global_cond, _ = self.prepare_global_conditioning(batch) 
+
+        noise = self.sample_noise(x1.shape, x1.device)
+        time = self.sample_time(x1.shape[0], x1.device)
+        time_expanded = time[:, None, None]
+        xt = time_expanded * noise + (1 - time_expanded) * x1
+        ut = noise - x1
+
+        vt = self.predict_velocity(noise=xt, global_cond=global_cond, timestep=time)
+        flow_matching_loss = F.mse_loss(vt, ut, reduction="none").mean()
+        loss = flow_matching_loss
+        loss_dict = {
+            "flow_matching_loss": flow_matching_loss.item(),
         }
-        self._act_queues = {
-            **{key: deque(maxlen=self.cfg.n_action_steps) for key in self.cfg.image_to_gaze_key.values()}, # gaze
-            self.task_cfg.action_key: deque(maxlen=self.cfg.n_action_steps),
-        }
-        if self.cfg.use_temporal_ensemble:
-            self.temporal_ensembler.reset() 
+        return loss, loss_dict
+    
+class SinusoidalPosEmb(nn.Module):
+    """1D sinusoidal positional embeddings as in Attention is All You Need."""
 
+    def __init__(self, dim: int):
+        super().__init__()
+        self.dim = dim
 
+    def forward(self, x: Tensor) -> Tensor:
+        device = x.device
+        half_dim = self.dim // 2
+        emb = math.log(10000) / (half_dim - 1)
+        emb = torch.exp(torch.arange(half_dim, device=device) * -emb)
+        emb = x.unsqueeze(-1) * emb.unsqueeze(0)
+        emb = torch.cat((emb.sin(), emb.cos()), dim=-1)
+        return emb
+    
 
+def sample_beta(alpha, beta, bsize, device):
+    gamma1 = torch.empty((bsize,), device=device).uniform_(0, 1).pow(1 / alpha)
+    gamma2 = torch.empty((bsize,), device=device).uniform_(0, 1).pow(1 / beta)
+    return gamma1 / (gamma1 + gamma2)
 
 class TemporalEnsembler:
     def __init__(self, temporal_ensemble_coeff: float, chunk_size: int) -> None:

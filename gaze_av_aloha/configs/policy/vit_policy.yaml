@@ -1,5 +1,5 @@
 defaults:
-  - base_cage_policy_config
+  - base_gaze_policy_config
 
 use_gaze: true
 
