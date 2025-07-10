@@ -26,7 +26,7 @@ class CAGEPolicyConfig(PolicyConfig):
 
     # gaze
     use_gaze: bool = False
-    gaze_noise: float = 0.0
+    gaze_noise: float = 0.02
 
     # Attention
     dim_model: int = 512
@@ -34,7 +34,7 @@ class CAGEPolicyConfig(PolicyConfig):
     dropout: float = 0.1
 
     # Pool
-    pool_n_queries: int = 4
+    pool_n_queries: int = 16
     pool_n_layers: int = 4
 
     # DiT
