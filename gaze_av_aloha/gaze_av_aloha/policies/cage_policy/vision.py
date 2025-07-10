@@ -17,6 +17,13 @@ class VisionEncoder(abc.ABC, nn.Module):
     def embed_dim(self) -> int:
         """Returns the embedding dimension of the encoder."""
         pass
+    
+    def get_num_tokens(self, height: int, width: int) -> int:
+        """Returns the number of tokens produced by the encoder."""
+        x = torch.randn(1, 3, height, width)
+        centers = torch.zeros((1, 2), device=x.device)  # Dummy centers
+        tokens, _ = self.forward(x, centers)
+        return tokens.shape[1]
 
     @abc.abstractmethod
     def forward(self, x: Tensor, centers: Tensor=None) -> Tuple[Tensor, dict]:
@@ -178,7 +185,7 @@ class FoveatedViT(VisionEncoder):
             height=height, 
             width=width
         )
-        self.backbone = create_vit_s(
+        self.backbone = create_vit_b(
             self.tokenizer.get_num_tokens(), self.tokenizer.get_token_size()
         )
 

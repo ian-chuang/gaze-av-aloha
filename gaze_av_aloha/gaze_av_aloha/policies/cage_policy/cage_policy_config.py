@@ -16,7 +16,7 @@ class CAGEPolicyConfig(PolicyConfig):
     # Observation
     image_norm_mode: str = "mean_std"
     state_norm_mode: str = "mean_std" 
-    action_norm_mode: str = "mean_std" 
+    action_norm_mode: str = "mean_std"  # min_max was better TODO
     image_to_gaze_key: dict[str, str] = field(default_factory=lambda: {})
 
     # vision
