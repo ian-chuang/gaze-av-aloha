@@ -11,7 +11,6 @@ from gaze_av_aloha.policies.policy import Policy
 from diffusers.optimization import get_scheduler
 from diffusers.training_utils import EMAModel
 
-from gaze_av_aloha.policies.normalize import Normalize, Unnormalize
 from gaze_av_aloha.utils.policy_utils import (
     get_device_from_parameters,
     populate_queues,
@@ -20,7 +19,8 @@ from collections import deque
 
 from gaze_av_aloha.policies.gaze_policy.transformer import DiT, AttentionPooling
 from gaze_av_aloha.policies.gaze_policy.vision import get_vision_encoder
-from torchvision.transforms import Resize, CenterCrop, RandomCrop
+from gaze_av_aloha.policies.normalize import Normalize, Unnormalize
+from torchvision.transforms import Resize
 
 import logging
 
