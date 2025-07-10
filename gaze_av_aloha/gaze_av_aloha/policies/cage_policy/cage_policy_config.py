@@ -22,9 +22,12 @@ class CAGEPolicyConfig(PolicyConfig):
     # vision
     input_shape: tuple = (240, 320)
     crop_shape: tuple[int] = (216, 288) # only applied if no gaze
+    vision_encoder: str = "vit"  # options: resnet, dino, vit
+    vision_encoder_kwargs: dict = field(default_factory=lambda: {})
 
     # gaze
     use_gaze: bool = False
+    gaze_noise: float = 0.0
 
     # Attention
     dim_model: int = 512
@@ -36,12 +39,16 @@ class CAGEPolicyConfig(PolicyConfig):
     pool_n_queries: int = 4
     pool_n_layers: int = 4
 
+    # DiT
+    dit_time_dim: int = 256
+    dit_n_layers: int = 8
+
     # Unet 
-    down_dims: tuple[int] = (256,512,1024)
-    layers_per_block: int = 2
-    conv_kernel_size: int = 3
-    num_norm_groups: int = 8
-    num_attn_heads: int = 8
+    # down_dims: tuple[int] = (256,512,1024)
+    # layers_per_block: int = 2
+    # conv_kernel_size: int = 3
+    # num_norm_groups: int = 8
+    # num_attn_heads: int = 8
 
     # Flow Matching
     n_sampling_steps: int = 6

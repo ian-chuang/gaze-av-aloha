@@ -14,6 +14,7 @@ from diffusers.optimization import get_scheduler
 from diffusers.training_utils import EMAModel
 
 from gaze_av_aloha.policies.normalize import Normalize, Unnormalize
+from torchvision.transforms import Resize
 from gaze_av_aloha.utils.policy_utils import (
     get_device_from_parameters,
     get_dtype_from_parameters,
@@ -21,16 +22,10 @@ from gaze_av_aloha.utils.policy_utils import (
 )
 from collections import deque
 
-# from gaze_av_aloha.policies.cage_policy.transformer import DiT, AttentionPooling
-# from gaze_av_aloha.policies.cage_policy.vit import create_vit_b
-# from gaze_av_aloha.policies.cage_policy.bert import CachedDistilBertEmbedder
-# from gaze_av_aloha.policies.cage_policy.tokenizer import FoveatedImageTokenizer, BaseImageTokenizer
-# from gaze_av_aloha.policies.cage_policy.utils import sample_beta, crop_at_kp, random_crop
-
-from gaze_av_aloha.policies.cage_policy.vision import ResNet
-from gaze_av_aloha.policies.cage_policy.unet import ConditionalAttnUnet1D
-from gaze_av_aloha.policies.cage_policy.pool import CAGEPooling
-from torchvision.transforms import Resize, CenterCrop, RandomCrop
+from gaze_av_aloha.policies.cage_policy.vision import get_vision_encoder
+# from gaze_av_aloha.policies.cage_policy.unet import ConditionalAttnUnet1D
+from gaze_av_aloha.policies.cage_policy.dit import DiT
+from gaze_av_aloha.policies.cage_policy.pool import AttentionPooling
 
 from torchcfm import ConditionalFlowMatcher
 
@@ -252,73 +247,81 @@ class FlowModel(nn.Module):
         }
         self.noise_dim = sum(self.target_keys_to_dim.values())
         self.proprio_dim = sum(self.state_keys_to_dim.values())
-        assert self.proprio_dim == self.noise_dim, "Proprioceptive dimension must match noise dimension. For now..."
 
-        self.backbone = ResNet(pool=False)
-        self.pool = CAGEPooling(
+        self.noise_proj = nn.Linear(self.noise_dim, policy_cfg.dim_model)
+        self.proprio_proj = nn.Linear(self.proprio_dim, policy_cfg.dim_model)
+        self.backbone = get_vision_encoder(
+            name=policy_cfg.vision_encoder,
+            **policy_cfg.vision_encoder_kwargs,
+        )
+        self.pool = AttentionPooling(
             dim=policy_cfg.dim_model,
-            obs_dim=policy_cfg.dim_model,
+            cond_dim=self.backbone.embed_dim,
             num_queries=policy_cfg.pool_n_queries,
             layers=policy_cfg.pool_n_layers,
             num_heads=policy_cfg.n_heads,
+            dropout=policy_cfg.dropout,
         )
-        self.unet = ConditionalAttnUnet1D(
-            input_dim=self.noise_dim,
-            obs_dim=policy_cfg.dim_model,
-            down_dims=policy_cfg.down_dims,
-            layers_per_block=policy_cfg.layers_per_block,
-            conv_kernel_size=policy_cfg.conv_kernel_size,
-            num_norm_groups=policy_cfg.num_norm_groups,
-            num_attn_heads=policy_cfg.num_attn_heads,
+        self.dit = DiT(
+            dim=policy_cfg.dim_model,
+            out_dim=self.noise_dim,
+            depth=policy_cfg.dit_n_layers,
+            num_heads=policy_cfg.n_heads,
+            dropout=policy_cfg.dropout,
+            time_dim=policy_cfg.dit_time_dim,
         )
 
         n_obs_steps = policy_cfg.n_obs_steps
         n_images = len(policy_cfg.image_to_gaze_key)
+        horizon = policy_cfg.horizon
         self.obs_time_emb = nn.Parameter(
             get_timestep_embedding(
-                torch.arange(n_obs_steps), policy_cfg.dim_model
-            ).reshape(1, 1, n_obs_steps, 1, policy_cfg.dim_model)
+                torch.arange(n_obs_steps), self.backbone.embed_dim
+            ).reshape(1, 1, n_obs_steps, 1, self.backbone.embed_dim)
         )
         self.obs_type_emb = nn.Parameter(
-            torch.zeros(1, n_images, 1, 1,  policy_cfg.dim_model)
+            torch.zeros(1, n_images, 1, 1,  self.backbone.embed_dim)
         )
-
+        self.dit_pos_emb = nn.Parameter(torch.randn(1, horizon + n_obs_steps, policy_cfg.dim_model))
+        
         self.flow_matcher = ConditionalFlowMatcher(sigma=0.0)
 
     def prepare_global_conditioning(self, batch: dict[str, Tensor]) -> tuple[Tensor, dict]:
-        viz = {}
-
         img = torch.stack([batch[key] for key in self.cfg.image_to_gaze_key.keys()], dim=2)
         b, s, n = img.shape[:3]
         img = einops.rearrange(img, 'b s n c h w -> (b s n) c h w')  
         img = Resize(self.cfg.input_shape)(img)  
-        if False: #self.cfg.use_gaze:
-            raise NotImplementedError("Gaze is not implemented yet.")
-        else:
+
+        if self.cfg.use_gaze:
+            gaze = torch.stack([batch[key] for key in self.cfg.image_to_gaze_key.values()], dim=2)
+            gaze = einops.rearrange(gaze, 'b s n c -> (b s n) c') 
             if self.training:
-                img = RandomCrop(self.cfg.crop_shape)(img)  # random crop if not using gaze
-            else:
-                img = CenterCrop(self.cfg.crop_shape)(img)
-        img_feat = self.backbone(img)
+                gaze = gaze + torch.randn_like(gaze) * self.cfg.gaze_noise
+        else:
+            gaze = None
+
+        img_feat, viz = self.backbone(img, centers=gaze)
         img_feat = einops.rearrange(img_feat, '(b s n) l d -> b s n l d', b=b, s=s, n=n)
         img_feat = img_feat + self.obs_time_emb + self.obs_type_emb
         img_feat = einops.rearrange(img_feat, 'b s n l d -> b (s n l) d')
         img_feat = self.pool(img_feat)
 
-        proprio = torch.cat([batch[key] for key in self.state_keys_to_dim.keys()], dim=-1)
+        proprio_feat = self.proprio_proj(
+            torch.cat([batch[key] for key in self.state_keys_to_dim.keys()], dim=-1)
+        )
 
         cond = {
             "img_feat": img_feat,
-            "proprio": proprio,
+            "proprio_feat": proprio_feat,
         }
 
         return cond, viz
     
     def predict_velocity(self, noise: Tensor, global_cond: dict, timestep: Tensor) -> Tensor:
-        vt = self.unet(
-            sample=torch.cat([noise, global_cond["proprio"]], dim=1), 
-            timesteps=timestep, 
-            cond=global_cond["img_feat"],
+        vt = self.dit.forward(
+            sample=torch.cat([self.noise_proj(noise), global_cond["proprio_feat"]], dim=1) + self.dit_pos_emb,
+            condition=global_cond["img_feat"],
+            timestep=timestep, 
         )
         return vt[:, :self.cfg.horizon]
 
@@ -376,22 +379,6 @@ class FlowModel(nn.Module):
             "flow_matching_loss": flow_matching_loss.item(),
         }
         return loss, loss_dict
-    
-class SinusoidalPosEmb(nn.Module):
-    """1D sinusoidal positional embeddings as in Attention is All You Need."""
-
-    def __init__(self, dim: int):
-        super().__init__()
-        self.dim = dim
-
-    def forward(self, x: Tensor) -> Tensor:
-        device = x.device
-        half_dim = self.dim // 2
-        emb = math.log(10000) / (half_dim - 1)
-        emb = torch.exp(torch.arange(half_dim, device=device) * -emb)
-        emb = x.unsqueeze(-1) * emb.unsqueeze(0)
-        emb = torch.cat((emb.sin(), emb.cos()), dim=-1)
-        return emb
 
 class TemporalEnsembler:
     def __init__(self, temporal_ensemble_coeff: float, chunk_size: int) -> None:

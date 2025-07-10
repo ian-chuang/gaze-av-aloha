@@ -27,6 +27,8 @@ wandb.enable=false train.eval_freq=100 train.viz_freq=99
 
 # cage policy 
 
-MUJOCO_EGL_DEVICE_ID=0 python train.py policy=cage_policy task=av_aloha_sim_slot_insertion wandb.job_name=slot_cage device=cuda:0
+MUJOCO_EGL_DEVICE_ID=0 python train.py policy=cage_policy task=av_aloha_sim_slot_insertion wandb.job_name=slot_cage_foveated_vit device=cuda:0 
 
-MUJOCO_EGL_DEVICE_ID=1 python train.py policy=cage_policy task=av_aloha_sim_slot_insertion wandb.job_name=slot_cage device=cuda:1 policy.use_gaze=true
+MUJOCO_EGL_DEVICE_ID=1 python train.py policy=cage_policy task=av_aloha_sim_slot_insertion wandb.job_name=slot_cage_vit device=cuda:1
+
+MUJOCO_EGL_DEVICE_ID=2 python train.py policy=cage_policy task=av_aloha_sim_slot_insertion wandb.job_name=slot_cage_dino device=cuda:2
