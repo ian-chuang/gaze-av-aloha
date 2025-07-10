@@ -1,5 +1,30 @@
 defaults:
   - base_cage_policy_config
 
+use_gaze: true
+
+# vision_encoder: foveated_vit
+# vision_encoder_kwargs:
+#   token_size: 16
+#   strides: [1, 2, 6]
+#   grid_sizes: [2, 3, 3]
+#   height: 288
+#   width: 288
+
+# vision_encoder: vit
+# vision_encoder_kwargs:
+#   crop_shape: [216, 288]
+#   token_size: 16
+#   height: 288
+#   width: 288
+
+# vision_encoder: dino
+# vision_encoder_kwargs:
+#   crop_shape: [224, 308]
+
+vision_encoder: resnet
+vision_encoder_kwargs:
+  crop_shape: [216, 288]
+
 image_to_gaze_key:
   observation.images.zed_cam_left: left_eye
