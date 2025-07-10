@@ -319,6 +319,8 @@ class BatchedFoveator(torch.nn.Module):
             raise ValueError(
                 f"[Foveator.generate_foveated_visualization]: Expected square tokens of size {self.token_size}"
             )
+        
+        tokens = tokens.clone()
 
         C = tokens.shape[1]
         reconstruction_size = self.block_sizes[-1] * self.token_size
@@ -332,6 +334,11 @@ class BatchedFoveator(torch.nn.Module):
         # unflatten | N, C, H, W     ->  I, J, C, H, W
         # permute   | I, J, C, H, W  ->  C, I, H, J, W
         # flatten   | C, I, H, J, W  ->  C, H, W
+
+        if draw_lines:
+            tokens_by_level[0][..., -1:, :] = 1.0
+            tokens_by_level[0][..., :, -1:] = 1.0
+
         inner_block = (
             tokens_by_level[0]
             .unflatten(0, (self.grid_sizes_by_level[0], self.grid_sizes_by_level[0]))
@@ -339,9 +346,6 @@ class BatchedFoveator(torch.nn.Module):
             .flatten(3, 4)
             .flatten(1, 2)
         )
-        if draw_lines:
-            inner_block[:, -1:, :] = 1.0
-            inner_block[:, :, -1:] = 1.0
 
         offset = self.token_size * (self.block_sizes[-1] - self.block_sizes[0]) // 2
 
