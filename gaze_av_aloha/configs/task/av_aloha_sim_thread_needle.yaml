@@ -31,9 +31,9 @@ envs:
     eval_options:
       iid:
         prompt: "thread needle through wall"
-      ood_distractors:
-        prompt: "thread needle through wall"
-        distractors: true
+      # ood_distractors:
+      #   prompt: "thread needle through wall"
+      #   distractors: true
       # ood_lighting:
       #   prompt: "thread needle through wall"
       #   randomize_light: true
