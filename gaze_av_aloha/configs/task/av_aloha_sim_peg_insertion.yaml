@@ -34,9 +34,9 @@ envs:
       ood_distractors:
         prompt: "insert peg into socket"
         distractors: true
-      # ood_lighting:
-      #   prompt: "insert peg into socket"
-      #   randomize_light: true
+      ood_lighting:
+        prompt: "insert peg into socket"
+        randomize_light: true
     visualization_steps: 100
 
 fps: 8.333333333333

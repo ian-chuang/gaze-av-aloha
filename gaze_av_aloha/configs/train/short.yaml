@@ -2,13 +2,13 @@ defaults:
   - base_train_config
 
 # Training settings
-steps: 50_000
-eval_freq: 2_500
-viz_freq: 2_500
+steps: 30_000
+eval_freq: 3_000
+viz_freq: 3_000
 log_freq: 100
 save_checkpoint: true
-save_freq: 2_500
-keep_freq: 50_000
+save_freq: 3_000
+keep_freq: 30_000
 num_workers: 4
 batch_size: 64
 grad_clip_norm: 1.0

@@ -1,25 +1,28 @@
 import torch
 from torch import nn, Tensor
 from timm.layers import Mlp
-
+    
 def maybe_add_pos_embed(tensor: Tensor, pos_embed: Tensor | None) -> Tensor:
     return tensor if pos_embed is None else tensor + pos_embed
 
 class AttentionPoolingBlock(nn.Module):
-    def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, dropout=0.1):
+    def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, dropout=0.1, cross_attn_only=False):
         super().__init__()
-        self.norm1 = nn.LayerNorm(hidden_size)
-        self.attn = nn.MultiheadAttention(hidden_size, num_heads, batch_first=True, dropout=dropout)
+        self.cross_attn_only = cross_attn_only
+        if not cross_attn_only:
+            self.norm1 = nn.LayerNorm(hidden_size)
+            self.attn = nn.MultiheadAttention(hidden_size, num_heads, batch_first=True, dropout=dropout)
         self.norm2 = nn.LayerNorm(hidden_size)
         self.xattn = nn.MultiheadAttention(hidden_size, num_heads, batch_first=True, dropout=dropout)
         self.norm3 = nn.LayerNorm(hidden_size)
         self.mlp = Mlp(in_features=hidden_size, hidden_features=int(hidden_size * mlp_ratio), drop=dropout)
 
     def forward(self, x, c, x_pos_emb=None, c_pos_emb=None):
-        x_norm = self.norm1(x)
-        q = k = maybe_add_pos_embed(x_norm, x_pos_emb)
-        v = x_norm
-        x = x + self.attn(q, k, v, need_weights=False)[0]
+        if not self.cross_attn_only:
+            x_norm = self.norm1(x)
+            q = k = maybe_add_pos_embed(x_norm, x_pos_emb)
+            v = x_norm
+            x = x + self.attn(q, k, v, need_weights=False)[0]
 
         q = maybe_add_pos_embed(self.norm2(x), x_pos_emb)
         k = maybe_add_pos_embed(c, c_pos_emb)
@@ -51,7 +54,8 @@ class AttentionPooling(nn.Module):
                 num_heads=num_heads, 
                 mlp_ratio=mlp_ratio,
                 dropout=dropout,
-            ) for _ in range(depth)
+                cross_attn_only= True if i == 0 else False,  # First block is cross-attention only
+            ) for i in range(depth)
         ])
         self.norm2 = nn.LayerNorm(hidden_size)
         self.initialize_weights()
@@ -72,11 +76,9 @@ class AttentionPooling(nn.Module):
         """
         context: (B, N, D) - Input features, where B is batch size, N is sequence length, and D is feature dimension.
         """
-        B = c.size(0)
-        x = self.query_tokens.weight.unsqueeze(0).expand(B, -1, -1)
+        x = self.query_tokens.weight.unsqueeze(0).expand(c.size(0), -1, -1)
         c = self.norm1(c)
         for block in self.blocks:
             x = block(x=x, c=c, c_pos_emb=c_pos_emb)
         x = self.norm2(x)
         return x 
-    
