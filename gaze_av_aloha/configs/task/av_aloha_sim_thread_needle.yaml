@@ -31,12 +31,12 @@ envs:
     eval_options:
       iid:
         prompt: "thread needle through wall"
-      # ood_distractors:
-      #   prompt: "thread needle through wall"
-      #   distractors: true
-      # ood_lighting:
-      #   prompt: "thread needle through wall"
-      #   randomize_light: true
+      ood_distractors:
+        prompt: "thread needle through wall"
+        distractors: true
+      ood_lighting:
+        prompt: "thread needle through wall"
+        randomize_light: true
     visualization_steps: 100
 
 fps: 8.333333333333

@@ -34,9 +34,9 @@ envs:
       ood_distractors:
         prompt: "pour ball into test tube"
         distractors: true
-      # ood_lighting:
-      #   prompt: "pour ball into test tube"
-      #   randomize_light: true
+      ood_lighting:
+        prompt: "pour ball into test tube"
+        randomize_light: true
     visualization_steps: 125
 
 fps: 8.333333333333

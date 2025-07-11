@@ -78,18 +78,6 @@ def train(cfg: Config):
     if cfg.policy.type == "gaze_policy":
         from gaze_av_aloha.policies.gaze_policy.gaze_policy import GazePolicy
         policy = GazePolicy(policy_cfg=cfg.policy, task_cfg=cfg.task, stats=stats)
-    elif cfg.policy.type == "flare_policy":
-        from gaze_av_aloha.policies.flare_policy.flare_policy import FlarePolicy
-        policy = FlarePolicy(policy_cfg=cfg.policy, task_cfg=cfg.task, stats=stats)
-    elif cfg.policy.type == "diffusion_policy":
-        from gaze_av_aloha.policies.diffusion_policy.diffusion_policy import DiffusionPolicy
-        policy = DiffusionPolicy(policy_cfg=cfg.policy, task_cfg=cfg.task, stats=stats)
-    elif cfg.policy.type == "flow_policy":
-        from gaze_av_aloha.policies.flow_policy.flow_policy import FlowPolicy
-        policy = FlowPolicy(policy_cfg=cfg.policy, task_cfg=cfg.task, stats=stats)
-    elif cfg.policy.type == "cage_policy":
-        from gaze_av_aloha.policies.cage_policy.cage_policy import CAGEPolicy
-        policy = CAGEPolicy(policy_cfg=cfg.policy, task_cfg=cfg.task, stats=stats)
     else:
         raise ValueError(f"Unknown policy type: {cfg.policy.type}")
     if checkpoint_path:
