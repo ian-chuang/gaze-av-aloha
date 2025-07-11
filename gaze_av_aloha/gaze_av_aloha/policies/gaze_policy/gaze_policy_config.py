@@ -10,13 +10,13 @@ class GazePolicyConfig(PolicyConfig):
     n_action_steps: int = 2
     horizon: int = 16
     use_temporal_ensemble: bool = True
-    temporal_ensemble_coeff: float = 0.0 # MAYBE?
+    temporal_ensemble_coeff: float = -0.01
     drop_n_last_frames: int = 6
     
     # Observation
     image_norm_mode: str = "mean_std"
-    state_norm_mode: str = "mean_std" 
-    action_norm_mode: str = "mean_std" 
+    state_norm_mode: str = "min_max" 
+    action_norm_mode: str = "min_max" 
     image_to_gaze_key: dict[str, str] = field(default_factory=lambda: {})
     input_shape: tuple = (240, 320)
 
@@ -26,7 +26,7 @@ class GazePolicyConfig(PolicyConfig):
 
     # gaze
     use_gaze: bool = True
-    gaze_noise: float = 0.0
+    gaze_noise: float = 0.01
 
     # Transformer Layers
     dim_model: int = 512
@@ -43,7 +43,7 @@ class GazePolicyConfig(PolicyConfig):
     dit_time_dim: int = 128
 
     # Flow Matching
-    n_sampling_steps: int = 6
+    n_sampling_steps: int = 8 
 
     # Training
     optimizer_lr: float = 1e-4

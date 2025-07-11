@@ -138,7 +138,7 @@ class ViT(VisionEncoder):
             height=height,
             width=width,
         )
-        self.backbone = create_vit_s(
+        self.backbone = create_vit_b(
             self.tokenizer.get_num_tokens(),
             self.tokenizer.get_token_size()
         )
@@ -155,13 +155,13 @@ class ViT(VisionEncoder):
         else:
             x = self.center_crop(x)
 
-        patch_tokens, masks = self.tokenizer.tokenize(x, centers)
+        patch_tokens, _ = self.tokenizer.tokenize(x)
         if not self.training:
             viz["input"] = self.tokenizer.generate_visualization(
                 patch_tokens[0]
             ).unsqueeze(0)
 
-        features, reg_tokens = self.backbone(patch_tokens, masks)
+        features, reg_tokens = self.backbone(patch_tokens)
 
         assert features.shape[1] == self.tokenizer.get_num_tokens(), \
             f"Expected {self.tokenizer.get_num_tokens()} tokens, got {features.shape[1]}"

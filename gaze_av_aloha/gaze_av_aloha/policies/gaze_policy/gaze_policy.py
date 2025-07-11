@@ -17,7 +17,8 @@ from gaze_av_aloha.utils.policy_utils import (
 )
 from collections import deque
 
-from gaze_av_aloha.policies.gaze_policy.transformer import DiT, AttentionPooling
+from gaze_av_aloha.policies.gaze_policy.dit import DiT
+from gaze_av_aloha.policies.gaze_policy.pool import AttentionPooling
 from gaze_av_aloha.policies.gaze_policy.vision import get_vision_encoder
 from gaze_av_aloha.policies.normalize import Normalize, Unnormalize
 from torchvision.transforms import Resize
@@ -235,30 +236,23 @@ class FlowModel(nn.Module):
             **{k: 2 for k in policy_cfg.image_to_gaze_key.values() if policy_cfg.use_gaze},
         }
 
-        n_tokens = 0
         n_obs_steps = policy_cfg.n_obs_steps
         n_images = len(policy_cfg.image_to_gaze_key)
-
-        self.state_proj = nn.Sequential(
-            nn.Dropout(policy_cfg.dropout),
-            nn.Linear(task_cfg.state_dim, policy_cfg.dim_model),
-        )
-        n_tokens += n_obs_steps
-
+        n_tokens = 0
         self.backbone = get_vision_encoder(
             name=policy_cfg.vision_encoder,
             **policy_cfg.vision_encoder_kwargs,
         )
         self.backbone_proj = nn.Linear(self.backbone.embed_dim, policy_cfg.dim_model)
-        n_tokens += self.backbone.get_num_tokens(*policy_cfg.input_shape) * n_obs_steps * n_images
-
+        n_tokens += n_obs_steps * n_images * self.backbone.get_num_tokens(*policy_cfg.input_shape)
+        self.state_proj = nn.Sequential(
+            nn.Dropout(policy_cfg.dropout),
+            nn.Linear(task_cfg.state_dim, policy_cfg.dim_model),
+        )
+        n_tokens += n_obs_steps
         if policy_cfg.use_gaze:
-            self.gaze_proj = nn.Sequential(
-                nn.Dropout(policy_cfg.dropout),
-                nn.Linear(2, policy_cfg.dim_model),
-            )
-            n_tokens += policy_cfg.n_obs_steps * n_images
-        
+            self.gaze_proj = nn.Linear(2, policy_cfg.dim_model)
+            n_tokens += n_obs_steps * n_images
         self.pool = AttentionPooling(
             hidden_size=policy_cfg.dim_model,
             num_queries=policy_cfg.pool_n_queries,
@@ -267,9 +261,16 @@ class FlowModel(nn.Module):
             mlp_ratio=policy_cfg.mlp_ratio,
             dropout=policy_cfg.dropout,
         ) 
+        self.s_pos_embed = nn.Embedding(policy_cfg.n_obs_steps, policy_cfg.dim_model)
+        self.n_pos_embed = nn.Embedding(len(policy_cfg.image_to_gaze_key), policy_cfg.dim_model)
+        self.l_pos_embed = nn.Embedding(self.backbone.get_num_tokens(*policy_cfg.input_shape), policy_cfg.dim_model)
+
+
+        # full pos embed for pool
         self.pool_pos_embed = nn.Embedding(n_tokens, policy_cfg.dim_model)
 
-        # Encoder for the diffusion timestep.
+
+
         self.noise_dim = sum(self.target_keys_to_dim.values())
         self.noise_proj = nn.Linear(self.noise_dim, policy_cfg.dim_model)
         self.time_embed = nn.Sequential(
@@ -316,6 +317,7 @@ class FlowModel(nn.Module):
 
         # state
         tokens.append(self.state_proj(batch[self.task_cfg.state_key]))
+        pos_embed.append(self.s_pos_embed.weight.unsqueeze(0))
 
         # foveal vision
         if self.cfg.use_gaze:
@@ -323,6 +325,7 @@ class FlowModel(nn.Module):
             gaze = einops.rearrange(gaze, 'b s n c -> (b s n) c') 
             if self.training:
                 gaze = gaze + torch.randn_like(gaze) * self.cfg.gaze_noise
+
             tokens.append(
                 einops.rearrange(
                     self.gaze_proj(gaze),  # send in the gaze (frame of ref of robot camera)
@@ -330,11 +333,17 @@ class FlowModel(nn.Module):
                     b=b, s=s, n=n
                 ) 
             )
+            pos_embed.append(
+                einops.rearrange(
+                    self.s_pos_embed.weight.unsqueeze(1) + self.n_pos_embed.weight.unsqueeze(0),
+                    's n d -> 1 (s n) d', 
+                    s=s, n=n
+                )
+            )
         else:
             gaze = None
 
         img_feat, viz = self.backbone(img, centers=gaze)
-        
         tokens.append(
             einops.rearrange(
                 self.backbone_proj(img_feat),  
@@ -342,9 +351,21 @@ class FlowModel(nn.Module):
                 b=b, s=s, n=n
             )
         )
+        pos_embed.append(
+            einops.repeat(
+                self.s_pos_embed.weight.unsqueeze(1).unsqueeze(1) + # s 1 1 d
+                self.n_pos_embed.weight.unsqueeze(0).unsqueeze(2) + # 1 n 1 d
+                self.l_pos_embed.weight.unsqueeze(0).unsqueeze(0),  # 1 1 l d
+                's n l d -> 1 (s n l) d',
+                s=s, n=n,
+            )
+        )
 
         tokens = torch.cat(tokens, dim=1)
+        pos_embed = torch.cat(pos_embed, dim=1)
+
         pos_embed = self.pool_pos_embed.weight.unsqueeze(0)
+
         cond = self.pool(tokens, pos_embed)
         return cond, viz
     
