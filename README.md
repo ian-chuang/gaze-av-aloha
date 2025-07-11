@@ -6,7 +6,7 @@ git submodule init
 git submodule update
 conda create -n gaze python=3.10
 pip install -e ./gym_av_aloha
-pip install git+https://github.com/huggingface/lerobot.git
+pip install git+https://github.com/huggingface/lerobot.git@483be9aac217c2d8ef16982490f22b2ad091ab46
 pip install -e ./gaze_av_aloha
 ```
 
