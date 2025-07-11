@@ -13,6 +13,7 @@ from diffusers.training_utils import EMAModel
 
 from gaze_av_aloha.utils.policy_utils import (
     get_device_from_parameters,
+    get_dtype_from_parameters,
     populate_queues,
 )
 from collections import deque
@@ -22,6 +23,8 @@ from gaze_av_aloha.policies.gaze_policy.pool import AttentionPooling
 from gaze_av_aloha.policies.gaze_policy.vision import get_vision_encoder
 from gaze_av_aloha.policies.normalize import Normalize, Unnormalize
 from torchvision.transforms import Resize
+
+from torchcfm import ConditionalFlowMatcher
 
 import logging
 
@@ -75,11 +78,6 @@ class GazePolicy(Policy):
         if not any(backbone_condition(n) for n, p in self.named_parameters()):
             raise ValueError(f"No parameters found satifying the condition for vision backbone: {backbone_condition}")
         
-        # TODO REMOVE THIS LOGGING
-        for n, p in self.named_parameters():
-            if backbone_condition(n) and p.requires_grad:
-                logging.info(f"{n}: {self.cfg.optimizer_lr_backbone}.")
-
         params = [
             {
                 "params": [
@@ -236,23 +234,20 @@ class FlowModel(nn.Module):
             **{k: 2 for k in policy_cfg.image_to_gaze_key.values() if policy_cfg.use_gaze},
         }
 
-        n_obs_steps = policy_cfg.n_obs_steps
-        n_images = len(policy_cfg.image_to_gaze_key)
-        n_tokens = 0
         self.backbone = get_vision_encoder(
             name=policy_cfg.vision_encoder,
             **policy_cfg.vision_encoder_kwargs,
         )
         self.backbone_proj = nn.Linear(self.backbone.embed_dim, policy_cfg.dim_model)
-        n_tokens += n_obs_steps * n_images * self.backbone.get_num_tokens(*policy_cfg.input_shape)
         self.state_proj = nn.Sequential(
             nn.Dropout(policy_cfg.dropout),
             nn.Linear(task_cfg.state_dim, policy_cfg.dim_model),
         )
-        n_tokens += n_obs_steps
         if policy_cfg.use_gaze:
-            self.gaze_proj = nn.Linear(2, policy_cfg.dim_model)
-            n_tokens += n_obs_steps * n_images
+            self.gaze_proj = nn.Sequential(
+                nn.Dropout(policy_cfg.dropout),
+                nn.Linear(2, policy_cfg.dim_model),
+            )
         self.pool = AttentionPooling(
             hidden_size=policy_cfg.dim_model,
             num_queries=policy_cfg.pool_n_queries,
@@ -261,16 +256,12 @@ class FlowModel(nn.Module):
             mlp_ratio=policy_cfg.mlp_ratio,
             dropout=policy_cfg.dropout,
         ) 
-        self.pool_pos_embed = nn.Embedding(n_tokens, policy_cfg.dim_model)
+        self.s_pos_embed = nn.Embedding(policy_cfg.n_obs_steps, policy_cfg.dim_model)
+        self.n_pos_embed = nn.Embedding(len(policy_cfg.image_to_gaze_key), policy_cfg.dim_model)
+        self.l_pos_embed = nn.Embedding(self.backbone.get_num_tokens(*policy_cfg.input_shape), policy_cfg.dim_model)
 
         self.noise_dim = sum(self.target_keys_to_dim.values())
         self.noise_proj = nn.Linear(self.noise_dim, policy_cfg.dim_model)
-        self.time_embed = nn.Sequential(
-            SinusoidalPosEmb(policy_cfg.dit_time_dim),
-            nn.Linear(policy_cfg.dit_time_dim, policy_cfg.dit_time_dim * 4),
-            nn.Mish(),
-            nn.Linear(policy_cfg.dit_time_dim * 4, policy_cfg.dim_model),
-        )
         self.DiT = DiT(
             out_dim=self.noise_dim,
             hidden_size=policy_cfg.dim_model,
@@ -278,23 +269,11 @@ class FlowModel(nn.Module):
             num_heads=policy_cfg.n_heads,
             mlp_ratio=policy_cfg.mlp_ratio,
             dropout=policy_cfg.dropout,
+            time_dim=policy_cfg.dit_time_dim,
         )
         self.dit_pos_embed = nn.Embedding(policy_cfg.horizon, policy_cfg.dim_model)
 
-    def sample_noise(self, shape, device):
-        noise = torch.normal(
-            mean=0.0,
-            std=1.0,
-            size=shape,
-            dtype=torch.float32,
-            device=device,
-        )
-        return noise
-
-    def sample_time(self, bsize, device):
-        time_beta = sample_beta(1.5, 1.0, bsize, device)
-        time = time_beta * 0.999 + 0.001
-        return time.to(dtype=torch.float32, device=device)
+        self.cfm = ConditionalFlowMatcher(sigma=0.0)
 
     def prepare_global_conditioning(self, batch: dict[str, Tensor]) -> tuple[Tensor, dict]:
         tokens = []
@@ -309,6 +288,7 @@ class FlowModel(nn.Module):
 
         # state
         tokens.append(self.state_proj(batch[self.task_cfg.state_key]))
+        pos_embed.append(self.s_pos_embed.weight.unsqueeze(0))
 
         # foveal vision
         if self.cfg.use_gaze:
@@ -324,6 +304,13 @@ class FlowModel(nn.Module):
                     b=b, s=s, n=n
                 ) 
             )
+            pos_embed.append(
+                einops.rearrange(
+                    self.s_pos_embed.weight.unsqueeze(1) + self.n_pos_embed.weight.unsqueeze(0),
+                    's n d -> 1 (s n) d', 
+                    s=s, n=n
+                )
+            )
         else:
             gaze = None
 
@@ -335,36 +322,44 @@ class FlowModel(nn.Module):
                 b=b, s=s, n=n
             )
         )
+        pos_embed.append(
+            einops.repeat(
+                self.s_pos_embed.weight.unsqueeze(1).unsqueeze(1) + # s 1 1 d
+                self.n_pos_embed.weight.unsqueeze(0).unsqueeze(2) + # 1 n 1 d
+                self.l_pos_embed.weight.unsqueeze(0).unsqueeze(0),  # 1 1 l d
+                's n l d -> 1 (s n l) d',
+                s=s, n=n,
+            )
+        )
 
         tokens = torch.cat(tokens, dim=1)
-        pos_embed = self.pool_pos_embed.weight.unsqueeze(0)
+        pos_embed = torch.cat(pos_embed, dim=1)
         cond = self.pool(tokens, pos_embed)
         return cond, viz
     
     def predict_velocity(self, noise: Tensor, global_cond: Tensor, timestep: Tensor,) -> Tensor:
         x = self.noise_proj(noise) + self.dit_pos_embed.weight.unsqueeze(0)
-        t = self.time_embed(timestep)
-        return self.DiT(x=x, c=global_cond, t=t)
+        return self.DiT(x=x, c=global_cond, timestep=timestep)
 
-    # ========= inference  ============
     def conditional_sample(
         self, batch_size: int, global_cond: Tensor | None = None
     ) -> Tensor:
         device = get_device_from_parameters(self)
+        dtype = get_dtype_from_parameters(self)
 
         actions_shape = (batch_size, self.cfg.horizon, self.noise_dim)
-        noise = self.sample_noise(actions_shape, device=device)
+        xt = torch.randn(actions_shape, dtype=dtype, device=device)
 
-        dt = -1.0 / self.cfg.n_sampling_steps
-        dt = torch.tensor(dt, dtype=torch.float32, device=device)
+        n_steps = self.cfg.n_sampling_steps
+        dt = torch.tensor(1.0 / n_steps, dtype=dtype, device=device)
 
-        xt = noise
-        time = torch.tensor(1.0, dtype=torch.float32, device=device)
-        while time >= -dt / 2:
-            vt = self.predict_velocity(noise=xt, global_cond=global_cond, timestep=time.expand(batch_size))
-            # Euler step
-            xt += dt * vt
-            time += dt
+        for i in range(n_steps):
+            timestep = (i * dt).expand(batch_size)
+            vt = self.predict_velocity(
+                noise=xt, global_cond=global_cond, timestep=timestep
+            )
+            xt = xt + vt * dt
+
         return xt
 
     def generate_actions(self, batch: dict[str, Tensor]) -> Tensor:
@@ -391,41 +386,15 @@ class FlowModel(nn.Module):
 
         global_cond, _ = self.prepare_global_conditioning(batch) 
 
-        noise = self.sample_noise(x1.shape, x1.device)
-        time = self.sample_time(x1.shape[0], x1.device)
-        time_expanded = time[:, None, None]
-        xt = time_expanded * noise + (1 - time_expanded) * x1
-        ut = noise - x1
-
-        vt = self.predict_velocity(noise=xt, global_cond=global_cond, timestep=time)
+        x0 = torch.randn_like(x1)
+        timestep, xt, ut = self.cfm.sample_location_and_conditional_flow(x0, x1)
+        vt = self.predict_velocity(noise=xt, global_cond=global_cond, timestep=timestep)
         flow_matching_loss = F.mse_loss(vt, ut, reduction="none").mean()
         loss = flow_matching_loss
         loss_dict = {
             "flow_matching_loss": flow_matching_loss.item(),
         }
         return loss, loss_dict
-    
-class SinusoidalPosEmb(nn.Module):
-    """1D sinusoidal positional embeddings as in Attention is All You Need."""
-
-    def __init__(self, dim: int):
-        super().__init__()
-        self.dim = dim
-
-    def forward(self, x: Tensor) -> Tensor:
-        device = x.device
-        half_dim = self.dim // 2
-        emb = math.log(10000) / (half_dim - 1)
-        emb = torch.exp(torch.arange(half_dim, device=device) * -emb)
-        emb = x.unsqueeze(-1) * emb.unsqueeze(0)
-        emb = torch.cat((emb.sin(), emb.cos()), dim=-1)
-        return emb
-    
-
-def sample_beta(alpha, beta, bsize, device):
-    gamma1 = torch.empty((bsize,), device=device).uniform_(0, 1).pow(1 / alpha)
-    gamma2 = torch.empty((bsize,), device=device).uniform_(0, 1).pow(1 / beta)
-    return gamma1 / (gamma1 + gamma2)
 
 class TemporalEnsembler:
     def __init__(self, temporal_ensemble_coeff: float, chunk_size: int) -> None:

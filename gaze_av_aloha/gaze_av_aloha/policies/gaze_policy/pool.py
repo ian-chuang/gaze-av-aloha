@@ -76,8 +76,7 @@ class AttentionPooling(nn.Module):
         """
         context: (B, N, D) - Input features, where B is batch size, N is sequence length, and D is feature dimension.
         """
-        B = c.size(0)
-        x = self.query_tokens.weight.unsqueeze(0).expand(B, -1, -1)
+        x = self.query_tokens.weight.unsqueeze(0).expand(c.size(0), -1, -1)
         c = self.norm1(c)
         for block in self.blocks:
             x = block(x=x, c=c, c_pos_emb=c_pos_emb)
