@@ -261,15 +261,7 @@ class FlowModel(nn.Module):
             mlp_ratio=policy_cfg.mlp_ratio,
             dropout=policy_cfg.dropout,
         ) 
-        self.s_pos_embed = nn.Embedding(policy_cfg.n_obs_steps, policy_cfg.dim_model)
-        self.n_pos_embed = nn.Embedding(len(policy_cfg.image_to_gaze_key), policy_cfg.dim_model)
-        self.l_pos_embed = nn.Embedding(self.backbone.get_num_tokens(*policy_cfg.input_shape), policy_cfg.dim_model)
-
-
-        # full pos embed for pool
         self.pool_pos_embed = nn.Embedding(n_tokens, policy_cfg.dim_model)
-
-
 
         self.noise_dim = sum(self.target_keys_to_dim.values())
         self.noise_proj = nn.Linear(self.noise_dim, policy_cfg.dim_model)
@@ -317,7 +309,6 @@ class FlowModel(nn.Module):
 
         # state
         tokens.append(self.state_proj(batch[self.task_cfg.state_key]))
-        pos_embed.append(self.s_pos_embed.weight.unsqueeze(0))
 
         # foveal vision
         if self.cfg.use_gaze:
@@ -333,13 +324,6 @@ class FlowModel(nn.Module):
                     b=b, s=s, n=n
                 ) 
             )
-            pos_embed.append(
-                einops.rearrange(
-                    self.s_pos_embed.weight.unsqueeze(1) + self.n_pos_embed.weight.unsqueeze(0),
-                    's n d -> 1 (s n) d', 
-                    s=s, n=n
-                )
-            )
         else:
             gaze = None
 
@@ -351,21 +335,9 @@ class FlowModel(nn.Module):
                 b=b, s=s, n=n
             )
         )
-        pos_embed.append(
-            einops.repeat(
-                self.s_pos_embed.weight.unsqueeze(1).unsqueeze(1) + # s 1 1 d
-                self.n_pos_embed.weight.unsqueeze(0).unsqueeze(2) + # 1 n 1 d
-                self.l_pos_embed.weight.unsqueeze(0).unsqueeze(0),  # 1 1 l d
-                's n l d -> 1 (s n l) d',
-                s=s, n=n,
-            )
-        )
 
         tokens = torch.cat(tokens, dim=1)
-        pos_embed = torch.cat(pos_embed, dim=1)
-
         pos_embed = self.pool_pos_embed.weight.unsqueeze(0)
-
         cond = self.pool(tokens, pos_embed)
         return cond, viz
     
