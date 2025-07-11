@@ -323,7 +323,7 @@ class FlowModel(nn.Module):
             )
         )
         pos_embed.append(
-            einops.repeat(
+            einops.rearrange(
                 self.s_pos_embed.weight.unsqueeze(1).unsqueeze(1) + # s 1 1 d
                 self.n_pos_embed.weight.unsqueeze(0).unsqueeze(2) + # 1 n 1 d
                 self.l_pos_embed.weight.unsqueeze(0).unsqueeze(0),  # 1 1 l d
