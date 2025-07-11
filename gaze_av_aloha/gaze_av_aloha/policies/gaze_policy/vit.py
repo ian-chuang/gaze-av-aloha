@@ -154,7 +154,7 @@ class ImageEncoder(torch.nn.Module):
         named_apply(init_weights_vit_timm, self)
 
     def forward(
-        self, foveated_tokens: torch.Tensor, valid_token_mask: Optional[torch.Tensor]
+        self, foveated_tokens: torch.Tensor, valid_token_mask: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         """
         Parameters:
