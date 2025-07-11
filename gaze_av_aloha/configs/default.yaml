@@ -1,7 +1,7 @@
 defaults:
   - _self_
   - base_config
-  - policy: gaze_policy
+  - policy: foveated_vit_policy
   - task: av_aloha_sim_thread_needle
   - train: short
   - wandb: gaze

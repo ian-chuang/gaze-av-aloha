@@ -18,15 +18,15 @@ class VisionEncoder(abc.ABC, nn.Module):
         """Returns the embedding dimension of the encoder."""
         pass
     
-    def get_num_tokens(self, height: int, width: int) -> int:
+    def get_num_tokens(self, height: int, width: int, device="cpu") -> int:
         """Returns the number of tokens produced by the encoder."""
-        x = torch.randn(1, 3, height, width)
+        x = torch.randn(1, 3, height, width, device=device)
         centers = torch.zeros((1, 2), device=x.device)  # Dummy centers
         tokens, _ = self.forward(x, centers)
         return tokens.shape[1]
 
     @abc.abstractmethod
-    def forward(self, x: Tensor, centers: Tensor=None) -> Tuple[Tensor, dict]:
+    def forward(self, x: Tensor, centers: Tensor=None, visualize: bool = False) -> Tuple[Tensor, dict]:
         """Forward pass of the encoder."""
         pass
 
@@ -54,7 +54,7 @@ class ResNet(VisionEncoder):
     def embed_dim(self) -> int:
         return self._embed_dim
 
-    def forward(self, x: Tensor, centers: Tensor=None) -> Tensor:
+    def forward(self, x: Tensor, centers: Tensor=None, visualize: bool = False) -> Tuple[Tensor, dict]:
         viz = {}
 
         if self.training:
@@ -62,7 +62,8 @@ class ResNet(VisionEncoder):
         else:
             x = self.center_crop(x)
 
-        viz["input"] = x
+        if not self.training and visualize:
+            viz["input"] = x
 
         x = self.backbone(x)["feature_map"]
         x = self.pool(x)
@@ -107,7 +108,7 @@ class DINO(VisionEncoder):
     def embed_dim(self):
         return self.backbone.embed_dim
 
-    def forward(self, x: Tensor, centers: Tensor=None) -> Tensor:
+    def forward(self, x: Tensor, centers: Tensor=None, visualize: bool = False) -> Tuple[Tensor, dict]:
         viz = {}
 
         if self.training:
@@ -115,7 +116,8 @@ class DINO(VisionEncoder):
         else:
             x = self.center_crop(x)
         
-        viz["input"] = x
+        if not self.training and visualize:
+            viz["input"] = x
 
         x = self.backbone.forward_features(x)["x_norm_patchtokens"]
 
@@ -147,7 +149,7 @@ class ViT(VisionEncoder):
     def embed_dim(self) -> int:
         return self.backbone.embed_dim
 
-    def forward(self, x: Tensor, centers: Tensor=None) -> Tensor:
+    def forward(self, x: Tensor, centers: Tensor=None, visualize: bool = False) -> Tuple[Tensor, dict]:
         viz = {}
 
         if self.training:
@@ -156,7 +158,7 @@ class ViT(VisionEncoder):
             x = self.center_crop(x)
 
         patch_tokens, _ = self.tokenizer.tokenize(x)
-        if not self.training:
+        if not self.training and visualize:
             viz["input"] = self.tokenizer.generate_visualization(
                 patch_tokens[0]
             ).unsqueeze(0)
@@ -193,12 +195,12 @@ class FoveatedViT(VisionEncoder):
     def embed_dim(self) -> int:
         return self.backbone.embed_dim
     
-    def forward(self, x: Tensor, centers: Tensor=None) -> Tensor:
+    def forward(self, x: Tensor, centers: Tensor=None, visualize: bool = False) -> Tuple[Tensor, dict]:
         viz = {}
 
         patch_tokens, masks = self.tokenizer.tokenize(x, centers)
 
-        if not self.training:
+        if not self.training and visualize:
             viz["input"] = self.tokenizer.generate_visualization(
                 patch_tokens[0]
             ).unsqueeze(0)  # add batch dimension for visualization

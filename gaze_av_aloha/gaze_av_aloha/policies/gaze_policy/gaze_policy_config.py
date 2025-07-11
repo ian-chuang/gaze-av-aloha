@@ -55,3 +55,5 @@ class GazePolicyConfig(PolicyConfig):
     scheduler_warmup_steps: int = 500
     use_ema: bool = True
     ema_decay: float = 0.99
+
+    visualize: bool = True
