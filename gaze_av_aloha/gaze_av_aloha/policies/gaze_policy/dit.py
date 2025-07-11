@@ -1,6 +1,23 @@
 import torch
 from torch import nn, Tensor
 from timm.layers import Mlp
+import math
+
+class SinusoidalPosEmb(nn.Module):
+    """1D sinusoidal positional embeddings as in Attention is All You Need."""
+
+    def __init__(self, dim: int):
+        super().__init__()
+        self.dim = dim
+
+    def forward(self, x: Tensor) -> Tensor:
+        device = x.device
+        half_dim = self.dim // 2
+        emb = math.log(10000) / (half_dim - 1)
+        emb = torch.exp(torch.arange(half_dim, device=device) * -emb)
+        emb = x.unsqueeze(-1) * emb.unsqueeze(0)
+        emb = torch.cat((emb.sin(), emb.cos()), dim=-1)
+        return emb
     
 def modulate(x, shift, scale):
     return x * (1 + scale.unsqueeze(1)) + shift.unsqueeze(1)
@@ -69,8 +86,15 @@ class DiT(nn.Module):
         num_heads=8,
         mlp_ratio=4.0,
         dropout=0.0,
+        time_dim=128,
     ):
         super().__init__()
+        self.time_embed = nn.Sequential(
+            SinusoidalPosEmb(time_dim),
+            nn.Linear(time_dim, time_dim * 4),
+            nn.Mish(),
+            nn.Linear(time_dim * 4, hidden_size),
+        )
         self.blocks = nn.ModuleList([
             DiTBlock(
                 hidden_size, 
@@ -102,7 +126,8 @@ class DiT(nn.Module):
         nn.init.constant_(self.final_layer.linear.weight, 0)
         nn.init.constant_(self.final_layer.linear.bias, 0)
 
-    def forward(self, x, c, t):
+    def forward(self, x, c, timestep):
+        t = self.time_embed(timestep)
         for block in self.blocks:
             x = block(x, c, t)
         x = self.final_layer(x, t)  

@@ -40,7 +40,7 @@ class GazePolicyConfig(PolicyConfig):
 
     # DiT
     dit_n_layers: int = 8
-    dit_time_dim: int = 128
+    dit_time_dim: int = 256
 
     # Flow Matching
     n_sampling_steps: int = 8 
