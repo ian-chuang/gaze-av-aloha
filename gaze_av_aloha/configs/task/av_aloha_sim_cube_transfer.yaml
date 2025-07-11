@@ -34,9 +34,9 @@ envs:
       ood_distractors:
         prompt: "pick red cube"
         distractors: true
-      # ood_lighting:
-      #   prompt: "pick red cube"
-      #   randomize_light: true
+      ood_lighting:
+        prompt: "pick red cube"
+        randomize_light: true
     visualization_steps: 50
 
 fps: 8.333333333333

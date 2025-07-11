@@ -34,9 +34,9 @@ envs:
       ood_distractors:
         prompt: "hook package"
         distractors: true
-      # ood_lighting:
-      #   prompt: "hook package"
-      #   randomize_light: true
+      ood_lighting:
+        prompt: "hook package"
+        randomize_light: true
     visualization_steps: 100
 
 fps: 8.333333333333

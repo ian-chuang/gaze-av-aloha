@@ -3,7 +3,7 @@ defaults:
 
 # WandB settings
 enable: true
-project: gaze_av_aloha_vit
+project: vit-scratch-sim
 entity: ianc-uc-berkeley
 job_name: ${policy.type}_${task.type}
 run_id: ???
