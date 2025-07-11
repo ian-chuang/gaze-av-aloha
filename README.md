@@ -27,9 +27,18 @@ wandb.enable=false train.eval_freq=100 train.viz_freq=99
 
 # EVAL
 
+### foveated vit
 MUJOCO_EGL_DEVICE_ID=0 python train.py policy=foveated_vit_policy task=av_aloha_sim_thread_needle wandb.job_name=thread_foveated device=cuda:0
 MUJOCO_EGL_DEVICE_ID=1 python train.py policy=foveated_vit_policy task=av_aloha_sim_pour_test_tube wandb.job_name=pour_foveated device=cuda:1
 MUJOCO_EGL_DEVICE_ID=2 python train.py policy=foveated_vit_policy task=av_aloha_sim_hook_package wandb.job_name=hook_foveated device=cuda:2
 MUJOCO_EGL_DEVICE_ID=3 python train.py policy=foveated_vit_policy task=av_aloha_sim_slot_insertion wandb.job_name=slot_foveated device=cuda:3
 MUJOCO_EGL_DEVICE_ID=0 python train.py policy=foveated_vit_policy task=av_aloha_sim_cube_transfer wandb.job_name=cube_foveated device=cuda:0
 MUJOCO_EGL_DEVICE_ID=1 python train.py policy=foveated_vit_policy task=av_aloha_sim_peg_insertion wandb.job_name=peg_foveated device=cuda:1
+
+### vit
+MUJOCO_EGL_DEVICE_ID=0 python train.py policy=vit_policy task=av_aloha_sim_thread_needle wandb.job_name=thread_vit device=cuda:0
+MUJOCO_EGL_DEVICE_ID=1 python train.py policy=vit_policy task=av_aloha_sim_pour_test_tube wandb.job_name=pour_vit device=cuda:1
+MUJOCO_EGL_DEVICE_ID=2 python train.py policy=vit_policy task=av_aloha_sim_hook_package wandb.job_name=hook_vit device=cuda:2
+MUJOCO_EGL_DEVICE_ID=3 python train.py policy=vit_policy task=av_aloha_sim_slot_insertion wandb.job_name=slot_vit device=cuda:3
+MUJOCO_EGL_DEVICE_ID=0 python train.py policy=vit_policy task=av_aloha_sim_cube_transfer wandb.job_name=cube_vit device=cuda:0
+MUJOCO_EGL_DEVICE_ID=1 python train.py policy=vit_policy task=av_aloha_sim_peg_insertion wandb.job_name=peg_vit device=cuda:1
