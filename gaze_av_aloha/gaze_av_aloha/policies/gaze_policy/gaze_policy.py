@@ -306,7 +306,7 @@ class FlowModel(nn.Module):
 
         proprio_tokens = self.proprio_proj(proprio)  # (b, s+s*n, d)
 
-        img_tokens, viz = self.backbone(img, centers=gaze)
+        img_tokens, viz = self.backbone(img, centers=gaze, visualize=self.cfg.visualize)  
         img_tokens = einops.rearrange(
             self.backbone_proj(img_tokens),  
             '(b s n) l d -> b (s n l) d',   
