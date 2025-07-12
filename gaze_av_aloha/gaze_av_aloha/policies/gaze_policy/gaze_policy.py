@@ -231,6 +231,9 @@ class FlowModel(nn.Module):
 
         n_obs_steps = policy_cfg.n_obs_steps
         n_images = len(policy_cfg.image_to_gaze_key)
+        proprio_dim = task_cfg.state_dim
+        if policy_cfg.use_gaze:
+            proprio_dim += 2 * n_images
 
         self.target_keys_to_dim = {
             task_cfg.action_key: task_cfg.action_dim,
@@ -242,15 +245,14 @@ class FlowModel(nn.Module):
             **policy_cfg.vision_encoder_kwargs,
         )
         self.backbone_proj = nn.Linear(self.backbone.embed_dim, policy_cfg.dim_model)
-        self.state_proj = nn.Sequential(
+        self.proprio_proj = nn.Sequential(
             nn.Dropout(policy_cfg.dropout),
-            nn.Linear(task_cfg.state_dim, policy_cfg.dim_model),
+            nn.Linear(proprio_dim, policy_cfg.dim_model),
+            nn.GELU(),
+            nn.Dropout(policy_cfg.dropout),
+            nn.Linear(policy_cfg.dim_model, policy_cfg.dim_model),
+            nn.Dropout(policy_cfg.dropout),
         )
-        if policy_cfg.use_gaze:
-            self.gaze_proj = nn.Sequential(
-                nn.Dropout(policy_cfg.dropout),
-                nn.Linear(2, policy_cfg.dim_model),
-            )
         self.pool = AttentionPooling(
             hidden_size=policy_cfg.dim_model,
             num_queries=policy_cfg.pool_n_queries,
@@ -274,37 +276,35 @@ class FlowModel(nn.Module):
             dropout=policy_cfg.dropout,
             time_dim=policy_cfg.dit_time_dim,
         )
-        self.dit_pos_embed = nn.Embedding(n_obs_steps + n_obs_steps*n_images + policy_cfg.horizon, policy_cfg.dim_model)
+        self.dit_pos_embed = nn.Embedding(n_obs_steps + policy_cfg.horizon, policy_cfg.dim_model)
 
         self.cfm = ConditionalFlowMatcher(sigma=0.0)
 
     def prepare_global_conditioning(self, batch: dict[str, Tensor]) -> tuple[Tensor, dict]:
-        # load image and resize to input shape
         img = torch.stack([batch[key] for key in self.cfg.image_to_gaze_key.keys()], dim=2)
         b, s, n = img.shape[:3]
         img = einops.rearrange(img, 'b s n c h w -> (b s n) c h w')  
         img = Resize(self.cfg.input_shape)(img)  
 
-        # state
-        proprio_tokens = self.state_proj(batch[self.task_cfg.state_key])
-
-        # foveal vision
+        proprio = batch[self.task_cfg.state_key]
         if self.cfg.use_gaze:
             gaze = torch.stack([batch[key] for key in self.cfg.image_to_gaze_key.values()], dim=2)
             gaze = einops.rearrange(gaze, 'b s n c -> (b s n) c') 
             if self.training:
                 gaze = gaze + torch.randn_like(gaze) * self.cfg.gaze_noise
 
-            proprio_tokens = torch.cat([
-                proprio_tokens,
+            proprio = torch.cat([
+                proprio,
                 einops.rearrange(
-                    self.gaze_proj(gaze), 
-                    '(b s n) d -> b (s n) d',
+                    gaze, 
+                    '(b s n) d -> b s (n d)',
                     b=b, s=s, n=n
                 ),
-            ], dim=1)  
+            ], dim=-1)  
         else:
             gaze = None
+
+        proprio_tokens = self.proprio_proj(proprio)  # (b, s+s*n, d)
 
         img_tokens, viz = self.backbone(img, centers=gaze)
         img_tokens = einops.rearrange(
