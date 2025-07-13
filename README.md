@@ -52,8 +52,13 @@ MUJOCO_EGL_DEVICE_ID=3 python train.py policy=low_res_vit_policy task=av_aloha_s
 MUJOCO_EGL_DEVICE_ID=0 python train.py policy=low_res_vit_policy task=av_aloha_sim_cube_transfer wandb.job_name=cube_low_res_vit_v2 device=cuda:0
 MUJOCO_EGL_DEVICE_ID=1 python train.py policy=low_res_vit_policy task=av_aloha_sim_peg_insertion wandb.job_name=peg_low_res_vit_v2 device=cuda:1
 
-
-
+### two stage foveated vit
+MUJOCO_EGL_DEVICE_ID=0 python train.py policy=foveated_vit_policy task=av_aloha_sim_thread_needle wandb.job_name=thread_2stage_foveated_v2 policy.use_gaze_as_action=false policy.gaze_model_repo_id=iantc104/gaze_model_av_aloha_sim_thread_needle device=cuda:0
+MUJOCO_EGL_DEVICE_ID=1 python train.py policy=foveated_vit_policy task=av_aloha_sim_pour_test_tube wandb.job_name=pour_2stage_foveated_v2 policy.use_gaze_as_action=false policy.gaze_model_repo_id=iantc104/gaze_model_av_aloha_sim_pour_test_tube device=cuda:1
+MUJOCO_EGL_DEVICE_ID=2 python train.py policy=foveated_vit_policy task=av_aloha_sim_hook_package wandb.job_name=hook_2stage_foveated_v2 policy.use_gaze_as_action=false policy.gaze_model_repo_id=iantc104/gaze_model_av_aloha_sim_hook_package device=cuda:2
+MUJOCO_EGL_DEVICE_ID=3 python train.py policy=foveated_vit_policy task=av_aloha_sim_slot_insertion wandb.job_name=slot_2stage_foveated_v2 policy.use_gaze_as_action=false policy.gaze_model_repo_id=iantc104/gaze_model_av_aloha_sim_slot_insertion device=cuda:3
+MUJOCO_EGL_DEVICE_ID=0 python train.py policy=foveated_vit_policy task=av_aloha_sim_cube_transfer wandb.job_name=cube_2stage_foveated_v2 policy.use_gaze_as_action=false policy.gaze_model_repo_id=iantc104/gaze_model_av_aloha_sim_cube_transfer device=cuda:0
+MUJOCO_EGL_DEVICE_ID=1 python train.py policy=foveated_vit_policy task=av_aloha_sim_peg_insertion wandb.job_name=peg_2stage_foveated_v2 policy.use_gaze_as_action=false policy.gaze_model_repo_id=iantc104/gaze_model_av_aloha_sim_peg_insertion device=cuda:1
 
 
 

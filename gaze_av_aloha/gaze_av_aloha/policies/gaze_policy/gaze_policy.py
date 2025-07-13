@@ -18,6 +18,7 @@ from gaze_av_aloha.utils.policy_utils import (
 )
 from collections import deque
 
+from gaze_av_aloha.policies.gaze_policy.gaze_model import GazeModel
 from gaze_av_aloha.policies.gaze_policy.dit import DiT
 from gaze_av_aloha.policies.gaze_policy.pool import AttentionPooling
 from gaze_av_aloha.policies.gaze_policy.vision import get_vision_encoder
@@ -229,6 +230,9 @@ class FlowModel(nn.Module):
         self.cfg = policy_cfg
         self.task_cfg = task_cfg
 
+        if policy_cfg.use_gaze:
+            assert policy_cfg.use_gaze_as_action or policy_cfg.gaze_model_repo_id != ""
+
         n_obs_steps = policy_cfg.n_obs_steps
         n_images = len(policy_cfg.image_to_gaze_key)
         proprio_dim = task_cfg.state_dim
@@ -237,8 +241,14 @@ class FlowModel(nn.Module):
 
         self.target_keys_to_dim = {
             task_cfg.action_key: task_cfg.action_dim,
-            **{k: 2 for k in policy_cfg.image_to_gaze_key.values() if policy_cfg.use_gaze},
+            **{k: 2 for k in policy_cfg.image_to_gaze_key.values() if policy_cfg.use_gaze_as_action},
         }
+
+        if policy_cfg.gaze_model_repo_id != "":
+            self.gaze_model = GazeModel.from_pretrained(policy_cfg.gaze_model_repo_id)
+            self.gaze_model.eval()
+            for param in self.gaze_model.parameters():
+                param.requires_grad = False
 
         self.backbone = get_vision_encoder(
             name=policy_cfg.vision_encoder,
@@ -288,8 +298,14 @@ class FlowModel(nn.Module):
 
         proprio = batch[self.task_cfg.state_key]
         if self.cfg.use_gaze:
-            gaze = torch.stack([batch[key] for key in self.cfg.image_to_gaze_key.values()], dim=2)
-            gaze = einops.rearrange(gaze, 'b s n c -> (b s n) c') 
+            if self.cfg.use_gaze_as_action:
+                gaze = torch.stack([batch[key] for key in self.cfg.image_to_gaze_key.values()], dim=2)
+                gaze = einops.rearrange(gaze, 'b s n c -> (b s n) c') 
+            elif self.cfg.gaze_model_repo_id != "":
+                gaze, _ = self.gaze_model(img)
+            else:
+                raise ValueError("Gaze model is not specified or not loaded.")
+            
             if self.training:
                 gaze = gaze + torch.randn_like(gaze) * self.cfg.gaze_noise
 

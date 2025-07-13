@@ -2,6 +2,7 @@ defaults:
   - base_gaze_policy_config
 
 use_gaze: true
+use_gaze_as_action: true
 
 vision_encoder: foveated_vit
 vision_encoder_kwargs:
