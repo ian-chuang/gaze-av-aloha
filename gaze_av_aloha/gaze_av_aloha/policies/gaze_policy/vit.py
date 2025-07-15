@@ -37,13 +37,13 @@ def extend_valid_token_mask(
         return None
     return torch.cat(
         [
-            valid_token_mask,
             torch.ones(
                 valid_token_mask.shape[0],
                 num_registers,
                 dtype=torch.bool,
                 device=valid_token_mask.device,
             ),
+            valid_token_mask,
         ],
         dim=1,
     )
@@ -176,8 +176,8 @@ class ImageEncoder(torch.nn.Module, PyTorchModelHubMixin):
 
         embedded_tokens = torch.cat(
             [
-                embedded_tokens,
                 self.reg_tokens.unsqueeze(0).expand(embedded_tokens.shape[0], -1, -1),
+                embedded_tokens,
             ],
             dim=1,
         )
@@ -194,7 +194,7 @@ class ImageEncoder(torch.nn.Module, PyTorchModelHubMixin):
 
         features = transformed_tokens #self.neck(transformed_tokens)
 
-        return features.split([features.shape[1] - num_registers, num_registers], dim=1)
+        return features[:, num_registers:], features[:, :num_registers] # return features, register_features
 
 def create_vit_s(num_tokens, patch_size) -> ImageEncoder:
     return ImageEncoder(

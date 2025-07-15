@@ -23,18 +23,22 @@ class PatchShuffle():
         super().__init__()
         self.ratio = ratio
 
-    def forward(self, patches : torch.Tensor):
+    def forward(self, patches : torch.Tensor, masks : torch.Tensor = None):
         T, B, C = patches.shape
         remain_T = int(T * (1 - self.ratio))
 
         indexes = [random_indexes(T) for _ in range(B)]
-        forward_indexes = torch.as_tensor(np.stack([i[0] for i in indexes], axis=-1), dtype=torch.long).to(patches.device)
-        backward_indexes = torch.as_tensor(np.stack([i[1] for i in indexes], axis=-1), dtype=torch.long).to(patches.device)
+        forward_indexes = torch.as_tensor(np.stack([i[0] for i in indexes], axis=-1), dtype=torch.long, device=patches.device)
+        backward_indexes = torch.as_tensor(np.stack([i[1] for i in indexes], axis=-1), dtype=torch.long, device=patches.device)
 
         patches = take_indexes(patches, forward_indexes)
         patches = patches[:remain_T]
 
-        return patches, forward_indexes, backward_indexes
+        if masks is not None:
+            masks = torch.gather(masks, 0, forward_indexes)
+            masks = masks[:remain_T]
+
+        return patches, masks, forward_indexes, backward_indexes
     
 from gaze_av_aloha.policies.gaze_policy.vit import named_apply, init_weights_vit_timm, extend_valid_token_mask, get_activation_fn
 from gaze_av_aloha.policies.gaze_policy.vit import Block as ViTBlock
@@ -58,6 +62,7 @@ class MAE_Encoder(torch.nn.Module):
         super().__init__()
 
         assert num_registers == 1, "assume only using CLS token"
+        self.num_registers = num_registers
 
         act_layer = get_activation_fn(act_layer)
 
@@ -114,15 +119,17 @@ class MAE_Encoder(torch.nn.Module):
 
         # not normal
         tokens = tokens.transpose(0,1) # (S, B, D)
-        tokens, forward_indexes, backward_indexes = self.shuffle.forward(tokens)
+        mask = mask.transpose(0,1) if mask is not None else None
+        tokens, mask, forward_indexes, backward_indexes = self.shuffle.forward(tokens, mask)
         tokens = tokens.transpose(0,1) # (B, S, D)
+        mask = mask.transpose(0,1) if mask is not None else None
 
         # normal 
         num_registers = self.reg_tokens.shape[0]
         tokens = torch.cat(
             [
-                tokens,
                 self.reg_tokens.unsqueeze(0).expand(tokens.shape[0], -1, -1),
+                tokens,
             ],
             dim=1,
         )
@@ -132,7 +139,8 @@ class MAE_Encoder(torch.nn.Module):
         )
         for block in self.blocks:
             tokens = block(tokens, invalid_token_mask)
-        # tokens = self.norm(tokens) 
+
+        tokens = self.norm(tokens) 
 
         # not normal
         tokens = tokens.transpose(0,1) # (S, B, D)
@@ -142,21 +150,25 @@ class MAE_Encoder(torch.nn.Module):
 from gaze_av_aloha.policies.gaze_policy.tokenizer import BaseImageTokenizer, FoveatedImageTokenizer, ImageTokenizer
 
 class MAE_Decoder(torch.nn.Module):
-    def __init__(self,
-                 image_size=32,
-                 patch_size=2,
-                 emb_dim=192,
-                 num_layer=4,
-                 num_head=3,
-                 ) -> None:
+    def __init__(
+            self,
+            num_tokens: int,
+            num_registers: int,
+            patch_size: int,
+            depth: int,
+            embedding_dim: int,
+            num_heads: int,
+        ) -> None:
         super().__init__()
 
-        self.mask_token = torch.nn.Parameter(torch.zeros(1, 1, emb_dim))
-        self.pos_embedding = torch.nn.Parameter(torch.zeros((image_size // patch_size) ** 2 + 1, 1, emb_dim))
+        self.mask_token = torch.nn.Parameter(torch.zeros(1, 1, embedding_dim))
+        self.pos_embedding = torch.nn.Parameter(torch.zeros(num_tokens+num_registers, 1, embedding_dim))
+        self.num_registers = num_registers
+        self.embed_dim = embedding_dim
 
-        self.transformer = torch.nn.Sequential(*[Block(emb_dim, num_head) for _ in range(num_layer)])
+        self.transformer = torch.nn.Sequential(*[Block(embedding_dim, num_heads) for _ in range(depth)])
 
-        self.head = torch.nn.Linear(emb_dim, 3 * patch_size ** 2)
+        self.head = torch.nn.Linear(embedding_dim, 3 * patch_size ** 2)
 
         self.init_weight()
 
@@ -166,7 +178,7 @@ class MAE_Decoder(torch.nn.Module):
 
     def forward(self, features, backward_indexes):
         T = features.shape[0]
-        backward_indexes = torch.cat([torch.zeros(1, backward_indexes.shape[1]).to(backward_indexes), backward_indexes + 1], dim=0)
+        backward_indexes = torch.cat([torch.zeros(1, backward_indexes.shape[1]).to(backward_indexes), backward_indexes + self.num_registers], dim=0)
         features = torch.cat([features, self.mask_token.expand(backward_indexes.shape[0] - features.shape[0], features.shape[1], -1)], dim=0)
         features = take_indexes(features, backward_indexes)
         features = features + self.pos_embedding
@@ -174,12 +186,12 @@ class MAE_Decoder(torch.nn.Module):
         features = rearrange(features, 't b c -> b t c')
         features = self.transformer(features)
         features = rearrange(features, 'b t c -> t b c')
-        features = features[1:] # remove global feature
+        features = features[self.num_registers:] # remove global feature
 
         patches = self.head(features)
         mask = torch.zeros_like(patches)
-        mask[T-1:] = 1
-        mask = take_indexes(mask, backward_indexes[1:] - 1)
+        mask[T-self.num_registers:] = 1  
+        mask = take_indexes(mask, backward_indexes[1:] - self.num_registers)
 
         return patches, mask   
 
@@ -193,11 +205,13 @@ class MAE_ViT(torch.nn.Module):
         super().__init__()
         self.tokenizer = tokenizer
         self.encoder = encoder
+        self.decoder_embed = torch.nn.Linear(encoder.embed_dim, decoder.embed_dim)
         self.decoder = decoder
 
-    def forward(self, img):
-        tokens, mask = self.tokenizer.tokenize(img)
+    def forward(self, img, centers):
+        tokens, mask = self.tokenizer.tokenize(img, centers)
         features, backward_indexes = self.encoder(tokens, mask)
+        features = self.decoder_embed(features)
         pred_tokens, mask = self.decoder(features,  backward_indexes)
         return tokens.flatten(2).transpose(0,1), pred_tokens, mask 
 
