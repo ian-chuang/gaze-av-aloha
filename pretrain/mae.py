@@ -191,7 +191,7 @@ class MAE_Decoder(torch.nn.Module):
         patches = self.head(features)
         mask = torch.zeros_like(patches)
         mask[T-self.num_registers:] = 1  
-        mask = take_indexes(mask, backward_indexes[1:] - self.num_registers)
+        mask = take_indexes(mask, backward_indexes[self.num_registers:] - self.num_registers)
 
         return patches, mask   
 
@@ -213,7 +213,7 @@ class MAE_ViT(torch.nn.Module):
         features, backward_indexes = self.encoder(tokens, mask)
         features = self.decoder_embed(features)
         pred_tokens, mask = self.decoder(features,  backward_indexes)
-        return tokens.flatten(2).transpose(0,1), pred_tokens, mask 
+        return tokens.flatten(2), pred_tokens.transpose(0,1), mask.transpose(0,1)
 
 class ViT_Classifier(torch.nn.Module):
     def __init__(self, encoder : MAE_Encoder, num_classes=10) -> None:
