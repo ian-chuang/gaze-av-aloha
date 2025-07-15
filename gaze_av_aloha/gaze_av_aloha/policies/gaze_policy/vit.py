@@ -2,6 +2,7 @@ from typing import Optional, Type, Callable
 import torch
 from timm.layers import Mlp
 from torch import nn, Tensor
+from huggingface_hub import PyTorchModelHubMixin
 
 def named_apply(fn: Callable, module: torch.nn.Module, name="", depth_first=True, include_root=False) -> torch.nn.Module:
     if not depth_first and include_root:
@@ -108,7 +109,7 @@ class Block(torch.nn.Module):
         x = x + self.drop_path(self.mlp(self.norm2(x)))
         return x
 
-class ImageEncoder(torch.nn.Module):
+class ImageEncoder(torch.nn.Module, PyTorchModelHubMixin):
     def __init__(
         self,
         num_tokens: int,
@@ -117,11 +118,13 @@ class ImageEncoder(torch.nn.Module):
         depth: int,
         embedding_dim: int,
         num_heads: int,
-        act_layer: Type[torch.nn.Module],
+        act_layer: str,
         drop: float = 0.0,
         drop_path: float = 0.0,
     ):
         super().__init__()
+
+        act_layer = get_activation_fn(act_layer)
 
         self.patch_emb = torch.nn.Linear(patch_size * patch_size * 3, embedding_dim)
 
@@ -201,7 +204,7 @@ def create_vit_s(num_tokens, patch_size) -> ImageEncoder:
         depth=12,
         embedding_dim=384,
         num_heads=6,
-        act_layer=torch.nn.GELU,
+        act_layer="gelu",
         drop=0.0,
         drop_path=0.1,
     )
@@ -214,8 +217,18 @@ def create_vit_b(num_tokens, patch_size) -> ImageEncoder:
         depth=12,
         embedding_dim=768,
         num_heads=12,
-        act_layer=torch.nn.GELU,
+        act_layer="gelu",
         drop=0.0,
         drop_path=0.1,
     )
 
+def get_activation_fn(name: str) -> Type[torch.nn.Module]:
+    """
+    Returns the activation function class based on the provided name.
+    """
+    if name == "gelu":
+        return torch.nn.GELU
+    elif name == "relu":
+        return torch.nn.ReLU
+    else:
+        raise ValueError(f"Unsupported activation function: {name}")
