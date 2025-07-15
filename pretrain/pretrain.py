@@ -11,6 +11,9 @@ import random
 import torch
 import numpy as np
 from mae import MAE_ViT, MAE_Decoder, MAE_Encoder, BaseImageTokenizer, FoveatedImageTokenizer
+import kagglehub
+from torchvision.datasets import ImageFolder
+import einops
 
 def setup_seed(seed=42):
     torch.manual_seed(seed)
@@ -22,7 +25,7 @@ def setup_seed(seed=42):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--batch_size', type=int, default=128)
+    parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--max_device_batch_size', type=int, default=512)
     parser.add_argument('--base_learning_rate', type=float, default=1.5e-4)
     parser.add_argument('--weight_decay', type=float, default=0.05)
@@ -31,6 +34,7 @@ if __name__ == '__main__':
     parser.add_argument('--warmup_epoch', type=int, default=200)
     parser.add_argument('--foveate', type=bool, default=True)
     parser.add_argument('--model_path', type=str, default='vit-t-mae.pt')
+    parser.add_argument('--max_viz' , type=int, default=3, help='Max number of images to visualize')
 
     args = parser.parse_args()
 
@@ -42,44 +46,49 @@ if __name__ == '__main__':
     assert batch_size % load_batch_size == 0
     steps_per_update = batch_size // load_batch_size
 
-    transform_train = transforms.Compose([
-        transforms.RandomResizedCrop(args.input_size, scale=(0.2, 1.0), interpolation=3),  # 3 is bicubic
+    transform_dataset = transforms.Compose([
+        transforms.RandomResizedCrop((288,288), scale=(0.2, 1.0), interpolation=3),  # 3 is bicubic
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
-    transform_val = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ])
+    denormalize = transforms.Normalize(
+        mean=[-0.485 / 0.229, -0.456 / 0.224, -0.406 / 0.225],
+        std=[1 / 0.229, 1 / 0.224, 1 / 0.225]
+    )
 
-    train_dataset = torchvision.datasets.CIFAR10('data', train=True, download=True, transform=transform_train)
-    val_dataset = torchvision.datasets.CIFAR10('data', train=False, download=True, transform=transform_val)
+    path = kagglehub.dataset_download("arjunashok33/miniimagenet")
+    train_dataset = ImageFolder(path, transform=transform_dataset)
     dataloader = torch.utils.data.DataLoader(train_dataset, load_batch_size, shuffle=True, num_workers=4)
-    writer = SummaryWriter(os.path.join('logs', 'cifar10', 'mae-pretrain'))
+    writer = SummaryWriter(os.path.join('logs', 'miniimagenet', 'mae-pretrain'))
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     if args.foveate:
-        tokenizer = FoveatedImageTokenizer(token_size=16, strides=[1,2,6], grid_sizes=[2,3,3], height=288, width=288)
+        tokenizer = FoveatedImageTokenizer()
     else:
-        tokenizer = BaseImageTokenizer(token_size=16, height=288, width=288)
+        tokenizer = BaseImageTokenizer()
     encoder = MAE_Encoder(
         num_tokens=tokenizer.get_num_tokens(),
         num_registers=1,
-        patch_size=2,
+        patch_size=tokenizer.get_token_size(),
         depth=12,
-        embedding_dim=192,
-        num_heads=3,
-        act_layer=torch.nn.GELU,
+        embedding_dim=768,
+        num_heads=12,
+        act_layer="gelu",
     )
-    decoder = MAE_Decoder()
+    decoder = MAE_Decoder(
+        num_tokens=tokenizer.get_num_tokens(),
+        num_registers=1,
+        patch_size=tokenizer.get_token_size(),
+        depth=8,
+        embedding_dim=384,
+        num_heads=12,
+    )
     model = MAE_ViT(
         tokenizer=tokenizer,
         encoder=encoder,
         decoder=decoder,
     ).to(device)
-
-    # model = MAE_ViT(mask_ratio=args.mask_ratio).to(device)
     optim = torch.optim.AdamW(model.parameters(), lr=args.base_learning_rate * args.batch_size / 256, betas=(0.9, 0.95), weight_decay=args.weight_decay)
     lr_func = lambda epoch: min((epoch + 1) / (args.warmup_epoch + 1e-8), 0.5 * (math.cos(epoch / args.total_epoch * math.pi) + 1))
     lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optim, lr_lambda=lr_func, verbose=True)
@@ -92,7 +101,9 @@ if __name__ == '__main__':
         for img, label in tqdm(iter(dataloader)):
             step_count += 1
             img = img.to(device)
-            tokens, pred_tokens, mask = model(img)
+            # centers = (torch.rand((img.size(0), 2), dtype=torch.float32, device=img.device) * 2 - 1) * 0.5
+            centers = torch.randn((img.size(0), 2), dtype=torch.float32, device=img.device) * 0.2
+            tokens, pred_tokens, mask = model(img, centers)
             loss = torch.mean((pred_tokens - tokens) ** 2 * mask) / args.mask_ratio
             loss.backward()
             if step_count % steps_per_update == 0:
@@ -105,15 +116,28 @@ if __name__ == '__main__':
         print(f'In epoch {e}, average traning loss is {avg_loss}.')
 
         ''' visualize the first 16 predicted images on val dataset'''
-        # model.eval()
-        # with torch.no_grad():
-        #     val_img = torch.stack([val_dataset[i][0] for i in range(16)])
-        #     val_img = val_img.to(device)
-        #     predicted_val_img, mask = model(val_img)
-        #     predicted_val_img = predicted_val_img * mask + val_img * (1 - mask)
-        #     img = torch.cat([val_img * (1 - mask), predicted_val_img, val_img], dim=0)
-        #     img = rearrange(img, '(v h1 w1) c h w -> c (h1 h) (w1 v w)', w1=2, v=3)
-        #     writer.add_image('mae_image', (img + 1) / 2, global_step=e)
+        model.eval()
+        with torch.no_grad():
+
+            img, label = next(iter(dataloader))
+            img = img.to(device)
+            n = min(img.size(0), args.max_viz)
+            img = img[:n]
+            centers = torch.zeros((img.size(0), 2), dtype=torch.float32, device=img.device)  # Center crop
+            tokens, pred_tokens, mask = model(img[:3], centers)
+            viz = []
+            viz_tokens = denormalize(einops.rearrange(tokens * (1-mask), "n b (c h w) -> b n c h w", c=3, h=16, w=16)).clip(0, 1)
+            viz_pred_tokens = denormalize(einops.rearrange(pred_tokens.detach(), "n b (c h w) -> b n c h w", c=3, h=16, w=16)).clip(0, 1)
+            for i in range(viz_tokens.size(0)):
+                viz.append(
+                    torch.cat([
+                        tokenizer.generate_visualization(viz_tokens[i]), 
+                        tokenizer.generate_visualization(viz_pred_tokens[i])
+                    ], dim=2)
+                )
+            viz = torch.cat(viz, dim=1)
+
+            writer.add_image('mae_image', viz, global_step=e)
         
         ''' save model '''
-        # torch.save(model, args.model_path)
+        torch.save(model, args.model_path)
