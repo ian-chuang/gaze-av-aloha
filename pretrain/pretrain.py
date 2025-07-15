@@ -60,10 +60,13 @@ if __name__ == '__main__':
     parser.add_argument('--type', type=str)
     parser.add_argument('--model_name', type=str, default='vit-b-mae')
     parser.add_argument('--max_viz' , type=int, default=3, help='Max number of images to visualize')
+    parser.add_argument('--device', type=str, default='cuda', help='Device to use for training (e.g., "cuda" or "cpu")')
 
     args = parser.parse_args()
 
     setup_seed(args.seed)
+
+    model_path = f"{args.model_name}_{args.type}.pth"
 
     batch_size = args.batch_size
     load_batch_size = min(args.max_device_batch_size, batch_size)
@@ -97,8 +100,8 @@ if __name__ == '__main__':
     path = kagglehub.dataset_download("arjunashok33/miniimagenet")
     train_dataset = ImageFolder(path, transform=transform_dataset)
     dataloader = torch.utils.data.DataLoader(train_dataset, load_batch_size, shuffle=True, num_workers=4)
-    writer = SummaryWriter(os.path.join('logs', 'miniimagenet', 'mae-pretrain'))
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    writer = SummaryWriter(os.path.join('logs', 'miniimagenet', model_path))
+    device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
 
     encoder = MAE_Encoder(
         num_tokens=tokenizer.get_num_tokens(),
@@ -127,7 +130,6 @@ if __name__ == '__main__':
     lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optim, lr_lambda=lr_func, verbose=True)
 
     start_epoch = 0
-    model_path = f"{args.model_name}_{args.type}.pth"
     if os.path.exists(model_path):
         print(f"Loading checkpoint from {model_path}")
         start_epoch = load_checkpoint(model_path, model, optim, lr_scheduler, device=device)
@@ -165,9 +167,13 @@ if __name__ == '__main__':
             img = img[:n]
             centers = torch.zeros((img.size(0), 2), dtype=torch.float32, device=img.device)  # Center crop
             tokens, pred_tokens, mask = model(img[:3], centers)
+            mask = mask.to(torch.bool)
             viz = []
-            viz_tokens = denormalize(einops.rearrange(tokens * (1-mask), "n b (c h w) -> b n c h w", c=3, h=16, w=16)).clip(0, 1)
-            viz_pred_tokens = denormalize(einops.rearrange(pred_tokens.detach(), "n b (c h w) -> b n c h w", c=3, h=16, w=16)).clip(0, 1)
+            token_size = tokenizer.get_token_size()
+            viz_tokens = denormalize(einops.rearrange(tokens * (~mask), "n b (c h w) -> b n c h w", c=3, h=token_size, w=token_size)).clip(0, 1)
+            viz_pred_tokens = pred_tokens.detach()
+            viz_pred_tokens[~mask] = tokens[~mask]  # Fill masked tokens with original tokens
+            viz_pred_tokens = denormalize(einops.rearrange(viz_pred_tokens, "n b (c h w) -> b n c h w", c=3, h=token_size, w=token_size)).clip(0, 1)
             for i in range(viz_tokens.size(0)):
                 viz.append(
                     torch.cat([
