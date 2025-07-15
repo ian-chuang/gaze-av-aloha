@@ -60,7 +60,7 @@ if __name__ == '__main__':
     parser.add_argument('--type', type=str)
     parser.add_argument('--num_workers', type=int, default=4, help='Number of workers for data loading')
     parser.add_argument('--model_name', type=str, default='vit-b-mae')
-    parser.add_argument('--max_viz' , type=int, default=4, help='Max number of images to visualize')
+    parser.add_argument('--max_viz' , type=int, default=3, help='Max number of images to visualize')
     parser.add_argument('--device', type=str, default='cuda', help='Device to use for training (e.g., "cuda" or "cpu")')
     parser.add_argument('--use_parallel', action='store_true', help='Use DataParallel for multi-GPU training')
 
