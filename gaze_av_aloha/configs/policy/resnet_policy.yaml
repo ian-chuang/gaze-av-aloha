@@ -1,7 +1,7 @@
 defaults:
   - base_gaze_policy_config
 
-use_gaze: true
+use_gaze: false
 
 vision_encoder: resnet
 vision_encoder_kwargs:

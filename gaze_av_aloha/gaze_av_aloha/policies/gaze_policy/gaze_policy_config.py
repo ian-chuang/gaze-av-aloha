@@ -25,7 +25,9 @@ class GazePolicyConfig(PolicyConfig):
     vision_encoder_kwargs: dict = field(default_factory=lambda: {})
 
     # gaze
-    use_gaze: bool = True
+    use_gaze: bool = False
+    gaze_model_repo_id: str = ""
+    use_gaze_as_action: bool = True
     gaze_noise: float = 0.01
 
     # Transformer Layers
