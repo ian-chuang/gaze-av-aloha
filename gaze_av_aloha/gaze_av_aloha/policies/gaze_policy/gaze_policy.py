@@ -18,6 +18,7 @@ from gaze_av_aloha.utils.policy_utils import (
 )
 from collections import deque
 
+from gaze_av_aloha.policies.gaze_policy.gaze_model import GazeModel
 from gaze_av_aloha.policies.gaze_policy.dit import DiT
 from gaze_av_aloha.policies.gaze_policy.pool import AttentionPooling
 from gaze_av_aloha.policies.gaze_policy.vision import get_vision_encoder
@@ -229,25 +230,39 @@ class FlowModel(nn.Module):
         self.cfg = policy_cfg
         self.task_cfg = task_cfg
 
+        if policy_cfg.use_gaze:
+            assert policy_cfg.use_gaze_as_action or policy_cfg.gaze_model_repo_id != ""
+
+        n_obs_steps = policy_cfg.n_obs_steps
+        n_images = len(policy_cfg.image_to_gaze_key)
+        proprio_dim = task_cfg.state_dim
+        if policy_cfg.use_gaze:
+            proprio_dim += 2 * n_images
+
         self.target_keys_to_dim = {
             task_cfg.action_key: task_cfg.action_dim,
-            **{k: 2 for k in policy_cfg.image_to_gaze_key.values() if policy_cfg.use_gaze},
+            **{k: 2 for k in policy_cfg.image_to_gaze_key.values() if policy_cfg.use_gaze_as_action},
         }
+
+        if policy_cfg.gaze_model_repo_id != "":
+            self.gaze_model = GazeModel.from_pretrained(policy_cfg.gaze_model_repo_id)
+            self.gaze_model.eval()
+            for param in self.gaze_model.parameters():
+                param.requires_grad = False
 
         self.backbone = get_vision_encoder(
             name=policy_cfg.vision_encoder,
             **policy_cfg.vision_encoder_kwargs,
         )
         self.backbone_proj = nn.Linear(self.backbone.embed_dim, policy_cfg.dim_model)
-        self.state_proj = nn.Sequential(
+        self.proprio_proj = nn.Sequential(
             nn.Dropout(policy_cfg.dropout),
-            nn.Linear(task_cfg.state_dim, policy_cfg.dim_model),
+            nn.Linear(proprio_dim, policy_cfg.dim_model),
+            nn.GELU(),
+            nn.Dropout(policy_cfg.dropout),
+            nn.Linear(policy_cfg.dim_model, policy_cfg.dim_model),
+            nn.Dropout(policy_cfg.dropout),
         )
-        if policy_cfg.use_gaze:
-            self.gaze_proj = nn.Sequential(
-                nn.Dropout(policy_cfg.dropout),
-                nn.Linear(2, policy_cfg.dim_model),
-            )
         self.pool = AttentionPooling(
             hidden_size=policy_cfg.dim_model,
             num_queries=policy_cfg.pool_n_queries,
@@ -256,8 +271,8 @@ class FlowModel(nn.Module):
             mlp_ratio=policy_cfg.mlp_ratio,
             dropout=policy_cfg.dropout,
         ) 
-        self.s_pos_embed = nn.Embedding(policy_cfg.n_obs_steps, policy_cfg.dim_model)
-        self.n_pos_embed = nn.Embedding(len(policy_cfg.image_to_gaze_key), policy_cfg.dim_model)
+        self.s_pos_embed = nn.Embedding(n_obs_steps, policy_cfg.dim_model)
+        self.n_pos_embed = nn.Embedding(n_images, policy_cfg.dim_model)
         self.l_pos_embed = nn.Embedding(self.backbone.get_num_tokens(*policy_cfg.input_shape), policy_cfg.dim_model)
 
         self.noise_dim = sum(self.target_keys_to_dim.values())
@@ -271,75 +286,73 @@ class FlowModel(nn.Module):
             dropout=policy_cfg.dropout,
             time_dim=policy_cfg.dit_time_dim,
         )
-        self.dit_pos_embed = nn.Embedding(policy_cfg.horizon, policy_cfg.dim_model)
+        self.dit_pos_embed = nn.Embedding(n_obs_steps + policy_cfg.horizon, policy_cfg.dim_model)
 
         self.cfm = ConditionalFlowMatcher(sigma=0.0)
 
     def prepare_global_conditioning(self, batch: dict[str, Tensor]) -> tuple[Tensor, dict]:
-        tokens = []
-        pos_embed = []
-        batch = dict(batch)  
-
-        # load image and resize to input shape
         img = torch.stack([batch[key] for key in self.cfg.image_to_gaze_key.keys()], dim=2)
         b, s, n = img.shape[:3]
         img = einops.rearrange(img, 'b s n c h w -> (b s n) c h w')  
         img = Resize(self.cfg.input_shape)(img)  
 
-        # state
-        tokens.append(self.state_proj(batch[self.task_cfg.state_key]))
-        pos_embed.append(self.s_pos_embed.weight.unsqueeze(0))
-
-        # foveal vision
+        proprio = batch[self.task_cfg.state_key]
         if self.cfg.use_gaze:
-            gaze = torch.stack([batch[key] for key in self.cfg.image_to_gaze_key.values()], dim=2)
-            gaze = einops.rearrange(gaze, 'b s n c -> (b s n) c') 
+            if self.cfg.use_gaze_as_action:
+                gaze = torch.stack([batch[key] for key in self.cfg.image_to_gaze_key.values()], dim=2)
+                gaze = einops.rearrange(gaze, 'b s n c -> (b s n) c') 
+            elif self.cfg.gaze_model_repo_id != "":
+                gaze, _ = self.gaze_model(img)
+            else:
+                raise ValueError("Gaze model is not specified or not loaded.")
+            
             if self.training:
                 gaze = gaze + torch.randn_like(gaze) * self.cfg.gaze_noise
 
-            tokens.append(
+            proprio = torch.cat([
+                proprio,
                 einops.rearrange(
-                    self.gaze_proj(gaze),  # send in the gaze (frame of ref of robot camera)
-                    '(b s n) d -> b (s n) d',
+                    gaze, 
+                    '(b s n) d -> b s (n d)',
                     b=b, s=s, n=n
-                ) 
-            )
-            pos_embed.append(
-                einops.rearrange(
-                    self.s_pos_embed.weight.unsqueeze(1) + self.n_pos_embed.weight.unsqueeze(0),
-                    's n d -> 1 (s n) d', 
-                    s=s, n=n
-                )
-            )
+                ),
+            ], dim=-1)  
         else:
             gaze = None
 
-        img_feat, viz = self.backbone(img, centers=gaze)
-        tokens.append(
-            einops.rearrange(
-                self.backbone_proj(img_feat),  
-                '(b s n) l d -> b (s n l) d',   
-                b=b, s=s, n=n
-            )
-        )
-        pos_embed.append(
-            einops.rearrange(
-                self.s_pos_embed.weight.unsqueeze(1).unsqueeze(1) + # s 1 1 d
-                self.n_pos_embed.weight.unsqueeze(0).unsqueeze(2) + # 1 n 1 d
-                self.l_pos_embed.weight.unsqueeze(0).unsqueeze(0),  # 1 1 l d
-                's n l d -> 1 (s n l) d',
-                s=s, n=n,
-            )
-        )
+        proprio_tokens = self.proprio_proj(proprio)  # (b, s+s*n, d)
 
-        tokens = torch.cat(tokens, dim=1)
-        pos_embed = torch.cat(pos_embed, dim=1)
-        cond = self.pool(tokens, pos_embed)
-        return cond, viz
+        img_tokens, viz = self.backbone(img, centers=gaze, visualize=self.cfg.visualize)  
+        img_tokens = einops.rearrange(
+            self.backbone_proj(img_tokens),  
+            '(b s n) l d -> b (s n l) d',   
+            b=b, s=s, n=n
+        )
+        pos_embed = einops.rearrange(
+            self.s_pos_embed.weight.unsqueeze(1).unsqueeze(1) + # s 1 1 d
+            self.n_pos_embed.weight.unsqueeze(0).unsqueeze(2) + # 1 n 1 d
+            self.l_pos_embed.weight.unsqueeze(0).unsqueeze(0),  # 1 1 l d
+            's n l d -> 1 (s n l) d',
+            s=s, n=n,
+        )
+        img_tokens = self.pool(img_tokens, pos_embed)
+
+        global_cond = {
+            "img_tokens": img_tokens,  # (b, s*n*l, d)
+            "proprio_tokens": proprio_tokens,  # (b, s+s*n, d)
+        }
+        return global_cond, viz
     
     def predict_velocity(self, noise: Tensor, global_cond: Tensor, timestep: Tensor,) -> Tensor:
-        x = self.noise_proj(noise) + self.dit_pos_embed.weight.unsqueeze(0)
-        return self.DiT(x=x, c=global_cond, timestep=timestep)
+        x = torch.cat([
+            self.noise_proj(noise),
+            global_cond["proprio_tokens"],
+        ], dim=1)  # (b, s+s*n+h, d)
+        x = x + self.dit_pos_embed.weight.unsqueeze(0)
+        c = global_cond["img_tokens"]
+        vt = self.DiT(x=x, c=c, timestep=timestep)
+        vt = vt[:, :self.cfg.horizon]  # (b, h, d)
+        return vt
 
     def conditional_sample(
         self, batch_size: int, global_cond: Tensor | None = None
