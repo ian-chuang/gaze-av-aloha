@@ -22,7 +22,32 @@ def setup_seed(seed=42):
     random.seed(seed)
     torch.backends.cudnn.deterministic = True
 
+def save_checkpoint(model, optimizer, scheduler, epoch, path):
+    checkpoint = {
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'scheduler_state_dict': scheduler.state_dict(),
+        'epoch': epoch,
+    }
+    torch.save(checkpoint, path)
+
+def load_checkpoint(path, model, optimizer=None, scheduler=None, device='cpu'):
+    checkpoint = torch.load(path, map_location=device)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    if optimizer is not None:
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    if scheduler is not None:
+        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+    epoch = checkpoint['epoch']
+    return epoch
+
 if __name__ == '__main__':
+    """
+    
+    VIEW TENSORBOARD:
+    tensorboard --logdir logs/miniimagenet/mae-pretrain --port 6006
+    
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--batch_size', type=int, default=64)
@@ -32,8 +57,8 @@ if __name__ == '__main__':
     parser.add_argument('--mask_ratio', type=float, default=0.75)
     parser.add_argument('--total_epoch', type=int, default=2000)
     parser.add_argument('--warmup_epoch', type=int, default=200)
-    parser.add_argument('--foveate', type=bool, default=True)
-    parser.add_argument('--model_path', type=str, default='vit-t-mae.pt')
+    parser.add_argument('--type', type=str)
+    parser.add_argument('--model_name', type=str, default='vit-b-mae')
     parser.add_argument('--max_viz' , type=int, default=3, help='Max number of images to visualize')
 
     args = parser.parse_args()
@@ -46,8 +71,20 @@ if __name__ == '__main__':
     assert batch_size % load_batch_size == 0
     steps_per_update = batch_size // load_batch_size
 
+    if args.type == "foveated_vit":
+        resize_shape = (288,288)
+        tokenizer = FoveatedImageTokenizer()
+    elif args.type == "base_vit":
+        resize_shape = (288,288)
+        tokenizer = BaseImageTokenizer()
+    elif args.type == "low_res_vit":
+        resize_shape = (216,288)
+        tokenizer = BaseImageTokenizer(token_size=64, height=256, width=320)
+    else:
+        raise ValueError(f"Unknown model type: {args.type}")
+
     transform_dataset = transforms.Compose([
-        transforms.RandomResizedCrop((288,288), scale=(0.2, 1.0), interpolation=3),  # 3 is bicubic
+        transforms.RandomResizedCrop(resize_shape, scale=(0.2, 1.0), interpolation=3),  # 3 is bicubic
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
@@ -63,10 +100,6 @@ if __name__ == '__main__':
     writer = SummaryWriter(os.path.join('logs', 'miniimagenet', 'mae-pretrain'))
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    if args.foveate:
-        tokenizer = FoveatedImageTokenizer()
-    else:
-        tokenizer = BaseImageTokenizer()
     encoder = MAE_Encoder(
         num_tokens=tokenizer.get_num_tokens(),
         num_registers=1,
@@ -92,6 +125,13 @@ if __name__ == '__main__':
     optim = torch.optim.AdamW(model.parameters(), lr=args.base_learning_rate * args.batch_size / 256, betas=(0.9, 0.95), weight_decay=args.weight_decay)
     lr_func = lambda epoch: min((epoch + 1) / (args.warmup_epoch + 1e-8), 0.5 * (math.cos(epoch / args.total_epoch * math.pi) + 1))
     lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optim, lr_lambda=lr_func, verbose=True)
+
+    start_epoch = 0
+    model_path = f"{args.model_name}_{args.type}.pth"
+    if os.path.exists(model_path):
+        print(f"Loading checkpoint from {model_path}")
+        start_epoch = load_checkpoint(model_path, model, optim, lr_scheduler, device=device)
+        print(f"Resuming from epoch {start_epoch}")
 
     step_count = 0
     optim.zero_grad()
@@ -140,4 +180,5 @@ if __name__ == '__main__':
             writer.add_image('mae_image', viz, global_step=e)
         
         ''' save model '''
-        torch.save(model, args.model_path)
+        # Save checkpoint after each epoch
+        save_checkpoint(model, optim, lr_scheduler, e + 1, model_path)
