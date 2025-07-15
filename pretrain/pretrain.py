@@ -60,7 +60,7 @@ if __name__ == '__main__':
     parser.add_argument('--type', type=str)
     parser.add_argument('--num_workers', type=int, default=4, help='Number of workers for data loading')
     parser.add_argument('--model_name', type=str, default='vit-b-mae')
-    parser.add_argument('--max_viz' , type=int, default=3, help='Max number of images to visualize')
+    parser.add_argument('--max_viz' , type=int, default=4, help='Max number of images to visualize')
     parser.add_argument('--device', type=str, default='cuda', help='Device to use for training (e.g., "cuda" or "cpu")')
     parser.add_argument('--use_parallel', action='store_true', help='Use DataParallel for multi-GPU training')
 
@@ -130,8 +130,12 @@ if __name__ == '__main__':
 
     if args.use_parallel:
         if torch.cuda.device_count() > 1:
-            print("Using", torch.cuda.device_count(), "GPUs!")
+            n_gpus = torch.cuda.device_count()
+            print("Using", n_gpus, "GPUs!")
             model = torch.nn.DataParallel(model)
+
+            assert batch_size % n_gpus == 0, "Batch size must be divisible by number of GPUs"
+            assert args.max_viz % n_gpus == 0, "Max visualization images must be divisible by number of GPUs"
 
     model = model.to(device)
 
@@ -176,18 +180,20 @@ if __name__ == '__main__':
             n = min(img.size(0), args.max_viz)
             img = img[:n]
             centers = torch.zeros((img.size(0), 2), dtype=torch.float32, device=img.device)  # Center crop
-            tokens, pred_tokens, mask = model(img[:3], centers)
+            tokens, pred_tokens, mask = model(img[:args.max_viz], centers)
             mask = mask.to(torch.bool)
             viz = []
             token_size = tokenizer.get_token_size()
-            viz_tokens = denormalize(einops.rearrange(tokens * (~mask), "n b (c h w) -> b n c h w", c=3, h=token_size, w=token_size)).clip(0, 1)
+            viz_tokens = denormalize(einops.rearrange(tokens, "b n (c h w) -> b n c h w", c=3, h=token_size, w=token_size)).clip(0, 1)
+            viz_tokens_masked = denormalize(einops.rearrange(tokens * (~mask), "b n (c h w) -> b n c h w", c=3, h=token_size, w=token_size)).clip(0, 1)
             viz_pred_tokens = pred_tokens.detach()
             viz_pred_tokens[~mask] = tokens[~mask]  # Fill masked tokens with original tokens
-            viz_pred_tokens = denormalize(einops.rearrange(viz_pred_tokens, "n b (c h w) -> b n c h w", c=3, h=token_size, w=token_size)).clip(0, 1)
+            viz_pred_tokens = denormalize(einops.rearrange(viz_pred_tokens, "b n (c h w) -> b n c h w", c=3, h=token_size, w=token_size)).clip(0, 1)
             for i in range(viz_tokens.size(0)):
                 viz.append(
                     torch.cat([
                         tokenizer.generate_visualization(viz_tokens[i]), 
+                        tokenizer.generate_visualization(viz_tokens_masked[i]),
                         tokenizer.generate_visualization(viz_pred_tokens[i])
                     ], dim=2)
                 )
