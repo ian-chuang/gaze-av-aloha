@@ -50,7 +50,7 @@ if __name__ == '__main__':
     """
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--batch_size', type=int, default=64)
+    parser.add_argument('--batch_size', type=int, default=384)
     parser.add_argument('--max_device_batch_size', type=int, default=512)
     parser.add_argument('--base_learning_rate', type=float, default=1.5e-4)
     parser.add_argument('--weight_decay', type=float, default=0.05)
@@ -58,9 +58,11 @@ if __name__ == '__main__':
     parser.add_argument('--total_epoch', type=int, default=2000)
     parser.add_argument('--warmup_epoch', type=int, default=200)
     parser.add_argument('--type', type=str)
+    parser.add_argument('--num_workers', type=int, default=4, help='Number of workers for data loading')
     parser.add_argument('--model_name', type=str, default='vit-b-mae')
     parser.add_argument('--max_viz' , type=int, default=3, help='Max number of images to visualize')
     parser.add_argument('--device', type=str, default='cuda', help='Device to use for training (e.g., "cuda" or "cpu")')
+    parser.add_argument('--use_parallel', action='store_true', help='Use DataParallel for multi-GPU training')
 
     args = parser.parse_args()
 
@@ -77,7 +79,7 @@ if __name__ == '__main__':
     if args.type == "foveated_vit":
         resize_shape = (288,288)
         tokenizer = FoveatedImageTokenizer()
-    elif args.type == "base_vit":
+    elif args.type == "vit":
         resize_shape = (288,288)
         tokenizer = BaseImageTokenizer()
     elif args.type == "low_res_vit":
@@ -99,7 +101,7 @@ if __name__ == '__main__':
 
     path = kagglehub.dataset_download("arjunashok33/miniimagenet")
     train_dataset = ImageFolder(path, transform=transform_dataset)
-    dataloader = torch.utils.data.DataLoader(train_dataset, load_batch_size, shuffle=True, num_workers=4)
+    dataloader = torch.utils.data.DataLoader(train_dataset, load_batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=True)
     writer = SummaryWriter(os.path.join('logs', 'miniimagenet', model_path))
     device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
 
@@ -124,10 +126,18 @@ if __name__ == '__main__':
         tokenizer=tokenizer,
         encoder=encoder,
         decoder=decoder,
-    ).to(device)
+    )
+
+    if args.use_parallel:
+        if torch.cuda.device_count() > 1:
+            print("Using", torch.cuda.device_count(), "GPUs!")
+            model = torch.nn.DataParallel(model)
+
+    model = model.to(device)
+
     optim = torch.optim.AdamW(model.parameters(), lr=args.base_learning_rate * args.batch_size / 256, betas=(0.9, 0.95), weight_decay=args.weight_decay)
     lr_func = lambda epoch: min((epoch + 1) / (args.warmup_epoch + 1e-8), 0.5 * (math.cos(epoch / args.total_epoch * math.pi) + 1))
-    lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optim, lr_lambda=lr_func, verbose=True)
+    lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optim, lr_lambda=lr_func)
 
     start_epoch = 0
     if os.path.exists(model_path):
