@@ -4,7 +4,8 @@ import math
 import torch
 import torchvision
 from torch.utils.tensorboard import SummaryWriter
-from torchvision.transforms import ToTensor, Compose, Normalize
+# from torchvision.transforms import ToTensor, Compose, Normalize
+from torchvision import transforms
 from tqdm import tqdm
 import random
 import torch
@@ -21,7 +22,7 @@ def setup_seed(seed=42):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--batch_size', type=int, default=4096)
+    parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--max_device_batch_size', type=int, default=512)
     parser.add_argument('--base_learning_rate', type=float, default=1.5e-4)
     parser.add_argument('--weight_decay', type=float, default=0.05)
@@ -41,16 +42,27 @@ if __name__ == '__main__':
     assert batch_size % load_batch_size == 0
     steps_per_update = batch_size // load_batch_size
 
-    train_dataset = torchvision.datasets.CIFAR10('data', train=True, download=True, transform=Compose([ToTensor(), Normalize(0.5, 0.5)]))
-    val_dataset = torchvision.datasets.CIFAR10('data', train=False, download=True, transform=Compose([ToTensor(), Normalize(0.5, 0.5)]))
+    transform_train = transforms.Compose([
+        transforms.RandomResizedCrop(args.input_size, scale=(0.2, 1.0), interpolation=3),  # 3 is bicubic
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+    transform_val = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+
+    train_dataset = torchvision.datasets.CIFAR10('data', train=True, download=True, transform=transform_train)
+    val_dataset = torchvision.datasets.CIFAR10('data', train=False, download=True, transform=transform_val)
     dataloader = torch.utils.data.DataLoader(train_dataset, load_batch_size, shuffle=True, num_workers=4)
     writer = SummaryWriter(os.path.join('logs', 'cifar10', 'mae-pretrain'))
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     if args.foveate:
-        tokenizer = FoveatedImageTokenizer(token_size=2, strides=[1,2,6], grid_sizes=[2,3,3], height=288, width=288)
+        tokenizer = FoveatedImageTokenizer(token_size=16, strides=[1,2,6], grid_sizes=[2,3,3], height=288, width=288)
     else:
-        tokenizer = BaseImageTokenizer(token_size=2, height=32, width=32)
+        tokenizer = BaseImageTokenizer(token_size=16, height=288, width=288)
     encoder = MAE_Encoder(
         num_tokens=tokenizer.get_num_tokens(),
         num_registers=1,

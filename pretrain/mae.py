@@ -36,7 +36,7 @@ class PatchShuffle():
 
         return patches, forward_indexes, backward_indexes
     
-from gaze_av_aloha.policies.gaze_policy.vit import named_apply, init_weights_vit_timm, extend_valid_token_mask
+from gaze_av_aloha.policies.gaze_policy.vit import named_apply, init_weights_vit_timm, extend_valid_token_mask, get_activation_fn
 from gaze_av_aloha.policies.gaze_policy.vit import Block as ViTBlock
 from typing import Optional, Type, Callable
 import torch
@@ -50,7 +50,7 @@ class MAE_Encoder(torch.nn.Module):
         depth: int,
         embedding_dim: int,
         num_heads: int,
-        act_layer: Type[torch.nn.Module],
+        act_layer: str,
         drop: float = 0.0,
         drop_path: float = 0.0,
         mask_ratio: float = 0.75
@@ -58,6 +58,8 @@ class MAE_Encoder(torch.nn.Module):
         super().__init__()
 
         assert num_registers == 1, "assume only using CLS token"
+
+        act_layer = get_activation_fn(act_layer)
 
         self.patch_emb = torch.nn.Linear(patch_size * patch_size * 3, embedding_dim)
 
