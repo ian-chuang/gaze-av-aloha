@@ -27,7 +27,7 @@ if __name__ == '__main__':
     parser.add_argument('--model_name', type=str, default='vit-b-mae')
     parser.add_argument('--max_viz' , type=int, default=3, help='Max number of images to visualize')
     parser.add_argument('--device', type=str, default='cuda', help='Device to use for training (e.g., "cuda" or "cpu")')
-    parser.add_argument('--repo_id', type=str, default='iantc104/mae_miniimagenet_vitb_', help='Hugging Face repository ID to push the model to')
+    parser.add_argument('--repo_id', type=str)
     args = parser.parse_args()
 
     model_path = f"{args.model_name}_{args.type}.pth"
@@ -157,8 +157,12 @@ if __name__ == '__main__':
     assert torch.allclose(encoder_reg, vit_reg, atol=1e-5), "Encoder and ViT registers do not match"
 
     vit.push_to_hub(
-        repo_id=f"gaze-av-aloha/mae-{args.type}",
+        repo_id=args.repo_id,
     )
 
-
-
+    vit = vit.from_pretrained(args.repo_id).to(device)
+    vit_feat, vit_reg = vit(x, mask)
+    assert encoder_feat.shape == vit_feat.shape, f"Shape mismatch: {encoder_feat.shape} vs {vit_feat.shape}"
+    assert encoder_reg.shape == vit_reg.shape, f"Shape mismatch: {encoder_reg.shape} vs {vit_reg.shape}"
+    assert torch.allclose(encoder_feat, vit_feat, atol=1e-5), "Encoder and ViT features do not match"
+    assert torch.allclose(encoder_reg, vit_reg, atol=1e-5), "Encoder and ViT registers do not match"
