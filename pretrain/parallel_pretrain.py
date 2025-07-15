@@ -19,9 +19,9 @@ import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
 
-def setup_distributed(rank, world_size):
+def setup_distributed(rank, world_size, port=12355):
     os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '12355'
+    os.environ['MASTER_PORT'] = str(port)
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
     torch.cuda.set_device(rank)
 
@@ -54,7 +54,8 @@ def load_checkpoint(path, model, optimizer=None, scheduler=None, device='cpu'):
 
 def main_worker(rank, world_size, args):
     setup_seed(args.seed)
-    setup_distributed(rank, world_size)
+    setup_distributed(rank, world_size, args.port)
+    print(f"[Rank {rank}] Using CUDA device: {torch.cuda.current_device()} / real GPU: {os.environ.get('CUDA_VISIBLE_DEVICES')}")
 
     # params
     device = torch.device(f'cuda:{rank}')
@@ -213,10 +214,16 @@ def main():
     parser.add_argument('--num_workers', type=int, default=4, help='Number of workers for data loading')
     parser.add_argument('--model_name', type=str, default='vit-b-mae')
     parser.add_argument('--max_viz' , type=int, default=3, help='Max number of images to visualize')
+    parser.add_argument('--port', type=int, default=12355, help='Port for distributed training')
     args = parser.parse_args()
 
     world_size = torch.cuda.device_count()
-    mp.spawn(main_worker, args=(world_size, args), nprocs=world_size, join=True)
+
+    if world_size > 1:
+        mp.spawn(main_worker, args=(world_size, args), nprocs=world_size, join=True)
+    else:
+        # Single GPU — no multiprocessing needed
+        main_worker(rank=0, world_size=1, args=args)
 
 if __name__ == "__main__":
     main()
