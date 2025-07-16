@@ -60,6 +60,9 @@ def main_worker(rank, world_size, args):
     # params
     device = torch.device(f'cuda:{rank}')
     model_path = f"{args.model_name}_{args.type}.pth"
+
+    print(f"Using model path: {model_path}")
+
     batch_size = args.batch_size
     load_batch_size = min(args.max_device_batch_size, batch_size)
     assert batch_size % load_batch_size == 0
@@ -153,8 +156,10 @@ def main_worker(rank, world_size, args):
         for img, label in tqdm(iter(dataloader)):
             step_count += 1
             img = img.to(device)
-            # centers = (torch.rand((img.size(0), 2), dtype=torch.float32, device=img.device) * 2 - 1) * 0.5
-            centers = torch.randn((img.size(0), 2), dtype=torch.float32, device=img.device) * 0.2
+            if args.add_noise:
+                centers = torch.randn((img.size(0), 2), dtype=torch.float32, device=img.device) * 0.2
+            else:
+                centers = torch.zeros((img.size(0), 2), dtype=torch.float32, device=img.device)  # Center crop
             tokens, pred_tokens, mask = model(img, centers)
             loss = torch.mean((pred_tokens - tokens) ** 2 * mask) / args.mask_ratio
             loss.backward()
@@ -211,6 +216,7 @@ def main():
     parser.add_argument('--total_epoch', type=int, default=2000)
     parser.add_argument('--warmup_epoch', type=int, default=200)
     parser.add_argument('--type', type=str)
+    parser.add_argument('--add_noise', action='store_true', help='Add noise to the input images')
     parser.add_argument('--num_workers', type=int, default=4, help='Number of workers for data loading')
     parser.add_argument('--model_name', type=str, default='vit-b-mae')
     parser.add_argument('--max_viz' , type=int, default=3, help='Max number of images to visualize')
