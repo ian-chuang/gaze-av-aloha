@@ -149,7 +149,7 @@ def main_worker(rank, world_size, args):
 
     step_count = 0
     optim.zero_grad()
-    for e in range(args.total_epoch):
+    for e in range(start_epoch, args.total_epoch):
         train_sampler.set_epoch(e)
         model.train()
         losses = []
@@ -202,6 +202,9 @@ def main_worker(rank, world_size, args):
                 writer.add_image('mae_image', viz, global_step=e)
         
             save_checkpoint(model, optim, lr_scheduler, e + 1, model_path)
+            if e+1 == 1000:
+                save_checkpoint(model, optim, lr_scheduler, e + 1, model_path.replace('.pth', '_1000.pth'))
+
 
     
 

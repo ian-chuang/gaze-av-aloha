@@ -126,6 +126,7 @@ class DINO(VisionEncoder):
 class ViT(VisionEncoder):
     def __init__(
         self, 
+        repo_id: Optional[str] = "",
         crop_shape: Tuple[int, int] = (216, 288),
         token_size: int = 16,
         height: int = 224,
@@ -144,6 +145,8 @@ class ViT(VisionEncoder):
             self.tokenizer.get_num_tokens(),
             self.tokenizer.get_token_size()
         )
+        if repo_id:
+            self.backbone = self.backbone.from_pretrained(repo_id)
 
     @property
     def embed_dim(self) -> int:
