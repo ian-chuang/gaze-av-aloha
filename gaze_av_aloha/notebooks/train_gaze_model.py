@@ -165,5 +165,5 @@ plt.title("Training Loss")
 plt.savefig(f"gaze_model_training_loss_{task}.png")
 
 # %%
-# model.push_to_hub(model_repo_id)
+model.push_to_hub(model_repo_id)
 
