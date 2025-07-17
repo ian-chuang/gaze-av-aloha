@@ -5,6 +5,7 @@ use_gaze: false
 
 vision_encoder: vit
 vision_encoder_kwargs:
+  repo_id: ''
   crop_shape: [216, 288]
   token_size: 64
   height: 256

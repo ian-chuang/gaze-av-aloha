@@ -146,6 +146,7 @@ class ViT(VisionEncoder):
             self.tokenizer.get_token_size()
         )
         if repo_id:
+            logging.info(f"Loading vit weights from {repo_id}")
             self.backbone = self.backbone.from_pretrained(repo_id)
 
     @property
@@ -176,6 +177,7 @@ class ViT(VisionEncoder):
 class FoveatedViT(VisionEncoder):
     def __init__(
         self, 
+        repo_id: str = "",
         token_size: int = 16, 
         strides: List[int] = [1, 2, 6], 
         grid_sizes: List[int] = [2,3,3], 
@@ -193,6 +195,9 @@ class FoveatedViT(VisionEncoder):
         self.backbone = create_vit_b(
             self.tokenizer.get_num_tokens(), self.tokenizer.get_token_size()
         )
+        if repo_id:
+            logging.info(f"Loading vit weights from {repo_id}")
+            self.backbone = self.backbone.from_pretrained(repo_id)
 
     @property
     def embed_dim(self) -> int:
