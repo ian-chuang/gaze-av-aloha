@@ -10,6 +10,27 @@ import einops
 import imageio
 from collections import OrderedDict
 
+def copy_matching_weights(src_module, tgt_module, startswith=()):
+    src_state = dict(src_module.named_parameters())
+    tgt_state = dict(tgt_module.named_parameters())
+
+    for name, param in tgt_state.items():
+        if any(name.startswith(prefix) for prefix in startswith):
+            if name in src_state and src_state[name].shape == param.shape:
+                param.data.copy_(src_state[name].data)
+                # print(f"Copied weight for {name} from source to target module.")
+
+def check_weights(src_module, tgt_module, startswith=()):
+    src_state = dict(src_module.named_parameters())
+    tgt_state = dict(tgt_module.named_parameters())
+
+    for name, param in tgt_state.items():
+        if any(name.startswith(prefix) for prefix in startswith):
+            if name in src_state and src_state[name].shape == param.shape:
+                # make sure data is copied correctly
+                if not torch.equal(param.data, src_state[name].data):
+                    print(f"Weight mismatch for {name}: source and target data are not equal.")
+
 def load_checkpoint(path, model, device='cpu'):
     checkpoint = torch.load(path, map_location=device)
     state_dict = checkpoint['model_state_dict']
@@ -33,19 +54,18 @@ if __name__ == '__main__':
     VIEW TENSORBOARD:
     tensorboard --logdir logs/miniimagenet/mae-pretrain --port 6006
 
-    python push_to_hub.py --type low_res_vit --checkpoint vit-b-mae_low_res_vit_1000.pth --repo_id iantc104/mae_vitb_low_res_vit
-    python push_to_hub.py --type foveated_vit --checkpoint vit-b-mae_foveated_vit_1000.pth --repo_id iantc104/mae_vitb_foveated_vit_shift
-    python push_to_hub.py --type foveated_vit --checkpoint vit-b-mae_no-noise_foveated_vit_1000.pth --repo_id iantc104/mae_vitb_foveated_vit
-    
+    python visualize.py --type low_res_vit --checkpoint vit-b-mae_low_res_vit_1000.pth --repo_id iantc104/mae_vitb_low_res_vit
+    python visualize.py --type foveated_vit --checkpoint vit-b-mae_foveated_vit_1000.pth --repo_id iantc104/mae_vitb_foveated_vit_shift
+    python visualize.py --type foveated_vit --checkpoint vit-b-mae_no-noise_foveated_vit_1000.pth --repo_id iantc104/mae_vitb_foveated_vit
+
     
     """
     parser = argparse.ArgumentParser()
     parser.add_argument('--type', type=str)
-    parser.add_argument('--model_name', type=str, default='vit-b-mae')
-    parser.add_argument('--checkpoint', type=str, default='')
     parser.add_argument('--max_viz' , type=int, default=3, help='Max number of images to visualize')
     parser.add_argument('--device', type=str, default='cuda', help='Device to use for training (e.g., "cuda" or "cpu")')
     parser.add_argument('--repo_id', type=str)
+    parser.add_argument('--checkpoint', type=str, default="", help='Path to the checkpoint file')
     args = parser.parse_args()
 
     if not args.checkpoint:
@@ -112,6 +132,19 @@ if __name__ == '__main__':
     start_epoch = load_checkpoint(model_path, model, device=device)
     print(f"Loadded from epoch {start_epoch}")
 
+    
+
+    from gaze_av_aloha.policies.gaze_policy.vit import create_vit_b
+    vit = create_vit_b(tokenizer.get_num_tokens(), tokenizer.get_token_size())
+    vit = vit.from_pretrained(args.repo_id)
+    vit = vit.to(device)
+    vit.eval()
+
+
+    check_weights(model.encoder, vit, startswith=["patch_emb", "pos_enc", "reg_tokens", "blocks"])
+
+    copy_matching_weights(vit, model.encoder, startswith=["patch_emb", "pos_enc", "reg_tokens", "blocks"])
+
     img, label = next(iter(dataloader))
     img = img.to(device)
     n = min(img.size(0), args.max_viz)
@@ -139,44 +172,3 @@ if __name__ == '__main__':
     viz = (viz * 255).astype('uint8')
     imageio.imwrite(f"visualization_{args.type}.png", viz)
     print(f"Visualization saved to visualization_{args.type}.png")
-
-    from gaze_av_aloha.policies.gaze_policy.vit import create_vit_b
-    vit = create_vit_b(tokenizer.get_num_tokens(), tokenizer.get_token_size())
-    vit = vit.to(device)
-    vit.eval()
-
-    def copy_matching_weights(src_module, tgt_module, startswith=()):
-        src_state = dict(src_module.named_parameters())
-        tgt_state = dict(tgt_module.named_parameters())
-
-        for name, param in tgt_state.items():
-            if any(name.startswith(prefix) for prefix in startswith):
-                if name in src_state and src_state[name].shape == param.shape:
-                    param.data.copy_(src_state[name].data)
-
-    encoder = model.encoder
-    copy_matching_weights(encoder, vit, startswith=["patch_emb", "pos_enc", "reg_tokens", "blocks"])
-
-
-
-    class DummyPatchShuffle():
-        def forward(self, patches : torch.Tensor, masks : torch.Tensor = None):
-            return patches, masks, None, None
-    encoder.shuffle = DummyPatchShuffle()
-    encoder.norm = torch.nn.Identity()
-
-    x = torch.randn(32, tokenizer.get_num_tokens(), tokenizer.get_token_size() ** 2 * 3, device=img.device)
-    mask = torch.ones((32, tokenizer.get_num_tokens()), dtype=torch.bool, device=img.device)
-    encoder_feat, _ = encoder(x, mask)
-    encoder_feat = encoder_feat.transpose(0, 1)  # (B, S, D)
-    encoder_feat, encoder_reg = encoder_feat[:, encoder.num_registers:], encoder_feat[:, :encoder.num_registers]
-    vit_feat, vit_reg = vit(x, mask)
-
-    assert encoder_feat.shape == vit_feat.shape, f"Shape mismatch: {encoder_feat.shape} vs {vit_feat.shape}"
-    assert encoder_reg.shape == vit_reg.shape, f"Shape mismatch: {encoder_reg.shape} vs {vit_reg.shape}"
-    assert torch.allclose(encoder_feat, vit_feat, atol=1e-5), "Encoder and ViT features do not match"
-    assert torch.allclose(encoder_reg, vit_reg, atol=1e-5), "Encoder and ViT registers do not match"
-
-    vit.push_to_hub(
-        repo_id=args.repo_id,
-    )
