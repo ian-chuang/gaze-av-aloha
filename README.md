@@ -7,6 +7,7 @@ git submodule update
 conda create -n gaze python=3.10
 pip install -e ./gym_av_aloha
 pip install git+https://github.com/huggingface/lerobot.git@483be9aac217c2d8ef16982490f22b2ad091ab46
+conda install ffmpeg=7.1.1 -c conda-forge
 pip install -e ./gaze_av_aloha
 ```
 
@@ -65,9 +66,17 @@ MUJOCO_EGL_DEVICE_ID=1 python train.py policy=foveated_vit_policy task=av_aloha_
 
 
 
+# WITH MAE
 
 
+iantc104/mae_vitb_low_res_vit
+iantc104/mae_vitb_foveated_vit_shift
+iantc104/mae_vitb_foveated_vit
 
-
-
-MUJOCO_EGL_DEVICE_ID=0 python train.py policy=vit_policy task=av_aloha_sim_cube_transfer wandb.job_name=TESTING_STATE_AFTER_POOL_cube_vit device=cuda:0
+### foveated vit
+MUJOCO_EGL_DEVICE_ID=0 python train.py policy=foveated_vit_policy task=av_aloha_sim_thread_needle wandb.job_name=thread_mae_foveated_v2 policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_foveated_vit device=cuda:0
+MUJOCO_EGL_DEVICE_ID=1 python train.py policy=foveated_vit_policy task=av_aloha_sim_pour_test_tube wandb.job_name=pour_mae_foveated_v2 policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_foveated_vit device=cuda:1
+MUJOCO_EGL_DEVICE_ID=2 python train.py policy=foveated_vit_policy task=av_aloha_sim_hook_package wandb.job_name=hook_mae_foveated_v2 policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_foveated_vit device=cuda:2
+MUJOCO_EGL_DEVICE_ID=3 python train.py policy=foveated_vit_policy task=av_aloha_sim_slot_insertion wandb.job_name=slot_mae_foveated_v2 policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_foveated_vit device=cuda:3
+MUJOCO_EGL_DEVICE_ID=0 python train.py policy=foveated_vit_policy task=av_aloha_sim_cube_transfer wandb.job_name=cube_mae_foveated_v2 policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_foveated_vit device=cuda:0
+MUJOCO_EGL_DEVICE_ID=1 python train.py policy=foveated_vit_policy task=av_aloha_sim_peg_insertion wandb.job_name=peg_mae_foveated_v2 policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_foveated_vit device=cuda:1
