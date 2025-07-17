@@ -81,6 +81,18 @@ MUJOCO_EGL_DEVICE_ID=3 python train.py policy=foveated_vit_policy task=av_aloha_
 MUJOCO_EGL_DEVICE_ID=0 python train.py policy=foveated_vit_policy task=av_aloha_sim_cube_transfer wandb.job_name=cube_mae_foveated_v2 policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_foveated_vit policy.optimizer_lr_backbone=1e-5 device=cuda:0
 MUJOCO_EGL_DEVICE_ID=1 python train.py policy=foveated_vit_policy task=av_aloha_sim_peg_insertion wandb.job_name=peg_mae_foveated_v2 policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_foveated_vit policy.optimizer_lr_backbone=1e-5 device=cuda:1
 
+
+### vit
+MUJOCO_EGL_DEVICE_ID=0 python train.py policy=vit_policy task=av_aloha_sim_thread_needle wandb.job_name=thread_mae_vit_v2 policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_vit policy.optimizer_lr_backbone=1e-5 device=cuda:0
+MUJOCO_EGL_DEVICE_ID=1 python train.py policy=vit_policy task=av_aloha_sim_pour_test_tube wandb.job_name=pour_mae_vit_v2 policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_vit policy.optimizer_lr_backbone=1e-5 device=cuda:1
+MUJOCO_EGL_DEVICE_ID=2 python train.py policy=vit_policy task=av_aloha_sim_hook_package wandb.job_name=hook_mae_vit_v2 policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_vit policy.optimizer_lr_backbone=1e-5 device=cuda:2
+MUJOCO_EGL_DEVICE_ID=3 python train.py policy=vit_policy task=av_aloha_sim_slot_insertion wandb.job_name=slot_mae_vit_v2 policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_vit policy.optimizer_lr_backbone=1e-5 device=cuda:3
+MUJOCO_EGL_DEVICE_ID=0 python train.py policy=vit_policy task=av_aloha_sim_cube_transfer wandb.job_name=cube_mae_vit_v2 policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_vit policy.optimizer_lr_backbone=1e-5 device=cuda:0
+MUJOCO_EGL_DEVICE_ID=1 python train.py policy=vit_policy task=av_aloha_sim_peg_insertion wandb.job_name=peg_mae_vit_v2 policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_vit policy.optimizer_lr_backbone=1e-5 device=cuda:1
+
+
+
+
 ### low res vit
 
 MUJOCO_EGL_DEVICE_ID=0 python train.py policy=low_res_vit_policy task=av_aloha_sim_thread_needle wandb.job_name=thread_mae_low_res_vit_v2 policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_low_res_vit policy.optimizer_lr_backbone=1e-5 device=cuda:0
