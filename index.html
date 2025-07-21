@@ -55,7 +55,8 @@
             <div class="container is-fullhd">
                 <div class="columns is-centered">
                     <div class="column has-text-centered">
-                        <h1 class="title is-1 publication-title">Look, Focus, Act:<br/>Efficient and Robust Robot Learning
+                        <h1 class="title is-1 publication-title">Look, Focus, Act:<br />Efficient and Robust Robot
+                            Learning
                             via Human Gaze and Foveated Vision Transformers</h1>
                         <div class="is-size-5 publication-authors">
                             <span class="author-block">
@@ -162,6 +163,26 @@
         </div>
     </section> -->
 
+    <section class="hero teaser">
+        <div class="container is-fullhd">
+            <div class="hero-body">
+                <div class="container">
+                    <div class="columns is-vcentered  is-centered">
+                        <img src="static/images/system.png" class="interpolation-image" />
+                    </div>
+                    <br>
+                    <h2 class="subtitle has-text-centered">
+                        <span class="dperact">We introduce a human-inspired <b>foveated vision framework for robot
+                                learning</b>
+                            that integrates human gaze with foveated Vision Transformers and robotic control, enabling
+                            efficient and
+                            robust policies.</span>
+                    </h2>
+                </div>
+            </div>
+        </div>
+    </section>
+
     <!-- Abstract -->
     <section class="section hero is-light">
         <div class="container is-max-desktop">
@@ -187,7 +208,7 @@
                             prediction from human data. The first is a structured, hierarchical two-stage model that
                             first predicts gaze, which is then used to guide foveation and action prediction. The second
                             is a novel method that treats gaze as an extension of whole-body control, integrating it
-                            into the robot’s action space such that the policy directly predicts both future gaze and
+                            into the robot's action space such that the policy directly predicts both future gaze and
                             actions in an end-to-end manner. Our results show that our method for foveated robot vision
                             not only drastically reduces computational overhead, but also improves performance for high
                             precision tasks and robustness to unseen distractors. Together, these findings suggest that
@@ -199,191 +220,218 @@
         </div>
     </section>
 
-    <!-- System Diagram -->
+    <section class="section hero">
+        <div class="container is-max-widescreen">
+            <div class="columns is-centered has-text-centered">
+                <div class="column is-full-width">
+                    <h2 class="title is-3">Data Collection</h2>
+                    <img src="static/images/data_collection.png" class="interpolation-image" style="max-width: 50em;" />
+                    <br />
+                    <br />
+
+                    <div class="content has-text-justified">
+
+                        <p>
+                            We use the <b>AV-ALOHA</b> simulation platform to collect bimanual robot demonstrations with
+                            human eye-tracking data. The robot streams stereo camera images to the VR headset for visual
+                            feedback, while the headset transmits head and hand controller poses to control the robot,
+                            along with human gaze data.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+
+
+    <!-- Simulation Tasks -->
+    <section class="hero is-small is-light">
+        <div class="hero-body">
+            <div class="container">
+                <h2 class="title is-3">
+                    Human Demonstrations with Eye-Tracking
+                </h2>
+
+                <!-- First Row of Simulation Videos -->
+                <div class="columns is-centered">
+                    <div class="column is-one-third">
+                        <video poster="" autoplay controls muted loop width="100%" style="object-fit: cover">
+                            <source src="static/videos/cube_demo.mp4" type="video/mp4" />
+                        </video>
+                        <h4 class="subtitle has-text-centered">Cube Transfer</h4>
+                    </div>
+                    <div class="column is-one-third">
+                        <video poster="" autoplay controls muted loop width="100%" style="object-fit: cover">
+                            <source src="static/videos/peg_demo.mp4" type="video/mp4" />
+                        </video>
+                        <h4 class="subtitle has-text-centered">Peg Insertion</h4>
+                    </div>
+                    <div class="column is-one-third">
+                        <video poster="" autoplay controls muted loop width="100%" style="object-fit: cover">
+                            <source src="static/videos/slot_demo.mp4" type="video/mp4" />
+                        </video>
+                        <h4 class="subtitle has-text-centered">Slot Insertion</h4>
+                    </div>
+                </div>
+
+                <!-- Second Row of Simulation Videos -->
+                <div class="columns is-centered">
+                    <div class="column is-one-third">
+                        <video poster="" autoplay controls muted loop width="100%" style="object-fit: cover">
+                            <source src="static/videos/hook_demo.mp4" type="video/mp4" />
+                        </video>
+                        <h4 class="subtitle has-text-centered">Hook Package</h4>
+                    </div>
+                    <div class="column is-one-third">
+                        <video poster="" autoplay controls muted loop width="100%" style="object-fit: cover">
+                            <source src="static/videos/pour_demo.mp4" type="video/mp4" />
+                        </video>
+                        <h4 class="subtitle has-text-centered">Pour Test Tube</h4>
+                    </div>
+                    <div class="column is-one-third">
+                        <video poster="" autoplay controls muted loop width="100%" style="object-fit: cover">
+                            <source src="static/videos/thread_demo.mp4" type="video/mp4" />
+                        </video>
+                        <h4 class="subtitle has-text-centered">Thread Needle</h4>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="section hero">
+        <div class="container is-max-widescreen">
+            <div class="columns is-centered has-text-centered">
+                <div class="column is-full-width">
+                    <h2 class="title is-3">Policy Architecture</h2>
+                    <img src="static/images/policy.png" class="interpolation-image" />
+                    <br />
+                    <br />
+
+                    <div class="content has-text-justified">
+
+                        <p>
+                            <b>Gaze Prediction:</b> Gaze is predicted using two approaches: <i>Fov-UNet</i>, a
+                            hierarchical two-stage model that first predicts gaze with a UNet and then uses it to guide
+                            the policy, and <i>Fov-Act</i>, a novel end-to-end method that treats gaze as part of the
+                            robot's action space where the policy predicts both gaze and action together.
+
+                            <b>Tokenization:</b> <i>Fov-UNet</i> and <i>Fov-Act</i> methods use foveated tokenization
+                            around predicted gaze. The other methods, <i>Fine</i> and <i>Coarse</i>, do not predict gaze
+                            and
+                            use a standard uniform tokenization.
+
+                            <b>Policy Architecture:</b> We use a Transformer-Based Flow Matching Policy. Image
+                            observations <code>O<sub>img</sub></code> are tokenized,
+                            processed by ViT, and compressed with a Q-Former module into tokens
+                            <code>c<sub>img</sub></code>, which condition the Flow Transformer (FT) via cross-attention.
+                            Proprioception is encoded by an MLP into tokens <code>c<sub>proprio</sub></code> and added
+                            to the FT input sequence. Timestep <code>t</code> is embedded and conditions FT via AdaLN.
+                            FT predicts flow matching velocity <code>v<sub>&theta;</sub></code> from noisy action latent
+                            <code>z<sub>t</sub></code>, <code>c<sub>img</sub></code>, <code>c<sub>proprio</sub></code>,
+                            and <code>t</code>. Actions are generated via Euler integration.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="section hero">
+        <div class="container is-max-widescreen">
+            <div class="columns is-centered has-text-centered">
+                <div class="column is-full-width">
+                    <h2 class="title is-3">Foveated Tokenization</h2>
+                    <video poster="" autoplay controls muted loop width="100%" style="object-fit: cover">
+                        <source src="static/videos/thread_tokenization.mp4" type="video/mp4" />
+                    </video>
+                    <br />
+                    <br />
+
+                    <div class="content has-text-justified">
+
+                        <p>
+                            (Left) The input image is divided into patches using either the standard uniform tokenization
+                            (Middle) or foveated tokenization (Right). Foveated tokenization mimics the human retina by
+                            assigning high-resolution patches near the gaze point and lower resolution in the periphery.
+                            This reduces the number of tokens from 324 (uniform) to just 20 (foveated), greatly lowering
+                            computational cost while preserving detail where it matters most.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Simulation Tasks -->
+    <section class="hero is-small is-light">
+        <div class="hero-body">
+            <div class="container">
+                <h2 class="title is-3">
+                    Autonomous Rollout with Foveated Vision
+                </h2>
+
+                <!-- First Row of Simulation Videos -->
+                <div class="columns is-centered">
+                    <div class="column is-one-third">
+                        <video poster="" autoplay controls muted loop width="100%" style="object-fit: cover">
+                            <source src="static/videos/cube_fov.mp4" type="video/mp4" />
+                        </video>
+                        <h4 class="subtitle has-text-centered">Cube Transfer</h4>
+                    </div>
+                    <div class="column is-one-third">
+                        <video poster="" autoplay controls muted loop width="100%" style="object-fit: cover">
+                            <source src="static/videos/peg_fov.mp4" type="video/mp4" />
+                        </video>
+                        <h4 class="subtitle has-text-centered">Peg Insertion</h4>
+                    </div>
+                    <div class="column is-one-third">
+                        <video poster="" autoplay controls muted loop width="100%" style="object-fit: cover">
+                            <source src="static/videos/slot_fov.mp4" type="video/mp4" />
+                        </video>
+                        <h4 class="subtitle has-text-centered">Slot Insertion</h4>
+                    </div>
+                </div>
+
+                <!-- Second Row of Simulation Videos -->
+                <div class="columns is-centered">
+                    <div class="column is-one-third">
+                        <video poster="" autoplay controls muted loop width="100%" style="object-fit: cover">
+                            <source src="static/videos/hook_fov.mp4" type="video/mp4" />
+                        </video>
+                        <h4 class="subtitle has-text-centered">Hook Package</h4>
+                    </div>
+                    <div class="column is-one-third">
+                        <video poster="" autoplay controls muted loop width="100%" style="object-fit: cover">
+                            <source src="static/videos/pour_fov.mp4" type="video/mp4" />
+                        </video>
+                        <h4 class="subtitle has-text-centered">Pour Test Tube</h4>
+                    </div>
+                    <div class="column is-one-third">
+                        <video poster="" autoplay controls muted loop width="100%" style="object-fit: cover">
+                            <source src="static/videos/thread_fov.mp4" type="video/mp4" />
+                        </video>
+                        <h4 class="subtitle has-text-centered">Thread Needle</h4>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
     <!-- <section class="section hero">
         <div class="container is-max-widescreen">
             <div class="columns is-centered has-text-centered">
                 <div class="column is-full-width">
-                    <h2 class="title is-3">AV-ALOHA</h2>
-
-                    <img src="static/images/ActiveVisionSystemFigure.png" class="interpolation-image" />
-                    <br />
-                    <br />
-
-                    <div class="content has-text-justified">
-
-                        <p>
-                            The AV-ALOHA system enables intuitive data collection using a VR headset for AV and either
-                            VR controllers or leader arms for manipulation. This helps capture full body and head
-                            movements to teleoperate both our real and simulation system that record video from six
-                            different cameras and provide training data for our AV imitation learning policies.
-                        </p>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section> -->
-
-    <!-- <section class="section hero is-light">
-        <div class="container is-max-widescreen">
-            <div class="columns is-centered has-text-centered">
-                <div class="column is-full-width">
                     <h2 class="title is-3">Results</h2>
-                    <img src="static/images/ActiveVisionResults.png" class="interpolation-image" />
+                    <img src="static/images/success.png" class="interpolation-image" />
                     <br />
                     <br />
-
-                    <div class="content has-text-justified">
-
-                        <p>
-                            We collect data and run experiments in both real-world and simulation across a variety of
-                            tasks that emphasize viewpoint planning. We evaluate the imitation learning policy, <a
-                                href="https://tonyzhaozh.github.io/aloha/">ACT</a>, with different camera configurations
-                            with and without active vision. Our results show that active vision can significantly
-                            improve the performance of imitation learning when there are occlusions or limited
-                            visibility.
-                        </p>
-                    </div>
+                    <img src="static/images/latency.png" class="interpolation-image" />
                 </div>
             </div>
         </div>
     </section> -->
-
-    <!-- Video carousel -->
-    <!-- <section class="hero is-small">
-        <div class="hero-body">
-            <div class="container">
-                <h2 class="title is-3">Autonomous Rollouts</h2>
-                <div id="results-carousel" class="carousel results-carousel">
-                    <div class="item item-video1">
-                        <video poster="" id="video1" autoplay controls muted loop height="100%">
-                            <source src="static/videos/eval_real_occluded_insertion_overhead_cam.mp4" type="video/mp4">
-                        </video>
-                        <h2 class="subtitle has-text-centered">
-                            Occluded Insertion
-                        </h2>
-                    </div>
-                    <div class="item item-video2">
-                        <video poster="" id="video2" autoplay controls muted loop height="100%">
-                            <source src="static/videos/eval_sim_thread_needle_overhead_cam.mp4" type="video/mp4">
-                        </video>
-                        <h2 class="subtitle has-text-centered">
-                            Thread Needle
-                        </h2>
-                    </div>
-                    <div class="item item-video3">
-                        <video poster="" id="video3" autoplay controls muted loop height="100%">\
-                            <source src="static/videos/eval_sim_tube_transfer_overhead_cam.mp4" type="video/mp4">
-                        </video>
-                        <h2 class="subtitle has-text-centered">
-                            Tube Transfer
-                        </h2>
-                    </div>
-                    <div class="item item-video4">
-                        <video poster="" id="video4" autoplay controls muted loop height="100%">\
-                            <source src="static/videos/eval_sim_slot_insertion_overhead_cam.mp4" type="video/mp4">
-                        </video>
-                        <h2 class="subtitle has-text-centered">
-                            Slot Insertion
-                        </h2>
-                    </div>
-                    <div class="item item-video5">
-                        <video poster="" id="video5" autoplay controls muted loop height="100%">\
-                            <source src="static/videos/eval_sim_peg_insertion_overhead_cam.mp4" type="video/mp4">
-                        </video>
-                        <h2 class="subtitle has-text-centered">
-                            Peg Insertion
-                        </h2>
-                    </div>
-                    <div class="item item-video6">
-                        <video poster="" id="video6" autoplay controls muted loop height="100%">\
-                            <source src="static/videos/eval_sim_hook_package_overhead_cam.mp4" type="video/mp4">
-                        </video>
-                        <h2 class="subtitle has-text-centered">
-                            Hook Package
-                        </h2>
-                    </div>
-                    <div class="item item-video7">
-                        <video poster="" id="video7" autoplay controls muted loop height="100%">\
-                            <source src="static/videos/eval_real_hidden_pick_overhead_cam.mp4" type="video/mp4">
-                        </video>
-                        <h2 class="subtitle has-text-centered">
-                            Hidden Pick
-                        </h2>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section> -->
-    <!-- End video carousel -->
-
-    <!-- Video carousel -->
-    <!-- <section class="hero is-small is-light">
-        <div class="hero-body">
-            <div class="container">
-                <h2 class="title is-3">Autonomous Rollouts (Active Vision Camera)</h2>
-                <div id="results-carousel" class="carousel results-carousel">
-                    <div class="item item-video1">
-                        <video poster="" id="video1" autoplay controls muted loop height="100%">
-                            <source src="static/videos/eval_real_occluded_insertion_zed_cam_left.mp4" type="video/mp4">
-                        </video>
-                        <h2 class="subtitle has-text-centered">
-                            Occluded Insertion
-                        </h2>
-                    </div>
-                    <div class="item item-video2">
-                        <video poster="" id="video2" autoplay controls muted loop height="100%">
-                            <source src="static/videos/eval_sim_thread_needle_zed_cam_left.mp4" type="video/mp4">
-                        </video>
-                        <h2 class="subtitle has-text-centered">
-                            Thread Needle
-                        </h2>
-                    </div>
-                    <div class="item item-video3">
-                        <video poster="" id="video3" autoplay controls muted loop height="100%">\
-                            <source src="static/videos/eval_sim_tube_transfer_zed_cam_left.mp4" type="video/mp4">
-                        </video>
-                        <h2 class="subtitle has-text-centered">
-                            Tube Transfer
-                        </h2>
-                    </div>
-                    <div class="item item-video4">
-                        <video poster="" id="video4" autoplay controls muted loop height="100%">\
-                            <source src="static/videos/eval_sim_slot_insertion_zed_cam_left.mp4" type="video/mp4">
-                        </video>
-                        <h2 class="subtitle has-text-centered">
-                            Slot Insertion
-                        </h2>
-                    </div>
-                    <div class="item item-video5">
-                        <video poster="" id="video5" autoplay controls muted loop height="100%">\
-                            <source src="static/videos/eval_sim_peg_insertion_zed_cam_left.mp4" type="video/mp4">
-                        </video>
-                        <h2 class="subtitle has-text-centered">
-                            Peg Insertion
-                        </h2>
-                    </div>
-                    <div class="item item-video6">
-                        <video poster="" id="video6" autoplay controls muted loop height="100%">\
-                            <source src="static/videos/eval_sim_hook_package_zed_cam_left.mp4" type="video/mp4">
-                        </video>
-                        <h2 class="subtitle has-text-centered">
-                            Hook Package
-                        </h2>
-                    </div>
-                    <div class="item item-video7">
-                        <video poster="" id="video7" autoplay controls muted loop height="100%">\
-                            <source src="static/videos/eval_real_hidden_pick_zed_cam_left.mp4" type="video/mp4">
-                        </video>
-                        <h2 class="subtitle has-text-centered">
-                            Hook Package
-                        </h2>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section> -->
-    <!-- End video carousel -->
 
 
     <!--BibTex citation -->
