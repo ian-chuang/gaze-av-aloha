@@ -2,7 +2,7 @@
 
 This repository contains the official code for our paper:
 **"Look, Focus, Act: Efficient and Robust Robot Learning via Human Gaze and Foveated Vision Transformers"**
-📄 [ArXiv](https://arxiv.org/abs/2507.15833) 🌐 [Project Website](https://ian-chuang.github.io/gaze-av-aloha/)
+🌐 [Project Website](https://ian-chuang.github.io/gaze-av-aloha/)
 
 We propose a human-inspired *foveated vision framework* for robot learning that combines human gaze, [foveated ViTs](https://github.com/facebookresearch/segment_this_thing), and robotic control to enable policies that are both efficient and robust. Our approach reduces ViT computation by 94%, accelerating training by 7× and inference by 3×.
 
@@ -104,11 +104,7 @@ gym_av_aloha/outputs/
 
 # AV ALOHA Benchmark
 
-Train and evaluate policies using:
-
-```bash
-python gaze_av_aloha/scripts/train.py
-```
+Train and evaluate policies using [`train.py`](./gaze_av_aloha/scripts/train.py).
 
 Exact commands used in our simulation experiments are provided in [`experiments.txt`](./experiments.txt).
 Pretrained weights are available and can be loaded via Hydra configuration.
