@@ -21,7 +21,6 @@ from gaze_av_aloha.visualize import visualize_policy, NoTerminationWrapper
 from gaze_av_aloha.utils.dataclass_utils import save_dataclass, load_dataclass
 from gaze_av_aloha.configs import Config
 import gaze_av_aloha # import to ensure all configs are registered
-# import copy
 
 def train(cfg: Config):
     # get hydra run directory

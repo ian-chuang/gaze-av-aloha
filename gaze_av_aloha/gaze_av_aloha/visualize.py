@@ -33,7 +33,6 @@ def visualize_policy(
 
     step = 0
     # Keep track of which environments are done.
-    # max_steps = env.call("_max_episode_steps")[0]
     progbar = trange(
         steps,
         desc=f"Running rollout with {steps} steps",
