@@ -1,8 +1,11 @@
-# gaze-av-aloha
+# Look, Focus, Act: Efficient and Robust Robot Learning via Human Gaze and Foveated Vision Transformers
+
+![hero](./media/hero.gif)
+
+🚀 **Project Website:** [https://ian-chuang.github.io/gaze-av-aloha/](https://ian-chuang.github.io/gaze-av-aloha/)
 
 This repository contains the official code for our paper:
 **"Look, Focus, Act: Efficient and Robust Robot Learning via Human Gaze and Foveated Vision Transformers"**
-🌐 [Project Website](https://ian-chuang.github.io/gaze-av-aloha/)
 
 We propose a human-inspired *foveated vision framework* for robot learning that combines human gaze, [foveated ViTs](https://github.com/facebookresearch/segment_this_thing), and robotic control to enable policies that are both efficient and robust. Our approach reduces ViT computation by 94%, accelerating training by 7× and inference by 3×.
 
