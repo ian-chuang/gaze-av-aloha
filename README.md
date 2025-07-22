@@ -205,7 +205,7 @@ To collect simulation data using AV-ALOHA:
 
 * Install the **AV-ALOHA Unity App** on your Meta Quest Pro headset:
   👉 [AV-ALOHA Unity App](https://github.com/Soltanilara/av-aloha-unity/tree/eye-tracking)
-* Follow the instructions in [`gym_av_aloha/README.md`](./gym_av_aloha/README.md) for detailed steps on data collection.
+* Follow the instructions in [`gym_av_aloha/README.md`](https://github.com/Soltanilara/gym_av_aloha) for detailed steps on data collection.
 
 ### MAE Pretraining
 
@@ -217,8 +217,6 @@ We provide MAE-pretrained Vision Transformers used for:
 
 Details and training scripts are located in:
 📄 [`pretrain/README.md`](./pretrain/README.md)
-
----
 
 ### Gaze Model Training
 
