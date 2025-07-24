@@ -239,3 +239,13 @@ Supported task names:
 * `peg_insertion`
 
 The resulting models will be pushed to Hugging Face under the appropriate task-specific repo.
+
+# Real Robot
+
+Install ROS-Noetic
+
+cd interbotix_ws/src
+rosdep install -y --from-paths . --ignore-src --rosdistro noetic
+cd ..
+catkin_make -DPYTHON_EXECUTABLE=/usr/bin/python3
+
