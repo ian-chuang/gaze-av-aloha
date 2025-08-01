@@ -34,7 +34,7 @@ class RealEnv():
 
     def __init__(self, init_node=True, headset: WebRTCHeadset = None, stereo_cam_idx=24):
         # setup mujoco for forward kinematics
-        self._mjcf_root = mjcf.from_path(os.path.join(XML_DIR, 'aloha_real.xml'))
+        self._mjcf_root = mjcf.from_path(os.path.join(XML_DIR, 'aloha.xml'))
         self._physics = mjcf.Physics.from_mjcf_model(self._mjcf_root) 
         self._left_joints = [self._mjcf_root.find('joint', name) for name in LEFT_JOINT_NAMES]
         self._right_joints = [self._mjcf_root.find('joint', name) for name in RIGHT_JOINT_NAMES]
@@ -46,20 +46,24 @@ class RealEnv():
         self._right_eef_site = self._mjcf_root.find('site', RIGHT_EEF_SITE)
         self._middle_eef_site = self._mjcf_root.find('site', MIDDLE_EEF_SITE)
         # set up controllers
+        cfg = GradIKConfig()
+        cfg.joint_p = 0.3
         self.left_controller = GradIK(
-            config=GradIKConfig(),
+            config=cfg,
             physics=self._physics,
             joints=self._left_joints,
             eef_site=self._left_eef_site,
         )
         self.right_controller = GradIK(
-            config=GradIKConfig(),
+            config=cfg,
             physics=self._physics,
             joints=self._right_joints,
             eef_site=self._right_eef_site,
         )
+        cfg = DiffIKConfig()
+        cfg.joint_p = 0.3
         self.middle_controller = DiffIK(
-            config=DiffIKConfig(),
+            config=cfg,
             physics=self._physics,
             joints=self._middle_joints,
             eef_site=self._middle_eef_site,
@@ -114,7 +118,6 @@ class RealEnv():
         }
 
     def reset(self, seed=None) -> tuple:
-        super().reset(seed=seed)
 
         # Reboot puppet robot gripper motors
         self.left_bot.dxl.robot_reboot_motors("single", "gripper", True)
@@ -141,11 +144,11 @@ class RealEnv():
 
     def get_info(self):
         return {
-            'left_pose': self.left_controller.fk(self.left_ctrl[:6]),
+            'left_arm_pose': self.left_controller.fk(self.left_ctrl[:6]),
             'left_gripper': LEFT_GRIPPER_JOINT_NORMALIZE_FN(self.left_ctrl[6]),
-            'right_pose': self.right_controller.fk(self.right_ctrl[:6]),
+            'right_arm_pose': self.right_controller.fk(self.right_ctrl[:6]),
             'right_gripper': RIGHT_GRIPPER_JOINT_NORMALIZE_FN(self.right_ctrl[6]),
-            'middle_pose': self.middle_controller.fk(self.middle_ctrl),
+            'middle_arm_pose': self.middle_controller.fk(self.middle_ctrl),
         }
 
     def step_pose(
@@ -249,7 +252,9 @@ def main():
                 middle_arm_pose=info['middle_arm_pose'],
             ) 
             # start the episode if the user clicks the right button and the headset is in sync
-            if headset_data.r_button_one == True and not headset_control.is_running():
+            if headset_data.r_button_one == True and feedback.head_out_of_sync == False and \
+                feedback.left_out_of_sync == False and feedback.right_out_of_sync == False and \
+                not headset_control.is_running():
                 headset_control.start(
                     headset_data, 
                     info['middle_arm_pose'],
@@ -267,7 +272,7 @@ def main():
         headset.send_feedback(feedback)
 
         end_time = time.time()
-        print(f"Step time: {end_time - start_time:.4f} seconds")
+        # print(f"Step time: {end_time - start_time:.4f} seconds")
         time.sleep(max(0, 1.0 / FPS - (end_time - start_time)))
 
 if __name__ == "__main__":

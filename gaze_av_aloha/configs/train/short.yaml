@@ -3,7 +3,7 @@ defaults:
 
 # Training settings
 steps: 30_000
-eval_freq: 3_000
+eval_freq: -1   #original 3_000
 viz_freq: 3_000
 log_freq: 100
 save_checkpoint: true

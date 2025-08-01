@@ -44,6 +44,11 @@ class Normalize(nn.Module):
         stats: dict[str, dict[str, Tensor]],
     ):
         super().__init__()
+
+        # sort stats by key
+        stats = dict(sorted(stats.items()))
+
+
         self.key_norm_mode = key_norm_mode
         self.stats = stats
         stats_buffers = create_stats_buffers(key_norm_mode, stats)
@@ -75,6 +80,10 @@ class Unnormalize(nn.Module):
         stats: dict[str, dict[str, Tensor]],
     ):
         super().__init__()
+
+        # sort stats by key
+        stats = dict(sorted(stats.items()))
+
         self.key_norm_mode = key_norm_mode
         self.stats = stats
         stats_buffers = create_stats_buffers(key_norm_mode, stats)

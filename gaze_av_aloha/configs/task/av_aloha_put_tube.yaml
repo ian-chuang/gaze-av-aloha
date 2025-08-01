@@ -1,10 +1,10 @@
 defaults:
   - base_task_config
 
-type: av_aloha_sim_thread_needle
+type: av_aloha_put_tube
 dataset_repo_id: iantc104/av_aloha_sim_peg_insertion_test
-dataset_root: /home/jinyu/GitHub/gaze-av-aloha/gym_av_aloha/outputs/iantc104/av_aloha_sim_peg_insertion_test
-dataset_episodes: [0,1,2,3,4] # use all episodes
+dataset_root: /home/jinyu/GitHub/gaze-av-aloha/gaze_av_aloha/robot_scripts/outputs_jy/iantc105/av_aloha_place_tube
+dataset_episodes: [0,1,2,3,4,5,6,7] # use all episodes
 override_stats:
   observation.images.left_eye_cam:
     mean: [[[0.485]], [[0.456]], [[0.406]]]

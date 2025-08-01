@@ -71,6 +71,9 @@ def train(cfg: Config):
 
     # create policy
     logging.info(f"Creating policy of type {cfg.policy.type}")
+    #dataset_meta = AVAlohaDatasetMeta(repo_id=cfg.task.dataset_repo_id, root=cfg.task.dataset_root)
+    logging.info(f"DEBUG: Attempting to load dataset from root: '{cfg.task.dataset_root}'")
+    logging.info(f"DEBUG: Attempting to load dataset with repo_id: '{cfg.task.dataset_repo_id}'")
     dataset_meta = AVAlohaDatasetMeta(repo_id=cfg.task.dataset_repo_id, root=cfg.task.dataset_root)
     stats = dataset_meta.stats
     stats.update(cfg.task.override_stats)
@@ -144,7 +147,13 @@ def train(cfg: Config):
     # create optimizer and lr scheduler
     logging.info(f"Creating optimizer, scheduler,")
     optimizer = policy.get_optimizer()
+
+    # 学习率调度器
     lr_scheduler = policy.get_scheduler(optimizer, cfg.train.steps)
+    '''
+    GradScaler
+    GradScaler 是 PyTorch 提供的一个工具，用于在混合精度训练中自动调整梯度的缩放因子。混合精度训练是一种在训练深度学习模型时，同时使用单精度（FP32）和半精度（FP16）浮点数的技术，旨在加速训练过程并减少内存占用，同时尽量减少精度损失。
+    '''
     grad_scaler = GradScaler(device.type, enabled=cfg.train.use_amp)
     ema = policy.get_ema()
     step = 0  # number of policy updates (forward + backward + optim)
@@ -163,6 +172,7 @@ def train(cfg: Config):
             raise e
         logging.info(f"Resuming training from step {step}")
 
+    # 得到模型总参数量
     num_learnable_params = sum(p.numel() for p in policy.parameters() if p.requires_grad)
     num_total_params = sum(p.numel() for p in policy.parameters())
     logging.info(f"{cfg.train.steps=} ({format_big_number(cfg.train.steps)})")
@@ -185,6 +195,7 @@ def train(cfg: Config):
         cfg.wandb.run_id = wandb.run.id
 
     # create dataloader for offline training
+    # hasattr 检查policy是否有这个属性
     if hasattr(cfg.policy, "drop_n_last_frames"):
         shuffle = False
         sampler = EpisodeAwareSampler(
@@ -195,6 +206,7 @@ def train(cfg: Config):
     else:
         shuffle = True
         sampler = None
+    # loading the dataset
     dataloader = torch.utils.data.DataLoader(
         dataset,
         num_workers=cfg.train.num_workers,
@@ -221,6 +233,7 @@ def train(cfg: Config):
 
     logging.info("Start offline training on a fixed dataset")
     for _ in range(step, cfg.train.steps):
+        # get the time
         start_time = time.perf_counter()
         batch = next(dl_iter)
         train_tracker.dataloading_s = time.perf_counter() - start_time
@@ -359,11 +372,17 @@ def train(cfg: Config):
 
             if ema is not None:
                 ema.restore(policy.parameters())
+    if eval_envs:
+        for env in eval_envs.values():
+            env.close()
+    if viz_envs:
+        for env in viz_envs.values():
+            env.close()
 
-    if eval_env:
-        eval_env.close()
-    if viz_env:
-        viz_env.close()
+    # if eval_env:
+    #     eval_env.close()
+    # if viz_env:
+    #     viz_env.close()
 
     if cfg.wandb.enable:
         wandb.finish()
