@@ -113,7 +113,9 @@ class StereoImageRecorder:
                 with self.count_lock:
                     count = self.count
 
-                self.headset.send_images((left_image_ocv, count), (right_image_ocv, count))
+                # self.headset.send_images((left_image_ocv, count), (right_image_ocv, count))
+                self.headset.send_left_image(left_image_ocv, count)
+                self.headset.send_right_image(right_image_ocv, count)
 
             with self.lock:
                 self.left_image = left_image_ocv
@@ -133,7 +135,22 @@ class StereoImageRecorder:
             raise Exception("Webcam is not running or image is not available")
         
 
+if __name__ == "__main__":
+    cam = StereoImageRecorder(24, auto_start=True)
+    time.sleep(1)
+    while True:
+        left, right = cam.get_images()
 
+        # Display the images
+        cv2.imshow("Left Image", left)
+        cv2.imshow("Right Image", right)
+
+        # Exit on 'q' key
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    cam.stop()  # if your class has a stop method
+    cv2.destroyAllWindows()
 
 
 class ROSImageRecorder:

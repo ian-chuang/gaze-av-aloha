@@ -324,9 +324,10 @@ cd /home/jinyu/GitHub/gaze-av-aloha/gaze_av_aloha/robot_scripts
 conda activate gym_av
 python sleep.py
 
-#covert data from lerobot to avaloha
-python convert_lerobot_to_avaloha.py --repo_id iantc104/av_aloha_sim_peg_insertion_test --start_episode 0 --end_episode 5
-
+# covert data from lerobot to avaloha
+cd /home/jinyu/GitHub/gaze-av-aloha/gym_av_aloha/scripts
+python convert_lerobot_to_avaloha.py --repo_id iantc104/av_aloha_sim_peg_insertion_test --start_episode 0 --end_episode 50
+python convert_lerobot_to_avaloha.py --repo_id Jinyu220/insert_straw2 --start_episode 0 --end_episode 50
 
 # train 
 cd 
@@ -379,3 +380,19 @@ python train.py \
   wandb.entity=jinyuzou220-uc-davis \
   wandb.job_name=foveated_put_tube2_train_ZJY \
   device=cuda:0
+
+
+
+  ####
+  python gaze_av_aloha/scripts/train.py \
+  policy=foveated_vit_policy \
+  task=<task e.g. av_aloha_sim_thread_needle> \
+  policy.use_gaze_as_action=false \
+  policy.gaze_model_repo_id=<gaze model e.g. iantc104/gaze_model_av_aloha_sim_thread_needle> \
+  policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_foveated_vit \
+  policy.optimizer_lr_backbone=1e-5 \
+  wandb.enable=true \
+  wandb.project=<project name> \
+  wandb.entity=<your wandb entity> \
+  wandb.job_name=fov-unet \
+  device=cuda

@@ -15,4 +15,4 @@ optimizer_lr: 1e-4
 optimizer_lr_backbone: 1e-4
 
 image_to_gaze_key:
-  observation.images.left_eye_cam: left_eye
+  observation.images.zed_cam_left: left_eye

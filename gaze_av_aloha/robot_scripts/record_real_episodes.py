@@ -136,8 +136,8 @@ def run_episode(dataset: LeRobotDataset, env: RealEnv, headset: WebRTCHeadset, e
         env.stereo_cam.set_count(step_idx)
 
         frame = {
-            'action': torch.tensor(obs['control'].copy()),
-            'observation.state': torch.tensor(obs['joints'].copy()),
+            'action': torch.tensor(obs['control'], dtype=torch.float32),
+            'observation.state': torch.tensor(obs['joints'], dtype=torch.float32),
             'observation.images.left_eye_cam': obs['images']['left_eye_cam'],
             'observation.images.right_eye_cam': obs['images']['right_eye_cam'],
             'observation.images.wrist_cam_left': obs['images']['wrist_cam_left'],
@@ -146,9 +146,9 @@ def run_episode(dataset: LeRobotDataset, env: RealEnv, headset: WebRTCHeadset, e
             'observation.images.worms_eye_cam': obs['images']['worms_eye_cam'],
             'left_eye': torch.zeros(2, dtype=torch.float32),
             'right_eye': torch.zeros(2, dtype=torch.float32),
-            'left_arm_pose': torch.tensor(info['left_arm_pose'].reshape(-1).copy()),
-            'right_arm_pose': torch.tensor(info['right_arm_pose'].reshape(-1).copy()),
-            'middle_arm_pose': torch.tensor(info['middle_arm_pose'].reshape(-1).copy()),
+            'left_arm_pose': torch.tensor(info['left_arm_pose'].reshape(-1), dtype=torch.float32),
+            'right_arm_pose': torch.tensor(info['right_arm_pose'].reshape(-1), dtype=torch.float32),
+            'middle_arm_pose': torch.tensor(info['middle_arm_pose'].reshape(-1), dtype=torch.float32),
         }
         dataset.add_frame(frame, task=task)
 
@@ -314,8 +314,7 @@ def main(cfg):
                 break
 
             # get the episode index
-            episode_idx = dataset["num_episodes"]
-
+            episode_idx = dataset.num_episodes
             waiting_zone(env, headset)
             
             reset_env(env, headset)
@@ -346,11 +345,10 @@ if __name__ == "__main__":
     import argparse
     # Parse command line arguments
     parser = argparse.ArgumentParser(description="Record simulation episodes for AV Aloha.")
-    parser.add_argument("--num-episodes", type=int, default=1, help="Number of episodes to record.")
-    parser.add_argument("--env_name", type=str, default="thread-needle-v1", help="Environment task to run.")
-    parser.add_argument("--repo-id", type=str, default="iantc104/av_aloha_sim_peg_insertion_test", help="Repository ID for the dataset.")
-    parser.add_argument("--root", type=str, default="outputs", help="Root directory for the dataset.")
-    parser.add_argument("--task", type=str, default="pick red cube", help="Task name for the dataset.")
+    parser.add_argument("--num-episodes", type=int, default=50, help="Number of episodes to record.")
+    parser.add_argument("--repo-id", type=str, default="Jinyu220/insert_straw2", help="Repository ID for the dataset.")
+    parser.add_argument("--root", type=str, default="outputs_strawJinyu2", help="Root directory for the dataset.")
+    parser.add_argument("--task", type=str, default="insert_straw", help="Task name for the dataset.")
     args = parser.parse_args()
     args_dict = vars(args)
 

@@ -55,9 +55,10 @@ class GazePolicy(Policy):
             },
             stats,
         )
-
+        # FlowModel 用于动作的生成
         self.flow = FlowModel(policy_cfg, task_cfg)
 
+        # 时间集成，平滑动作
         if policy_cfg.use_temporal_ensemble:
             self.temporal_ensembler = TemporalEnsembler(
                 temporal_ensemble_coeff=policy_cfg.temporal_ensemble_coeff,

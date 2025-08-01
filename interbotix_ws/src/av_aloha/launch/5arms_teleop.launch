@@ -8,11 +8,11 @@
   <arg name="base_link_master"                  default="base_link"/>
   <arg name="base_link_puppet"                  default="base_link"/>
 
-  <arg name="master_modes_left"                 default="$(find guided_vision)/config/master_modes_left.yaml"/>
-  <arg name="puppet_modes_left"                 default="$(find guided_vision)/config/puppet_modes_left.yaml"/>
-  <arg name="master_modes_right"                default="$(find guided_vision)/config/master_modes_right.yaml"/>
-  <arg name="puppet_modes_right"                default="$(find guided_vision)/config/puppet_modes_right.yaml"/>
-  <arg name="puppet_modes_middle"               default="$(find guided_vision)/config/puppet_modes_middle.yaml"/>
+  <arg name="master_modes_left"                 default="$(find av_aloha)/config/master_modes_left.yaml"/>
+  <arg name="puppet_modes_left"                 default="$(find av_aloha)/config/puppet_modes_left.yaml"/>
+  <arg name="master_modes_right"                default="$(find av_aloha)/config/master_modes_right.yaml"/>
+  <arg name="puppet_modes_right"                default="$(find av_aloha)/config/puppet_modes_right.yaml"/>
+  <arg name="puppet_modes_middle"               default="$(find av_aloha)/config/puppet_modes_middle.yaml"/>
 
   <arg name="launch_driver"                     default="true"/>
   <arg name="use_sim"                           default="false"/>
