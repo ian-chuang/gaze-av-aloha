@@ -326,11 +326,11 @@ python sleep.py
 
 # covert data from lerobot to avaloha
 cd /home/jinyu/GitHub/gaze-av-aloha/gym_av_aloha/scripts
-python convert_lerobot_to_avaloha.py --repo_id iantc104/av_aloha_sim_peg_insertion_test --start_episode 0 --end_episode 50
-python convert_lerobot_to_avaloha.py --repo_id Jinyu220/insert_straw2 --start_episode 0 --end_episode 50
+python convert_lerobot_to_avaloha.py --repo_id Jinyu220/put_tri --start_episode 0 --end_episode 56
+python convert_lerobot_to_avaloha.py --repo_id Jinyu220/put_tube_singlev2 --start_episode 0 --end_episode 50
+python covert_data_to_Avaloha_skip.py --repo_id Jinyu220/put_coinv3 --start_episode 0 --end_episode 80
 
 # train 
-cd 
 python train.py \
   policy=foveated_vit_policy \
   policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_foveated_vit \
@@ -383,7 +383,7 @@ python train.py \
 
 
 
-  ####
+  #### ian start
   python gaze_av_aloha/scripts/train.py \
   policy=foveated_vit_policy \
   task=<task e.g. av_aloha_sim_thread_needle> \
@@ -395,4 +395,87 @@ python train.py \
   wandb.project=<project name> \
   wandb.entity=<your wandb entity> \
   wandb.job_name=fov-unet \
+  device=cuda
+
+
+  python gaze_av_aloha/scripts/train.py \
+  policy=vit_policy \
+  task=<task e.g. av_aloha_sim_thread_needle> \
+  policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_vit \
+  policy.optimizer_lr_backbone=1e-5 \
+  wandb.enable=true \
+  wandb.project=<project name> \
+  wandb.entity=<your wandb entity> \
+  wandb.job_name=fine \
+  device=cuda
+  # ian end
+
+  #####
+  python gaze_av_aloha/scripts/train.py \
+  policy=foveated_vit_policy \
+  task=<task e.g. av_aloha_sim_thread_needle> \
+  policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_foveated_vit \
+  policy.optimizer_lr_backbone=1e-5 \
+  wandb.enable=true \
+  wandb.project=<project name> \
+  wandb.entity=<your wandb entity> \
+  wandb.job_name=fov-act \
+  device=cuda
+
+
+### eval
+./robot_real_2arms.sh
+cd ~/GitHub/gaze-av-aloha
+conda deactivate
+conda deactivate
+conda deactivate
+source /opt/ros/noetic/setup.sh
+source interbotix_ws/devel/setup.sh
+cd /home/jinyu/GitHub/gaze-av-aloha/gaze_av_aloha/robot_scripts
+python eval.py
+
+
+
+  ### train_gaze_model
+  train gaze model
+  cd /home/jinyu/GitHub/gaze-av-aloha/gaze_av_aloha/scripts/
+  python train_gaze_model.py
+
+  #  pretrained vit-unet
+
+  cd Github/gaze-av-aloha
+  python gaze_av_aloha/scripts/train.py \
+  policy=foveated_vit_policy \
+  policy.use_gaze_as_action=false \
+  policy.gaze_model_repo_id=Jinyu220/gaze_model_av_aloha_real_put_square\
+  policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_foveated_vit \
+  policy.optimizer_lr_backbone=1e-5 \
+  wandb.enable=true \
+  wandb.project=put_square_unet \
+  wandb.entity=jinyuzou220-uc-davis \
+  wandb.job_name=fov-unet-square \
+  device=cuda:2
+
+
+  python gaze_av_aloha/scripts/train.py \
+  policy=vit_policy \
+  policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_vit \
+  policy.optimizer_lr_backbone=1e-5 \
+  wandb.enable=true \
+  wandb.project=put_square_vit \
+  wandb.entity=jinyuzou220-uc-davis\
+  wandb.job_name=fine-square \
+  device=cuda
+
+
+  ##### test
+  cd /home/jinyu/GitHub/gaze-av-aloha
+  python gaze_av_aloha/scripts/train.py \
+  policy=vit_policy \
+  policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_vit \
+  policy.optimizer_lr_backbone=1e-5 \
+  wandb.enable=true \
+  wandb.project=test \
+  wandb.entity=jinyuzou220-uc-davis\
+  wandb.job_name=test \
   device=cuda

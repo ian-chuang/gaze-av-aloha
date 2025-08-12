@@ -67,6 +67,8 @@ class GazePolicy(Policy):
 
         self.reset()
 
+
+    # 优化器 初始化优化器，设置不同的学习率参数。
     def get_optimizer(self) -> torch.optim.Optimizer:
         logging.info(f"""
             [FlowPolicy] Initializing AdamW optimizer with the following parameters:
@@ -105,6 +107,8 @@ class GazePolicy(Policy):
             weight_decay=self.cfg.optimizer_weight_decay
         )
     
+
+    # 学习率调动器  初始化学习率调度器，控制学习率的变化。
     def get_scheduler(self, optimizer: torch.optim.Optimizer, num_training_steps: int) -> torch.optim.lr_scheduler.LambdaLR | None:
         logging.info(f"""
             [FlowPolicy] Initializing scheduler '{self.cfg.scheduler_name}' with the following parameters:
@@ -212,7 +216,8 @@ class GazePolicy(Policy):
     def forward(self, batch: dict[str, Tensor]) -> tuple[Tensor, None]:
         batch = self.normalize_inputs(batch)
 
-        # pad gaze obs with zeros
+        # pad gaze obs with zeros 
+        # 这段代码的作用是对注视点（gaze）数据进行填充处理。
         for gaze_key in self.cfg.image_to_gaze_key.values():
             is_pad = batch[self.task_cfg.action_key + "_is_pad"][:, :self.cfg.n_obs_steps] # use action key since it is 1 behind
             batch[gaze_key][:, :self.cfg.n_obs_steps][is_pad] = 0.0
@@ -246,7 +251,7 @@ class FlowModel(nn.Module):
         }
 
         if policy_cfg.gaze_model_repo_id != "":
-            self.gaze_model = GazeModel.from_pretrained(policy_cfg.gaze_model_repo_id)
+            self.gaze_model = GazeModel.from_pretrained(policy_cfg.gaze_model_repo_id,resize_shape=(120, 160))
             self.gaze_model.eval()
             for param in self.gaze_model.parameters():
                 param.requires_grad = False

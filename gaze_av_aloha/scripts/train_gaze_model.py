@@ -22,37 +22,37 @@ from gaze_av_aloha.utils.dataset_utils import cycle
 import argparse
 
 # Define valid task choices
-TASK_CHOICES = [
-    "thread_needle",
-    "pour_test_tube",
-    "hook_package",
-    "slot_insertion",
-    "cube_transfer",
-    "peg_insertion",
-]
+# TASK_CHOICES = [
+#     "thread_needle",
+#     "pour_test_tube",
+#     "hook_package",
+#     "slot_insertion",
+#     "cube_transfer",
+#     "peg_insertion",
+# ]
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="Train gaze model for a specific AV-Aloha task")
-    parser.add_argument(
-        "--task",
-        type=str,
-        choices=TASK_CHOICES,
-        required=True,
-        help="Specify the AV-Aloha task to train on"
-    )
-    return parser.parse_args()
+# def parse_args():
+#     parser = argparse.ArgumentParser(description="Train gaze model for a specific AV-Aloha task")
+#     parser.add_argument(
+#         "--task",
+#         type=str,
+#         choices=TASK_CHOICES,
+#         required=True,
+#         help="Specify the AV-Aloha task to train on"
+#     )
+#     return parser.parse_args()
 
-args = parse_args()
-task = args.task
+# args = parse_args()
+# task = args.task
 
 # %%
 input_shape = (240, 320)
 resize_shape=(120, 160)
-
-dataset = f"iantc104/av_aloha_sim_{task}"
-model_repo_id = f"iantc104/gaze_model_av_aloha_sim_{task}"
+task="put_square"
+dataset = f"Jinyu220/put_tri"
+model_repo_id = f"Jinyu220/gaze_model_av_aloha_real_{task}"
 image_keys = [
-    "observation.images.zed_cam_left",
+    "observation.images.left_eye_cam",
 ]
 eye_keys = [
     "left_eye",

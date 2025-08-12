@@ -1,5 +1,5 @@
 from pathlib import Path
-from gaze_av_aloha.robot.env import RealEnv
+from gaze_av_aloha.robot.env_no_left import RealEnv
 from gaze_av_aloha.robot.config import REAL_DT, FPS
 from tqdm import tqdm
 import einops
@@ -127,7 +127,7 @@ def eval(args):
         # Encode all frames into a mp4 video.
 
 
-        video_dir = policy_path / "eval" / f"rollout_{i+1}"
+        video_dir = policy_path / "eval_distractors" / f"rollout_{i+35}"
         os.makedirs(str(video_dir), exist_ok=True)
         for key, video in viz_videos.items():
             video_path = video_dir / f"{key}.mp4"
@@ -166,9 +166,9 @@ def main():
     import rospy
     # add arg for policy
     parser = argparse.ArgumentParser()
-    parser.add_argument('--policy', type=str, default="/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-08-06_01-03-47_fov-unet-cube/checkpoints/0000030000", help='Path to the policy checkpoint directory parent folder of policy/model.safetensors')
-    parser.add_argument('--episode_len', type=int, default=200, help='Length of the episode')
-    parser.add_argument('--num_episodes', type=int, default=50, help='Number of episodes to run')
+    parser.add_argument('--policy', type=str, default="/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-08-06_22-22-45_fine-cube_v2/checkpoints/0000030000", help='Path to the policy checkpoint directory parent folder of policy/model.safetensors')
+    parser.add_argument('--episode_len', type=int, default=125, help='Length of the episode')
+    parser.add_argument('--num_episodes', type=int, default=10, help='Number of episodes to run')
     # convert to dict
     args = vars(parser.parse_args())
 
