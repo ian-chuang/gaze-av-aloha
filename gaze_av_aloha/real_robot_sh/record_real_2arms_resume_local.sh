@@ -22,4 +22,4 @@ cd /home/jinyu/GitHub/gaze-av-aloha/gaze_av_aloha/robot_scripts
 conda activate gym_av
 
 # Run the Python script
-python record_real_episodes_no_left.py
+python record_real_episodes_no_left_resume_local.py

@@ -15,11 +15,4 @@ source /opt/ros/noetic/setup.sh
 # Source the Interbotix workspace setup
 source interbotix_ws/devel/setup.sh
 
-# Change directory to the robot_scripts folder
-cd /home/jinyu/GitHub/gaze-av-aloha/gaze_av_aloha/robot_scripts
-
-# Activate the Conda environment
-conda activate gym_av
-
-# Run the Python script
-python record_real_episodes_no_left.py
+roslaunch av_aloha 3arms_teleop.launch use_sim:=true use_rviz:=true

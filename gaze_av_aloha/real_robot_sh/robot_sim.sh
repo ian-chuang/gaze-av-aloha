@@ -15,4 +15,4 @@ source /opt/ros/noetic/setup.sh
 # Source the Interbotix workspace setup
 source interbotix_ws/devel/setup.sh
 
-roslaunch av_aloha 3arms_teleop.launch use_sim:=true use_rviz:=true
+roslaunch av_aloha 2arms_teleop_no_left.launch use_sim:=true use_rviz:=true
