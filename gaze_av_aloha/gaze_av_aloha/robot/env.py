@@ -32,7 +32,7 @@ FPS = round(1.0 / DT)
 
 class RealEnv():
 
-    def __init__(self, init_node=True, headset: WebRTCHeadset = None, stereo_cam_idx=24):
+    def __init__(self, init_node=True, headset: WebRTCHeadset = None, stereo_cam_idx=18):
         # setup mujoco for forward kinematics
         self._mjcf_root = mjcf.from_path(os.path.join(XML_DIR, 'aloha.xml'))
         self._physics = mjcf.Physics.from_mjcf_model(self._mjcf_root) 
@@ -223,7 +223,7 @@ def main():
     headset.run_in_thread()
 
     # setup the environment
-    env = RealEnv(init_node=True, headset=headset, stereo_cam_idx=24)
+    env = RealEnv(init_node=True, headset=headset, stereo_cam_idx=18)
     obs, info = env.reset()
     init_action = {
         'left_pose': info['left_arm_pose'],

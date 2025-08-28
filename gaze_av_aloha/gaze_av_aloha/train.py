@@ -11,7 +11,7 @@ from omegaconf import OmegaConf
 from pathlib import Path
 import random
 import numpy as np
-from gym_av_aloha.datasets.av_aloha_dataset import AVAlohaDataset, AVAlohaDatasetMeta
+from gym_av_aloha.datasets.av_aloha_dataset import AVAlohaDataset, AVAlohaDatasetMeta, image_transforms_augmentation,transform_image
 import importlib
 import gymnasium as gym
 import wandb
@@ -76,7 +76,9 @@ def train(cfg: Config):
     logging.info(f"DEBUG: Attempting to load dataset with repo_id: '{cfg.task.dataset_repo_id}'")
     dataset_meta = AVAlohaDatasetMeta(repo_id=cfg.task.dataset_repo_id, root=cfg.task.dataset_root)
     stats = dataset_meta.stats
+  
     stats.update(cfg.task.override_stats)
+    
     if cfg.policy.type == "gaze_policy":
         from gaze_av_aloha.policies.gaze_policy.gaze_policy import GazePolicy
         policy = GazePolicy(policy_cfg=cfg.policy, task_cfg=cfg.task, stats=stats)
@@ -98,9 +100,10 @@ def train(cfg: Config):
         repo_id=cfg.task.dataset_repo_id, 
         root=cfg.task.dataset_root,
         episodes=cfg.task.dataset_episodes,
+        image_transforms=transform_image,
         delta_timestamps=delta_timestamps,
     )
-
+    # print("cfg.task.dataset_root=",cfg.task.dataset_root)
     # create eval env
     eval_envs = None
     if cfg.train.eval_freq > 0 and len(cfg.task.envs) > 0:

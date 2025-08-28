@@ -2,7 +2,7 @@ defaults:
   - _self_
   - base_config
   - policy: foveated_vit_policy
-  - task: av_aloha_put_square
+  - task: av_aloha_put_coin
   - train: short
   - wandb: gaze
 

@@ -69,7 +69,7 @@ def eval(args):
     print(f"Using {n_interpolation_steps} interpolation steps for actions.")
 
     # setup the environment
-    env = RealEnv(init_node=True, stereo_cam_idx=24)
+    env = RealEnv(init_node=True, stereo_cam_idx=18)
 
     success_episodes = []
     failed_episodes = []
@@ -86,6 +86,7 @@ def eval(args):
 
         viz_videos = {}
         for _ in tqdm(range(episode_len)):
+            
             observation = preprocess_observation(observation)
             observation = {key: observation[key].to(device, non_blocking=True) for key in observation}
 
@@ -158,6 +159,7 @@ def main():
         --policy /home/jinyu/GitHub/gaze-av-aloha/outputs/2025-07-27_23-18-17_foveated_put_tube1_train_ZJY/checkpoints/0000030000 \
         --episode_len 300 \
         --num_episodes 10
+        2025-08-11_19-29-35_fine-ring
 
     """
 
@@ -166,8 +168,10 @@ def main():
     import rospy
     # add arg for policy
     parser = argparse.ArgumentParser()
-    parser.add_argument('--policy', type=str, default="/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-08-06_22-22-45_fine-cube_v2/checkpoints/0000030000", help='Path to the policy checkpoint directory parent folder of policy/model.safetensors')
-    parser.add_argument('--episode_len', type=int, default=125, help='Length of the episode')
+    # 2025-08-19_17-30-56_hang_ring_resnet
+    # 2025-08-18_12-38-39_fine-hang_cirle_v4
+    parser.add_argument('--policy', type=str, default="/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-08-24_02-12-39_fov-unet-augementation_hangv4_ring/checkpoints/0000030000", help='Path to the policy checkpoint directory parent folder of policy/model.safetensors')
+    parser.add_argument('--episode_len', type=int, default=120, help='Length of the episode')
     parser.add_argument('--num_episodes', type=int, default=10, help='Number of episodes to run')
     # convert to dict
     args = vars(parser.parse_args())

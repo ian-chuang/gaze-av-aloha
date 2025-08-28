@@ -12,5 +12,3 @@ optimizer_lr_backbone: 1e-5
 
 image_to_gaze_key:
   observation.images.left_eye_cam: left_eye
-
-

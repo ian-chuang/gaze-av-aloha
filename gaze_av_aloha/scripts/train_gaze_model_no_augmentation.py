@@ -48,11 +48,11 @@ import argparse
 # %%
 input_shape = (240, 320)
 resize_shape=(120, 160)
-task="insert_peg"
-dataset = f"iantc104/av_aloha_sim_peg_insertion_v0"
-model_repo_id = f"Jinyu220/gaze_model_av_aloha_real_{task}"
+task="hang_ring"
+dataset = f"Jinyu220/circle_2"
+model_repo_id = f"Jinyu220/gaze_model_av_aloha_real_no_augmentation_{task}"
 image_keys = [
-    "observation.images.zed_cam_left",
+    "observation.images.left_eye_cam",
 ]
 eye_keys = [
     "left_eye",
@@ -88,12 +88,12 @@ model = GazeModel(
 optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
 transforms = K.AugmentationSequential(
-    K.RandomCrop(size=(int(input_shape[0]*0.9), int(input_shape[1]*0.9)), p=0.5),
-    K.ColorJiggle(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1, p=0.1),
-    K.RandomPerspective(distortion_scale=0.5, p=0.1),
-    K.RandomHorizontalFlip(p=0.1),
-    K.RandomRotation(degrees=15, p=0.1),
-    K.RandomErasing(scale=(0.02, 0.2), ratio=(0.3, 3.3), p=0.1),
+    # K.RandomCrop(size=(int(input_shape[0]*0.9), int(input_shape[1]*0.9)), p=0.5),
+    # K.ColorJiggle(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1, p=0.1),
+    # K.RandomPerspective(distortion_scale=0.5, p=0.1),
+    # K.RandomHorizontalFlip(p=0.1),
+    # K.RandomRotation(degrees=15, p=0.1),
+    # K.RandomErasing(scale=(0.02, 0.2), ratio=(0.3, 3.3), p=0.1),
     data_keys=["input", "keypoints"],
     same_on_batch=True,
 )
@@ -160,20 +160,19 @@ for step in tqdm(range(num_steps)):
     )
 
 
-    # IAN HACK
-    torch.stack(
+
+    # ---- 归一化 gaze 到 [-1, 1]，并去掉多余维度 ----
+    EYE_W, EYE_H = 640, 480   # 这里改成你的原始标注分辨率
+    eye = torch.stack(
         [
-            (eye[..., 0] / 640) * 2 - 1,  # Normalize x to [-1, 1]
-            (eye[..., 1] / 480) * 2 - 1,  # Normalize y to [-1, 1]
+            (eye[..., 0] / EYE_W) * 2 - 1,
+            (eye[..., 1] / EYE_H) * 2 - 1,
         ],
         dim=-1,
-    )
+    ).squeeze(1)   # (B,1,2) -> (B,2)
 
-
+    # ---- 图像预处理（无数据增强）----
     image = resize(image)
-    eye = denormalize_keypoints(eye, image.shape[-2:])
-    image, eye = transforms(image, eye)
-    eye = normalize_keypoints(eye, image.shape[-2:]).squeeze(1)
     image = normalize(image)
     
     optimizer.zero_grad()

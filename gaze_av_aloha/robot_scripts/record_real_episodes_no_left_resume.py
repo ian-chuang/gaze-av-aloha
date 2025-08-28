@@ -216,13 +216,20 @@ def run_episode(dataset: LeRobotDataset, env: RealEnv, headset: WebRTCHeadset, e
             if headset_data.r_button_one == False:
                 print("Episode finished by user.")
                 break
-            
-            eye_frame = {
-                'left_eye': headset_data.l_eye.copy(),
-                'right_eye': headset_data.r_eye.copy(),
-                'left_eye_frame_id': headset_data.l_eye_frame_id,
-                'right_eye_frame_id': headset_data.r_eye_frame_id,
-            }
+ 
+            eye_frame = {}
+            eye_frame['left_eye'] = headset_data.l_eye.copy()
+            eye_frame['right_eye'] = headset_data.r_eye.copy()
+            eye_frame['left_eye_frame_id'] = headset_data.l_eye_frame_id
+            eye_frame['right_eye_frame_id'] = headset_data.r_eye_frame_id
+            l_h = obs['images']['left_eye_cam'].shape[0]
+            l_w = obs['images']['left_eye_cam'].shape[1]
+            r_h = obs['images']['right_eye_cam'].shape[0]
+            r_w = obs['images']['right_eye_cam'].shape[1]
+            eye_frame['left_eye'][0] = (eye_frame['left_eye'][0] / l_w) * 2 - 1
+            eye_frame['left_eye'][1] = (eye_frame['left_eye'][1] / l_h) * 2 - 1
+            eye_frame['right_eye'][0] = (eye_frame['right_eye'][0] / r_w) * 2 - 1
+            eye_frame['right_eye'][1] = (eye_frame['right_eye'][1] / r_h) * 2 - 1
             eye_data.append(eye_frame)
 
         feedback.info = f"Episode {episode_idx}, Timestep: {str(step_idx).zfill(4)}\n{info}"
@@ -384,9 +391,9 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Record simulation episodes for AV Aloha.")
     parser.add_argument("--num-episodes", type=int, default=70, help="Number of episodes to record.")
-    parser.add_argument("--repo-id", type=str, default="Jinyu220/insert_cube_to_ring", help="Repository ID for the dataset.")
-    parser.add_argument("--root", type=str, default="outputs_single_insert_cube_to_ring", help="Root directory for the dataset.")
-    parser.add_argument("--task", type=str, default="insert_cube_to_ring", help="Task name for the dataset.")
+    parser.add_argument("--repo-id", type=str, default="Jinyu220/test_resume", help="Repository ID for the dataset.")
+    parser.add_argument("--root", type=str, default="outputs_test_resume", help="Root directory for the dataset.")
+    parser.add_argument("--task", type=str, default="test_resume", help="Task name for the dataset.")
     parser.add_argument("--batch-size", type=int, default=2, help="Number of episodes to record before uploading to Hugging Face.")
     #parser.add_argument("--process", type=str, default="/home/jinyu/GitHub/gaze-av-aloha/gaze_av_aloha/robot_scripts/outputs_single_put_coinv3/progress.json", help="Number of episodes to record before uploading to Hugging Face.")
     args = parser.parse_args()

@@ -48,18 +48,33 @@ import argparse
 # %%
 input_shape = (240, 320)
 resize_shape=(120, 160)
-task="insert_peg"
-dataset = f"iantc104/av_aloha_sim_peg_insertion_v0"
+import argparse
+
+# 1. 定义命令行参数
+parser = argparse.ArgumentParser()
+parser.add_argument("--task", type=str, required=True, help="任务名称，比如 put_square")
+parser.add_argument("--dataset", type=str, required=True, help="HuggingFace 数据集ID，比如 Jinyu220/put_tri")
+args = parser.parse_args()
+
+# 2. 使用参数
+task = args.task
+dataset = args.dataset
 model_repo_id = f"Jinyu220/gaze_model_av_aloha_real_{task}"
+
+print("Task:", task)
+print("Dataset:", dataset)
+print("Model Repo ID:", model_repo_id)
+batch_size = 64
+num_steps = 30_000
+lr = 1e-4
 image_keys = [
-    "observation.images.zed_cam_left",
+    "observation.images.left_eye_cam",
 ]
 eye_keys = [
     "left_eye",
 ]
-batch_size = 64
-num_steps = 30_000
-lr = 1e-4
+
+print(f"Training gaze model for {task} task")
 print(f"Training gaze model for {task} task")
 
 # %%

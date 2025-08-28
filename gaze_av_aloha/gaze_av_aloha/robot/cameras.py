@@ -136,7 +136,7 @@ class StereoImageRecorder:
         
 
 if __name__ == "__main__":
-    cam = StereoImageRecorder(24, auto_start=True)
+    cam = StereoImageRecorder(18, auto_start=True)
     time.sleep(1)
     while True:
         left, right = cam.get_images()
