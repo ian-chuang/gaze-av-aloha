@@ -48,9 +48,9 @@ import argparse
 # %%
 input_shape = (240, 320)
 resize_shape=(120, 160)
-task="hang_circle"
-dataset = f"Jinyu220/circle_2"
-model_repo_id = f"Jinyu220/gaze_model_av_aloha_real_no_{task}_real"
+task="hook_circlev2"
+dataset = f"Jinyu220/hook_circlev2"
+model_repo_id = f"Jinyu220/gaze_model_av_aloha_real_NEW1_{task}"
 image_keys = [
     "observation.images.left_eye_cam",
 ]
@@ -58,13 +58,11 @@ eye_keys = [
     "left_eye",
 ]
 batch_size = 64
-num_steps = 30_000
+num_steps = 40_000
 lr = 1e-4
 print(f"Training gaze model for {task} task")
 
 # %%
-
-
 from gym_av_aloha.datasets.av_aloha_dataset import transform_image
 
 
@@ -74,8 +72,15 @@ delta_timestamps = {
 dataset = AVAlohaDataset(
     repo_id=dataset,
     delta_timestamps=delta_timestamps,
-    #image_transforms=transform_image,
+    image_transforms=transform_image,
 )
+# delta_timestamps = {
+#     k: [0] for k in image_keys + eye_keys
+# }
+# dataset = AVAlohaDataset(
+#     repo_id=dataset,
+#     delta_timestamps=delta_timestamps,
+# )
 dataloader = DataLoader(
     dataset,
     batch_size=batch_size,
@@ -85,11 +90,6 @@ dataloader = DataLoader(
 )
 
 
-batch = next(iter(dataloader))
-img = batch['observation.images.left_eye_cam'][0,0]
-plt.imsave("left_eye_cam.png", img.permute(1, 2, 0).cpu().numpy())
-
-
 # %%
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = GazeModel(
@@ -97,18 +97,16 @@ model = GazeModel(
 ).to(device)
 optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
-# transforms = K.AugmentationSequential(
-#     # K.RandomCrop(size=(int(input_shape[0]*0.9), int(input_shape[1]*0.9)), p=0.5),
-#     # K.ColorJiggle(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1, p=0.1),
-#     # K.RandomPerspective(distortion_scale=0.5, p=0.1),
-#     # K.RandomHorizontalFlip(p=0.1),
-#     # K.RandomRotation(degrees=15, p=0.1),
-#     # K.RandomErasing(scale=(0.02, 0.2), ratio=(0.3, 3.3), p=0.1),
-#     data_keys=["input", "keypoints"],
-#     same_on_batch=True,
-# )
-
-
+transforms = K.AugmentationSequential(
+    K.RandomCrop(size=(int(input_shape[0]*0.9), int(input_shape[1]*0.9)), p=0.5),
+    K.ColorJiggle(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1, p=0.1),
+    K.RandomPerspective(distortion_scale=0.5, p=0.1),
+    K.RandomHorizontalFlip(p=0.1),
+    K.RandomRotation(degrees=15, p=0.1),
+    K.RandomErasing(scale=(0.02, 0.2), ratio=(0.3, 3.3), p=0.1),
+    data_keys=["input", "keypoints"],
+    same_on_batch=True,
+)
 resize = Resize(input_shape)
 normalize = Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
@@ -172,19 +170,20 @@ for step in tqdm(range(num_steps)):
     )
 
 
-
-    # ---- 归一化 gaze 到 [-1, 1]，并去掉多余维度 ----
-    EYE_W, EYE_H = 640, 480   # 这里改成你的原始标注分辨率
-    eye = torch.stack(
+    # IAN HACK
+    torch.stack(
         [
-            (eye[..., 0] / EYE_W) * 2 - 1,
-            (eye[..., 1] / EYE_H) * 2 - 1,
+            (eye[..., 0] / 640) * 2 - 1,  # Normalize x to [-1, 1]
+            (eye[..., 1] / 480) * 2 - 1,  # Normalize y to [-1, 1]
         ],
         dim=-1,
-    ).squeeze(1)   # (B,1,2) -> (B,2)
+    )
 
-    # ---- 图像预处理（无数据增强）----
+
     image = resize(image)
+    eye = denormalize_keypoints(eye, image.shape[-2:])
+    #image, eye = transforms(image, eye)
+    eye = normalize_keypoints(eye, image.shape[-2:]).squeeze(1)
     image = normalize(image)
     
     optimizer.zero_grad()

@@ -121,3 +121,17 @@ def sleep_no_left(puppet_bot_right, puppet_bot_middle):
     middle_puppet_sleep_position = (0, -1.85, 1.6, 0, 0.65, 0, 0)
     move_arms(all_bots, [right_puppet_sleep_position, middle_puppet_sleep_position], move_time=3)
 
+def sleep_middle(puppet_bot_middle):
+    all_bots = [ puppet_bot_middle]
+    for bot in all_bots:
+        torque_on(bot)
+
+    #left_puppet_sleep_position = (0, -1.7, 1.55, 0, 0.65, 0)
+    right_puppet_sleep_position = (0, -1.7, 1.55, 0, 0.65, 0)
+    middle_puppet_sleep_position = (0, -1.7, 1.55, 0, 0.65, 0, 0)
+    move_arms(all_bots, [ middle_puppet_sleep_position], move_time=3)
+
+    #left_puppet_sleep_position = (0, -1.85, 1.6, 0, 0.65, 0)
+    right_puppet_sleep_position = (0, -1.85, 1.6, 0, 0.65, 0)
+    middle_puppet_sleep_position = (0, -1.85, 1.6, 0, 0.65, 0, 0)
+    move_arms(all_bots, [middle_puppet_sleep_position], move_time=3)

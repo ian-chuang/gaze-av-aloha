@@ -200,7 +200,8 @@ def run_episode(dataset: LeRobotDataset, env: RealEnv, headset: WebRTCHeadset, e
             eye_frame['right_eye'][1] = (eye_frame['right_eye'][1] / r_h) * 2 - 1
             eye_data.append(eye_frame)
 
-        feedback.info = f"Episode {episode_idx}, Timestep: {str(step_idx).zfill(4)}\n{info}"
+        # feedback.info = f"Episode {episode_idx}, Timestep: {str(step_idx).zfill(4)}\n{info}"
+        feedback.info = f"Episode {episode_idx}, Timestep: {str(step_idx).zfill(4)}"
         headset.send_feedback(feedback) 
 
         time_until_next_step = REAL_DT - (time.time() - step_start)
@@ -361,9 +362,9 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Record simulation episodes for AV Aloha.")
     parser.add_argument("--num-episodes", type=int, default=80, help="Number of episodes to record.")
-    parser.add_argument("--repo-id", type=str, default="Jinyu220/shoot", help="Repository ID for the dataset.")
-    parser.add_argument("--root", type=str, default="outputs_shoot", help="Root directory for the dataset.")
-    parser.add_argument("--task", type=str, default="shoot", help="Task name for the dataset.")
+    parser.add_argument("--repo-id", type=str, default="Jinyu220/vedio_55", help="Repository ID for the dataset.")
+    parser.add_argument("--root", type=str, default="vedio_55", help="Root directory for the dataset.")
+    parser.add_argument("--task", type=str, default="vedio_55", help="Task name for the dataset.")
     parser.add_argument("--batch-size", type=int, default=2, help="Number of episodes to record before uploading to Hugging Face.")
     #parser.add_argument("--process", type=str, default="/home/jinyu/GitHub/gaze-av-aloha/gaze_av_aloha/robot_scripts/outputs_single_put_coinv3/progress.json", help="Number of episodes to record before uploading to Hugging Face.")
     args = parser.parse_args()

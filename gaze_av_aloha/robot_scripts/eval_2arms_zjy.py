@@ -87,6 +87,7 @@ def eval(args):
         input("Press Enter to start...")
 
         viz_videos = {}
+        raw_videos = {}
         for _ in tqdm(range(episode_len)):
             observation = preprocess_observation(observation)
             observation = {key: observation[key].to(device, non_blocking=True) for key in observation}
@@ -104,6 +105,10 @@ def eval(args):
                 images = cv2.cvtColor(images, cv2.COLOR_RGB2RGBA)
                 viz_videos.setdefault(key, []).append(images)
 
+            raw_image = observation["observation.images.left_eye_cam"].cpu().numpy()
+            raw_image = einops.rearrange(raw_image, "b c h w -> h (b w) c")
+            raw_image = (raw_image * 255).astype(np.uint8)
+            raw_videos.setdefault("raw", []).append(raw_image)
             # 执行动作
             action = action.to("cpu").numpy()
             actions = np.linspace(ctrl, action[0], n_interpolation_steps+1)[1:]
@@ -116,7 +121,7 @@ def eval(args):
             ctrl = observation['control']
 
         # 保存视频
-        video_dir = policy_paths[policy_idx] / "eval_distractors" / f"rollout_{i+8024}"
+        video_dir = policy_paths[policy_idx] / "eval_distractors" / f"rollout_distractor_jinyus_{i+2}"
         os.makedirs(str(video_dir), exist_ok=True)
         for key, video in viz_videos.items():
             video_path = video_dir / f"{key}.mp4"
@@ -124,6 +129,8 @@ def eval(args):
             imageio.mimsave(str(video_path), video, fps=round(FPS * speed_factor))
 
         print(f"Videos saved to {video_dir}")
+        raw_video_path = video_dir / f"raw_{i}.mp4"
+        imageio.mimsave(str(raw_video_path), raw_videos["raw"], fps=round(FPS * speed_factor/3.0))
         while True:
             is_success = input("Success? (y/n): ").strip().lower()
             if is_success in ('y', 'n'):
@@ -163,15 +170,24 @@ def main():
         '--policies', nargs='+',
         default=[
             #"/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-08-24_02-12-39_fov-unet-augementation_hangv4_ring/checkpoints/0000030000",
-            "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-08-23_17-55-15_fine-augementation_hang_ringv3/checkpoints/0000030000",
-            "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-08-19_17-30-56_hang_ring_resnet/checkpoints/0000030000",
+            #  "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-09-04_16-24-19_fov-unet-augementation_hang__Ian/checkpoints/0000030000",
+            # "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-09-04_17-22-32_hang_ring_resnet/checkpoints/0000030000",
+            # "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-08-16_19-30-35_hang_ring_dino/checkpoints/0000030000",
+            # "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-09-04_20-13-21_fov-unet-augementation_shoot_Ian/checkpoints/0000030000",
+            # "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-09-05_14-06-06_fine-augementation_shoot/checkpoints/0000030000"
+            "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-09-05_18-15-35_fine-augementation_toothbrush/checkpoints/0000030000",
+            "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-09-05_23-34-13_fov-unet-augementation_toothbrush_Ian/checkpoints/0000030000",
+    #    "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-09-09_16-46-32_fov-unet-augementation_hook_Ian/checkpoints/0000030000",
+        
+           #Z "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-08-19_17-30-56_hang_ring_resnet/checkpoints/0000030000",
+          # "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-09-04_17-22-32_hang_ring_resnet/checkpoints/0000030000",
      
             
         ],
         help='List of policy checkpoint dirs, will be cycled episode by episode'
     )
     parser.add_argument('--episode_len', type=int, default=150)
-    parser.add_argument('--num_episodes', type=int, default=30)
+    parser.add_argument('--num_episodes', type=int, default=100)
     args = vars(parser.parse_args())
 
     def shutdown():
