@@ -331,7 +331,8 @@ python sleep.py
 iantc104/av_aloha_sim_peg_insertion_v0
 
 cd /home/jinyu/GitHub/gaze-av-aloha/gym_av_aloha/scripts
-python convert_lerobot_to_avaloha.py --repo_id Jinyu220/shoot --start_episode 0 --end_episode 60
+python convert_lerobot_to_avaloha.py --repo_id Jinyu220/vedio --start_episode 0 --end_episode 6
+python convert_lerobot_to_avaloha.py --repo_id Jinyu220/shoot --start_episode 0 --end_episode 78
 python convert_lerobot_to_avaloha.py --repo_id Jinyu220/put_tube_singlev2 --start_episode 0 --end_episode 50
 python covert_data_to_Avaloha_skip.py --repo_id Jinyu220/put_coin_add_more --start_episode 0 --end_episode 100
 
@@ -451,6 +452,7 @@ python eval.py
   python train_gaze_model_argparse.py --trask put_coin_v2 --dataset Jinyu220/coin_2
   python train_gaze_model_argparse.py --trask hang_circle_v2 --dataset Jinyu220/circle_2
   python train_gaze_model_argparse.py --trask put_tube_v2 --dataset Jinyu220/put_tube_singlev2
+  python train_gaze_model_no_augmentation.py
 
   #  pretrained vit-unet
 
@@ -458,13 +460,13 @@ python eval.py
   python gaze_av_aloha/scripts/train.py \
   policy=foveated_vit_policy \
   policy.use_gaze_as_action=false \
-  policy.gaze_model_repo_id=Jinyu220/gaze_model_av_aloha_real_put_coin_v2 \
+  policy.gaze_model_repo_id=Jinyu220/gaze_model_av_aloha_real_NEW1_hook_circlev2 \
   policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_foveated_vit \
   policy.optimizer_lr_backbone=1e-5 \
   wandb.enable=true \
-  wandb.project=hang_augementation_put_coin_Ian_unet \
+  wandb.project=hang_augementation_hook_Ian_unet \
   wandb.entity=jinyuzou220-uc-davis \
-  wandb.job_name=fov-unet-augementation_put_coin_Ian \
+  wandb.job_name=fov-unet-augementation_hook_Ian \
   device=cuda
 
 
@@ -473,9 +475,9 @@ python eval.py
   policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_vit \
   policy.optimizer_lr_backbone=1e-5 \
   wandb.enable=true \
-  wandb.project=augementation_put_coinv3-fine \
+  wandb.project=augementation_toothbrush-fine \
   wandb.entity=jinyuzou220-uc-davis\
-  wandb.job_name=fine-augementation_put_coinv3 \
+  wandb.job_name=fine-augementation_toothbrush \
   device=cuda
 
 
@@ -497,11 +499,12 @@ python eval.py
   # train_dino
   cd Github/gaze-av-aloha
   python gaze_av_aloha/scripts/train.py \
+  policy=resnet_policy \
   wandb.enable=true \
-  wandb.project=hang_ring_resnet \
+  wandb.project=shoot_resnet_n1o \
   wandb.entity=jinyuzou220-uc-davis \
-  wandb.job_name=hang_ring_resnet \
-  device=cuda
+  wandb.job_name=shoot_resnet_n1o \
+  device=cuda:2
 
 
 

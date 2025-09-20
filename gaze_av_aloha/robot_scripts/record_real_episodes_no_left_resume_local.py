@@ -350,9 +350,9 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Record simulation episodes for AV Aloha.")
     parser.add_argument("--num-episodes", type=int, default=120, help="Number of episodes to record.")
-    parser.add_argument("--repo-id", type=str, default="Jinyu220/square_add_more", help="Repository ID for the dataset.")
-    parser.add_argument("--root", type=str, default="/home/jinyu/GitHub/dairy/temp_download_square", help="Root directory for the dataset.")
-    parser.add_argument("--task", type=str, default="square_add_more", help="Task name for the dataset.")
+    parser.add_argument("--repo-id", type=str, default="Jinyu220/put_toothbrush", help="Repository ID for the dataset.")
+    parser.add_argument("--root", type=str, default="/home/jinyu/GitHub/dairy/put_toothbrush", help="Root directory for the dataset.")
+    parser.add_argument("--task", type=str, default="put_toothbrush", help="Task name for the dataset.")
     parser.add_argument("--batch-size", type=int, default=2, help="Number of episodes to record before uploading to Hugging Face.")
     #parser.add_argument("--process", type=str, default="/home/jinyu/GitHub/gaze-av-aloha/gaze_av_aloha/robot_scripts/outputs_single_put_coinv3/progress.json", help="Number of episodes to record before uploading to Hugging Face.")
     args = parser.parse_args()

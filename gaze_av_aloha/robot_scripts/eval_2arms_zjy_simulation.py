@@ -232,13 +232,13 @@ def main():
             # "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-08-24_02-12-39_fov-unet-augementation_hangv4_ring/checkpoints/0000030000",
             # "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-08-23_17-55-15_fine-augementation_hang_ringv3/checkpoints/0000030000",
             # "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-08-19_17-30-56_hang_ring_resnet/checkpoints/0000030000",
-            "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-08-24_14-47-06_fov-unet-augementation_insertion_peg/checkpoints/0000006000"
+            "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-09-03_02-38-20_fov-unet-augementation_hang_ring_22_Ian/checkpoints/0000030000"
      
             
         ],
         help='List of policy checkpoint dirs, will be cycled episode by episode'
     )
-    parser.add_argument('--episode_len', type=int, default=200)
+    parser.add_argument('--episode_len', type=int, default=500)
     parser.add_argument('--num_episodes', type=int, default=30)
     args = vars(parser.parse_args())
 

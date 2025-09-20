@@ -24,5 +24,4 @@ cd /home/jinyu/GitHub/gaze-av-aloha/gaze_av_aloha/robot_scripts
 conda activate gym_av
 
 # Run the Python script
-# for simulation with dataset
-python eval_2arms_zjy_simulationcopy.py
+python sleep_no_left.py

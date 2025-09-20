@@ -100,7 +100,7 @@ def train(cfg: Config):
         repo_id=cfg.task.dataset_repo_id, 
         root=cfg.task.dataset_root,
         episodes=cfg.task.dataset_episodes,
-        image_transforms=transform_image,
+        #image_transforms=transform_image,
         delta_timestamps=delta_timestamps,
     )
     # print("cfg.task.dataset_root=",cfg.task.dataset_root)

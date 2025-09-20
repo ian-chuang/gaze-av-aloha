@@ -52,7 +52,7 @@ FPS = round(1 / REAL_DT)
 image_keys = ["observation.images.left_eye_cam", "observation.images.right_eye_cam"]
 eye_keys = ["left_eye", "right_eye"]
 state=["observation.state"]
-dataset = "Jinyu220/coin_2"
+dataset = "Jinyu220/circle_2"
 
 delta_timestamps = {
     k: [0] for k in image_keys + eye_keys+state
@@ -69,7 +69,7 @@ dataloader = DataLoader(
     num_workers=4,
 )
 ranges = [
-    [200,400],
+    [0,400],
 ]
 eval_dataset = Subset(dataset, sum([list(range(start, end)) for start, end in ranges], []))
 eval_dataloader = DataLoader(eval_dataset, batch_size=1, shuffle=False)
@@ -231,14 +231,15 @@ def main():
             # "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-08-24_02-12-39_fov-unet-augementation_hangv4_ring/checkpoints/0000030000",
             # "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-08-23_17-55-15_fine-augementation_hang_ringv3/checkpoints/0000030000",
             # "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-08-19_17-30-56_hang_ring_resnet/checkpoints/0000030000",
-            "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-08-24_03-01-51_fov-unet-augementation_put_coinv4/checkpoints/0000030000"
+            "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-09-04_16-24-19_fov-unet-augementation_hang__Ian/checkpoints/0000030000",
+            "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-09-04_17-22-32_hang_ring_resnet/checkpoints/0000030000",
         
      
             
         ],
         help='List of policy checkpoint dirs, will be cycled episode by episode'
     )
-    parser.add_argument('--episode_len', type=int, default=200)
+    parser.add_argument('--episode_len', type=int, default=300)
     parser.add_argument('--num_episodes', type=int, default=30)
     args = vars(parser.parse_args())
 
