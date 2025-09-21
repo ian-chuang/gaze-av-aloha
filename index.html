@@ -63,26 +63,27 @@
                                 <a target="_blank" href="https://ian-chuang.github.io/">Ian Chuang</a><sup>1</sup>,
                             </span>
                             <span class="author-block">
-                                <a target="_blank" href="https://andrewcwlee.github.io/">Andrew Lee</a><sup>2</sup>,
+                                <a target="_blank" href="">Jinyu Zou</a><sup>2</sup>,
+                            </span>
+                            <span class="author-block">
+                                <a target="_blank" href="https://andrewcwlee.github.io/">Andrew Lee</a><sup>3</sup>,
                             </span>
                             <span class="author-block">
                                 <a target="_blank" href="https://www.linkedin.com/in/gao-dechen/">Dechen
-                                    Gao</a><sup>2</sup>,
-                            </span>
-                            <span class="author-block">
-                                <a target="_blank" href="">Jinyu Zou</a><sup>3</sup>,
+                                    Gao</a><sup>3</sup>,
                             </span>
                             <span class="author-block">
                                 <a target="_blank"
                                     href="https://soltanilab.engineering.ucdavis.edu/people/iman-soltani">Iman
-                                    Soltani</a><sup>2</sup>,
+                                    Soltani</a><sup>3</sup>,
                             </span>
                         </div>
 
                         <div class="is-size-5 publication-authors">
                             <span class="author-block"><sup>1</sup>University of California, Berkeley </span>
-                            <span class="author-block"><sup>2</sup>University of California, Davis</span>
-                            <span class="author-block"><sup>3</sup>Tongji University</span>
+                            <span class="author-block"><sup>2</sup>Tongji University</span>
+                            <span class="author-block"><sup>3</sup>University of California, Davis</span>
+
                         </div>
 
                         <div class="column has-text-centered">
@@ -164,19 +165,21 @@
     </section> -->
 
     <section class="hero teaser">
-        <div class="container is-fullhd">
+        <div class="container is-max-desktop">
             <div class="hero-body">
                 <div class="container">
                     <div class="columns is-vcentered  is-centered">
-                        <img src="static/images/system.png" class="interpolation-image" />
+                        <div class="publication-video">
+                            <iframe src="https://www.youtube.com/embed/o55EAaySGWA" frameborder="0"
+                                allow="autoplay; encrypted-media" allowfullscreen></iframe>
+                        </div>
+                        </br>
                     </div>
                     <br>
                     <h2 class="subtitle has-text-centered">
-                        <span class="dperact">We introduce a human-inspired <b>foveated vision framework for robot
-                                learning</b>
-                            that integrates human gaze with foveated Vision Transformers and robotic control, enabling
-                            efficient and
-                            robust policies.</span>
+                        <span class="dperact">We introduce <b>GIAVA</b> (Gaze Integrated Active-Vision ALOHA), a human-inspired <b>foveated vision framework for robot
+                                learning</b> that integrates human gaze with foveated Vision Transformers and robotic
+                            control, enabling efficient and robust policies.</span>
                     </h2>
                 </div>
             </div>
@@ -191,28 +194,29 @@
                     <h2 class="title is-3">Abstract</h2>
                     <div class="content has-text-justified">
                         <p>
-                            Human vision is a highly active process driven by gaze, which directs attention and fixation
-                            to task-relevant regions and dramatically reduces visual processing. In contrast, robot
-                            learning systems typically rely on passive, uniform processing of raw camera images. In this
-                            work, we explore how incorporating human-like active gaze into robotic policies can enhance
-                            both efficiency and performance. We build on recent advances in foveated image processing
-                            and apply them to an Active Vision robot system that emulates both human head movement and
-                            eye tracking. Extending prior work on the AV-ALOHA robot simulation platform, we introduce a
-                            framework for simultaneously collecting eye-tracking data and robot demonstrations from a
-                            human operator as well as a simulation benchmark and dataset for training robot policies
-                            that incorporate human gaze. Given the widespread use of Vision Transformers (ViTs) in robot
-                            learning, we integrate gaze information into ViTs using a foveated patch tokenization scheme
-                            inspired by recent work in image segmentation. Compared to uniform patch tokenization, this
-                            significantly reduces the number of tokens—and thus computation—without sacrificing visual
-                            fidelity near regions of interest. We also explore two approaches to gaze imitation and
-                            prediction from human data. The first is a structured, hierarchical two-stage model that
-                            first predicts gaze, which is then used to guide foveation and action prediction. The second
-                            is a novel method that treats gaze as an extension of whole-body control, integrating it
-                            into the robot's action space such that the policy directly predicts both future gaze and
-                            actions in an end-to-end manner. Our results show that our method for foveated robot vision
-                            not only drastically reduces computational overhead, but also improves performance for high
-                            precision tasks and robustness to unseen distractors. Together, these findings suggest that
-                            human-inspired visual processing offers a useful inductive bias for robotic vision systems.
+                            Human vision is a highly active process driven by gaze, which directs attention to
+                            task-relevant regions through foveation, dramatically reducing visual processing. In
+                            contrast, robot learning systems typically rely on passive, uniform processing of raw camera
+                            images. In this work, we explore how incorporating human-like active gaze into robotic
+                            policies can enhance efficiency and robustness. We develop GIAVA (Gaze Integrated
+                            Active-Vision ALOHA), a robot vision system that emulates human head and neck movement, and
+                            gaze adjustment for foveated processing. Extending the AV-ALOHA robot platform, we introduce
+                            a framework for simultaneously collecting eye-tracking, perspective control, and robot
+                            manipulation demonstration data from a human operator. We also open-source a simulation
+                            benchmark and dataset for training robot policies that incorporate human gaze. Inspired by
+                            recent work in foveated image segmentation and given the widespread use of Vision
+                            Transformers (ViTs) in robot learning, we integrate gaze information into ViTs using a
+                            foveated patch tokenization scheme. Compared to uniform patch tokenization, this
+                            significantly reduces the number of tokens, and thus computation. For this purpose, we
+                            explore two approaches to gaze estimation: The first is a two-stage model that predicts gaze
+                            independently to guide foveation and subsequently action. The second integrates gaze into
+                            the action space, allowing the policy to jointly estimate gaze and actions end-to-end. Our
+                            results show that our method for foveated robot vision drastically reduces computational
+                            overhead, and enhances robustness to background distractors. Notably, on certain
+                            high-precision tasks, foveated vision also improves performance, as reflected in higher
+                            success rates. Together, these findings suggest that human-inspired foveated visual
+                            processing offers untapped potential and should be further considered as a useful inductive
+                            bias in robotic vision systems.
                         </p>
                     </div>
                 </div>
@@ -221,18 +225,22 @@
     </section>
 
     <section class="section hero">
-        <div class="container is-max-widescreen">
+        <div class="container is-max-desktop">
             <div class="columns is-centered has-text-centered">
                 <div class="column is-full-width">
                     <h2 class="title is-3">Data Collection</h2>
-                    <img src="static/images/data_collection.png" class="interpolation-image" style="max-width: 50em; width: 100%; height: auto" />
+                    <!-- <img src="static/images/data_collection.png" class="interpolation-image"
+                        style="max-width: 50em; width: 100%; height: auto" /> -->
+                    <video poster="" autoplay controls muted loop width="100%" style="object-fit: cover">
+                        <source src="static/videos/data_collection.mp4" type="video/mp4" />
+                    </video>
                     <br />
                     <br />
 
                     <div class="content has-text-justified">
 
                         <p>
-                            We use the <b>AV-ALOHA</b> simulation platform to collect bimanual robot demonstrations with
+                            We use the <b>GIAVA</b> platform to collect bimanual robot demonstrations with
                             human eye-tracking data. The robot streams stereo camera images to the VR headset for visual
                             feedback, while the headset transmits head and hand controller poses to control the robot,
                             along with human gaze data.
@@ -296,6 +304,21 @@
                         <h4 class="subtitle has-text-centered">Thread Needle</h4>
                     </div>
                 </div>
+
+                <div class="columns is-centered">
+                    <div class="column is-one-third">
+                        <video poster="" autoplay controls muted loop width="100%" style="object-fit: cover">
+                            <source src="static/videos/ball_demo.mp4" type="video/mp4" />
+                        </video>
+                        <h4 class="subtitle has-text-centered">Ball</h4>
+                    </div>
+                    <div class="column is-one-third">
+                        <video poster="" autoplay controls muted loop width="100%" style="object-fit: cover">
+                            <source src="static/videos/toothbrush_demo.mp4" type="video/mp4" />
+                        </video>
+                        <h4 class="subtitle has-text-centered">Toothbrush</h4>
+                    </div>
+                </div>
             </div>
         </div>
     </section>
@@ -352,7 +375,8 @@
                     <div class="content has-text-justified">
 
                         <p>
-                            (Left) The input image is divided into patches using either the standard uniform tokenization
+                            (Left) The input image is divided into patches using either the standard uniform
+                            tokenization
                             (Middle) or foveated tokenization (Right). Foveated tokenization mimics the human retina by
                             assigning high-resolution patches near the gaze point and lower resolution in the periphery.
                             This reduces the number of tokens from 324 (uniform) to just 20 (foveated), greatly lowering
@@ -413,6 +437,21 @@
                             <source src="static/videos/thread_fov.mp4" type="video/mp4" />
                         </video>
                         <h4 class="subtitle has-text-centered">Thread Needle</h4>
+                    </div>
+                </div>
+
+                <div class="columns is-centered">
+                    <div class="column is-one-third">
+                        <video poster="" autoplay controls muted loop width="100%" style="object-fit: cover">
+                            <source src="static/videos/ball_fov.mp4" type="video/mp4" />
+                        </video>
+                        <h4 class="subtitle has-text-centered">Ball</h4>
+                    </div>
+                    <div class="column is-one-third">
+                        <video poster="" autoplay controls muted loop width="100%" style="object-fit: cover">
+                            <source src="static/videos/toothbrush_fov.mp4" type="video/mp4" />
+                        </video>
+                        <h4 class="subtitle has-text-centered">Toothbrush</h4>
                     </div>
                 </div>
             </div>
