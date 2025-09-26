@@ -145,44 +145,17 @@ def eval(args):
         print('Failed episodes:', failed_episodes)
         input("Press Enter to reset env...")
 
-'''
-/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-08-17_16-25-02_put_coin_resnet
-/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-08-18_23-27-40_fine-hang_coin_fine_v4
-/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-08-14_16-31-53_fov-unet-coinv2
-/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-08-17_17-36-04_put_coin_dino
 
-
-"/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-08-19_17-30-56_hang_ring_resnet/checkpoints/0000030000",
-            "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-08-18_12-38-39_fine-hang_cirle_v4/checkpoints/0000030000",
-            "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-08-14_17-58-17_fov-unet-hang_ring/checkpoints/0000030000",
-
-            
-hang_ring:
-/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-08-22_23-04-38_fov-unet-augementation_hang_ring/checkpoints/0000030000
-/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-08-23_00-00-55_fine-augementation_hang_ring/checkpoints/0000030000
-/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-08-19_17-30-56_hang_ring_resnet/checkpoints/0000030000
-
-'''
 def main():
     import argparse, traceback, rospy
     parser = argparse.ArgumentParser()
     parser.add_argument(
         '--policies', nargs='+',
         default=[
-            #"/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-08-24_02-12-39_fov-unet-augementation_hangv4_ring/checkpoints/0000030000",
-            #  "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-09-04_16-24-19_fov-unet-augementation_hang__Ian/checkpoints/0000030000",
-            # "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-09-04_17-22-32_hang_ring_resnet/checkpoints/0000030000",
-            # "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-08-16_19-30-35_hang_ring_dino/checkpoints/0000030000",
-            # "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-09-04_20-13-21_fov-unet-augementation_shoot_Ian/checkpoints/0000030000",
-            # "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-09-05_14-06-06_fine-augementation_shoot/checkpoints/0000030000"
-            "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-09-05_18-15-35_fine-augementation_toothbrush/checkpoints/0000030000",
-            "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-09-05_23-34-13_fov-unet-augementation_toothbrush_Ian/checkpoints/0000030000",
-    #    "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-09-09_16-46-32_fov-unet-augementation_hook_Ian/checkpoints/0000030000",
-        
-           #Z "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-08-19_17-30-56_hang_ring_resnet/checkpoints/0000030000",
-          # "/home/jinyu/GitHub/gaze-av-aloha/outputs/2025-09-04_17-22-32_hang_ring_resnet/checkpoints/0000030000",
-     
-            
+           
+            "/gaze-av-aloha/outputs/2025-09-05_18-15-35_fine-augementation_toothbrush/checkpoints/0000030000",
+            "/gaze-av-aloha/outputs/2025-09-05_23-34-13_fov-unet-augementation_toothbrush_Ian/checkpoints/0000030000",
+
         ],
         help='List of policy checkpoint dirs, will be cycled episode by episode'
     )
