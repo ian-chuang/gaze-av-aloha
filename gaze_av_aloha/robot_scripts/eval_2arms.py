@@ -159,7 +159,7 @@ def main():
         --policy /home/jinyu/GitHub/gaze-av-aloha/outputs/2025-07-27_23-18-17_foveated_put_tube1_train_ZJY/checkpoints/0000030000 \
         --episode_len 300 \
         --num_episodes 10
-        2025-08-11_19-29-35_fine-ring
+  
 
     """
 
