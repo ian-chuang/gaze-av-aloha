@@ -1,7 +1,7 @@
 
 import numpy as np
 import mujoco
-from transform_utils import exp2mat, adjoint, within_pose_threshold, pose2mat, wxyz_to_xyzw
+from .transform_utils import exp2mat, adjoint, within_pose_threshold, pose2mat, wxyz_to_xyzw
 from numba import jit, prange
 
 def create_fk_fn(physics, joints, eef_site):

@@ -3,8 +3,9 @@ import numpy as np
 from dm_control import mjcf
 import gymnasium as gym
 from gymnasium import spaces
-from data_collection_scripts.constants import (
-    XML_DIR, REAL_DT, 
+from gaze_av_aloha.data_collection_scripts.constants import (
+    XML_DIR,
+    REAL_DT,
     RIGHT_GRIPPER_JOINT_UNNORMALIZE_FN,
     RIGHT_GRIPPER_JOINT_NORMALIZE_FN,
     RIGHT_GRIPPER_VELOCITY_NORMALIZE_FN,
@@ -15,15 +16,20 @@ from data_collection_scripts.constants import (
     RIGHT_MASTER_GRIPPER_JOINT_OPEN,
     RIGHT_MASTER_GRIPPER_JOINT_CLOSE,
     RIGHT_JOINT_NAMES,
-    RIGHT_ACTUATOR_NAMES,
     RIGHT_EEF_SITE,
 )
-from image_recorders import ROSImageRecorder
-from robot_utils import setup_puppet_bot, move_arms, move_grippers, sleep, torque_off, torque_on
-from transform_utils import xyzw_to_wxyz, mat2pose
+from gaze_av_aloha.robot.cameras import ROSImageRecorder
+from gaze_av_aloha.robot.robot import (
+    setup_puppet_bot,
+    move_arms,
+    move_grippers,
+    torque_off,
+    torque_on,
+)
+from gaze_av_aloha.data_collection_scripts.transform_utils import xyzw_to_wxyz, mat2pose
 from interbotix_xs_modules.arm import InterbotixManipulatorXS
 from interbotix_xs_msgs.msg import JointSingleCommand
-from kinematics import create_fk_fn
+from gaze_av_aloha.data_collection_scripts.kinematics import create_fk_fn
 import mujoco
 import os
 import rospy
@@ -58,7 +64,6 @@ class RealEnv(gym.Env):
         self._mjcf_root = mjcf.from_path(os.path.join(XML_DIR, 'aloha_real.xml'))
         self._physics = mjcf.Physics.from_mjcf_model(self._mjcf_root) 
         self._right_joints = [self._mjcf_root.find('joint', name) for name in RIGHT_JOINT_NAMES]
-        self._right_actuators = [self._mjcf_root.find('actuator', name) for name in RIGHT_ACTUATOR_NAMES]
         self._right_eef_site = self._mjcf_root.find('site', RIGHT_EEF_SITE)
         
         self._right_fk_fn = create_fk_fn(self._physics, self._right_joints, self._right_eef_site)
@@ -68,7 +73,6 @@ class RealEnv(gym.Env):
 
         # setup bot
         self.right_bot = InterbotixManipulatorXS(robot_model="vx300s", group_name="arm", gripper_name="gripper", robot_name=f'puppet_right', init_node=False)
-        sleep(self.right_bot)
         setup_puppet_bot(self.right_bot)
         
         # cmd buffer
@@ -218,17 +222,27 @@ def get_master_bot_action(master_bot_right):
 
 def main():
     # source of data
-    master_bot_right = InterbotixManipulatorXS(robot_model="wx250s", group_name="arm", gripper_name="gripper",
-                                               robot_name=f'master_right', init_node=False)
+    master_bot_right = InterbotixManipulatorXS(
+        robot_model="wx250s",
+        group_name="arm",
+        gripper_name="gripper",
+        robot_name=f'master_right',
+        init_node=False
+    )
 
     # setup the environment
+    print("Setting up the environment...")
     env = RealEnv(init_node=False)
+    print("Environment set up.")
 
     reset_env(env, master_bot_right)
+    print("Environment reset.")
 
     reset_master_arm(master_bot_right)
+    print("Master arm reset.")
 
     wait_for_user(master_bot_right)
+    print("User ready.")
 
     # run 
     print(f"Starting Teleoperation...")
