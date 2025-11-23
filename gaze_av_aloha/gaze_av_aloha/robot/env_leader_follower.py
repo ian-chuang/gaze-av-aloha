@@ -72,7 +72,6 @@ class RealEnv(gym.Env):
         self.image_recorder = ROSImageRecorder(
             init_node=init_node,
             camera_names=['cam_high', 'cam_right_wrist'],
-            wait_for_messages=False,
         )
 
         # setup bot
@@ -201,7 +200,6 @@ def wait_for_user(master_bot_right):
     # disable torque for only gripper joint of master robot to allow user movement
     master_bot_right.dxl.robot_torque_enable("single", "gripper", False)
 
-    last_log = 0
     while True:
         start_time = time.time()
 
@@ -211,11 +209,6 @@ def wait_for_user(master_bot_right):
         # break once user closes the gripper past ~90% closed
         if gripper_pos_right < right_master_gripper_almost_close or gripper_norm < 0.2:
             break
-
-        # periodic feedback so user knows the current reading
-        if time.time() - last_log > 1.0:
-            print(f"Waiting for master gripper to close... current={gripper_pos_right} (normalized {gripper_norm}), target<{right_master_gripper_almost_close}")
-            last_log = time.time()
 
         time_until_next_step = REAL_DT - (time.time() - start_time)
         time.sleep(max(0, time_until_next_step))

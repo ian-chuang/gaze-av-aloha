@@ -1,10 +1,13 @@
-import numpy as np
-import time
 import os
-import torch
-import rospy
-import traceback
 import argparse
+import select
+import sys
+import time
+import traceback
+
+import numpy as np
+import rospy
+import torch
 from interbotix_xs_modules.arm import InterbotixManipulatorXS
 
 # Env and Constants
@@ -17,36 +20,34 @@ from gaze_av_aloha.robot.env_leader_follower import (
     reset_env as reset_puppet_env
 )
 
-# Headset (Only for Feedback/Buttons, not tracking)
-from gym_av_aloha.vr.headset import WebRTCHeadset
-from gym_av_aloha.vr.headset_utils import HeadsetFeedback
-
 # Dataset
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 
 
-def run_episode(dataset: LeRobotDataset, env: RealEnv, headset: WebRTCHeadset, 
-                master_bot_right, episode_idx: int, task: str):
+def _user_requested_stop():
+    """Return True if user pressed Enter in the terminal."""
+    r, _, _ = select.select([sys.stdin], [], [], 0)
+    if r:
+        sys.stdin.readline()
+        return True
+    return False
+
+
+def run_episode(dataset: LeRobotDataset, env: RealEnv, master_bot_right, episode_idx: int, task: str):
     """
     Runs a single data recording episode using Leader-Follower teleoperation.
     """
-    feedback = HeadsetFeedback()
-    
     # 1. Reset Puppet and Master
     reset_puppet_env(env, master_bot_right)
     reset_master_arm(master_bot_right)
 
     # 2. Wait for user to trigger start (Close Master Gripper)
-    feedback.info = f"Episode {episode_idx}: Close RIGHT Master Gripper to start."
-    headset.send_feedback(feedback)
-    
-    # This function blocks until user closes the gripper
+    print(f"Episode {episode_idx}: Close RIGHT master gripper to start recording.")
+    print("Press Enter in this terminal to stop the episode when you are done.")
     wait_for_user(master_bot_right) 
 
     # 3. Start Recording Loop
     print(f"Starting episode {episode_idx}...")
-    feedback.info = f"Recording Episode {episode_idx}... (Press 'A' on headset to Stop)"
-    headset.send_feedback(feedback)
 
     step_idx = 0
     
@@ -59,6 +60,9 @@ def run_episode(dataset: LeRobotDataset, env: RealEnv, headset: WebRTCHeadset,
     while True:
         step_start = time.time()
 
+        wrist_img = obs['images']['wrist_cam_right']
+        overhead_img = obs['images']['overhead_cam']
+
         # --- Data Collection ---
         # Construct the frame for LeRobotDataset
         # Note: RealEnv (Single Arm) returns 7-dim vectors for state/action
@@ -66,8 +70,8 @@ def run_episode(dataset: LeRobotDataset, env: RealEnv, headset: WebRTCHeadset,
             'action': torch.tensor(action, dtype=torch.float32),
             'observation.state': torch.tensor(obs['joints']['position'], dtype=torch.float32),
             'observation.velocity': torch.tensor(obs['joints']['velocity'], dtype=torch.float32),
-            'observation.images.wrist_cam_right': obs['images']['wrist_cam_right'],
-            'observation.images.overhead_cam': obs['images']['overhead_cam'],
+            'observation.images.wrist_cam_right': wrist_img,
+            'observation.images.overhead_cam': overhead_img,
         }
         dataset.add_frame(frame, task=task)
 
@@ -79,18 +83,9 @@ def run_episode(dataset: LeRobotDataset, env: RealEnv, headset: WebRTCHeadset,
         action = get_master_bot_action(master_bot_right)
 
         # --- Stop Condition ---
-        # Check headset buttons to stop recording
-        headset_data = headset.receive_data()
-        if headset_data is not None:
-            # Press 'A' (r_button_one) or 'X' (l_button_one) to stop
-            if headset_data.r_button_one or headset_data.l_button_one:
-                print("Episode finished by user.")
-                break
-
-        # --- Feedback ---
-        if step_idx % 10 == 0:
-            feedback.info = f"Recording Ep {episode_idx}: Step {step_idx}"
-            headset.send_feedback(feedback)
+        if _user_requested_stop():
+            print("Episode finished by user.")
+            break
 
         # --- Timing ---
         time_until_next_step = REAL_DT - (time.time() - step_start)
@@ -100,29 +95,18 @@ def run_episode(dataset: LeRobotDataset, env: RealEnv, headset: WebRTCHeadset,
     
     return True
 
-def confirm_episode(headset: WebRTCHeadset, episode_idx):
-    """Waits for user confirmation to save or discard the episode."""
-    feedback = HeadsetFeedback()
-    print("Waiting for user to confirm...")
-    
+def confirm_episode(episode_idx):
+    """Ask the user whether to keep the episode."""
     while True:
-        start_time = time.time()
-        headset_data = headset.receive_data()
-        
-        if headset_data is not None:
-            # Left Hand 'X' button to Save/Next
-            if headset_data.l_button_one == True: 
-                return True
-            # Left Hand 'Y' button to Discard/Redo
-            elif headset_data.l_button_two == True: 
-                return False       
-               
-        feedback.info = f"Ep {episode_idx} Done.\nPress 'X' to Save/Next.\nPress 'Y' to Discard/Redo."
-        headset.send_feedback(feedback)
-        
-        time.sleep(0.02)
+        resp = input(f"Episode {episode_idx} complete. Save? [Y/n]: ").strip().lower()
+        if resp in ("", "y", "yes"):
+            return True
+        if resp in ("n", "no"):
+            return False
+        print("Please enter 'y' or 'n'.")
 
 def main(cfg):
+    rospy.init_node("leader_follower", anonymous=True)
     print(f"Starting Leader-Follower recording (Right Arm Only), FPS: {FPS}")
     print(cfg)
     
@@ -135,40 +119,44 @@ def main(cfg):
         init_node=False
     )
 
-    current_episode = 0
     num_cameras = 2 # Right Wrist + Overhead
-    
-    # Create Dataset with Single-Arm Structure (7 DOF)
-    dataset = LeRobotDataset.create(
-        repo_id=cfg['repo_id'],
-        root=os.path.join(cfg['root'], cfg['repo_id']),
-        fps=FPS,
-        features={
-            "observation.images.wrist_cam_right": {
-                "dtype": "video", "shape": (480, 640, 3), "names": ["height", "width", "channel"],
+    dataset_root = os.path.join(cfg['root'], cfg['repo_id'])
+
+    # Create or resume dataset
+    if os.path.exists(dataset_root):
+        print(f"Dataset exists. Resuming from {dataset_root}")
+        dataset = LeRobotDataset(repo_id=cfg['repo_id'], root=dataset_root)
+        dataset.start_image_writer(num_threads=num_cameras, num_processes=4 * num_cameras)
+    else:
+        dataset = LeRobotDataset.create(
+            repo_id=cfg['repo_id'],
+            root=dataset_root,
+            fps=FPS,
+            features={
+                "observation.images.wrist_cam_right": {
+                    "dtype": "video", "shape": (480, 640, 3), "names": ["height", "width", "channel"],
+                },
+                "observation.images.overhead_cam": {
+                    "dtype": "video", "shape": (480, 640, 3), "names": ["height", "width", "channel"],
+                },
+                "observation.state": {
+                    "dtype": "float32", "shape": (7,), "names": None, # 7 DOF
+                },
+                "observation.velocity": {
+                    "dtype": "float32", "shape": (7,), "names": None, # 7 DOF
+                },
+                "action": {
+                    "dtype": "float32", "shape": (7,), "names": None, # 7 DOF
+                },
             },
-            "observation.images.overhead_cam": {
-                "dtype": "video", "shape": (480, 640, 3), "names": ["height", "width", "channel"],
-            },
-            "observation.state": {
-                "dtype": "float32", "shape": (7,), "names": None, # 7 DOF
-            },
-            "observation.velocity": {
-                "dtype": "float32", "shape": (7,), "names": None, # 7 DOF
-            },
-            "action": {
-                "dtype": "float32", "shape": (7,), "names": None, # 7 DOF
-            },
-        },
-        image_writer_threads=num_cameras,
-        image_writer_processes=4 * num_cameras,
-    )
+            image_writer_threads=num_cameras,
+            image_writer_processes=4 * num_cameras,
+        )
+
+    current_episode = dataset.num_episodes
+    print(f"Resuming at episode index {current_episode}.")
 
     if dataset.num_episodes < cfg['num_episodes']:
-        # Headset used for text feedback and button inputs only
-        headset = WebRTCHeadset()
-        headset.run_in_thread()
-
         # RealEnv (Right Arm Only)
         env = RealEnv(init_node=False) 
 
@@ -179,14 +167,14 @@ def main(cfg):
             episode_idx = current_episode
             
             # Run Recording
-            ok = run_episode(dataset, env, headset, master_bot_right, episode_idx, cfg['task'])
+            ok = run_episode(dataset, env, master_bot_right, episode_idx, cfg['task'])
 
             if not ok:
                 dataset.clear_episode_buffer()
                 continue
 
             # Confirm Save/Discard
-            ok = confirm_episode(headset, episode_idx)
+            ok = confirm_episode(episode_idx)
 
             if not ok:
                 dataset.clear_episode_buffer()
@@ -209,7 +197,7 @@ if __name__ == "__main__":
     # ROS Setup
     parser = argparse.ArgumentParser(description="Record simulation episodes for AV Aloha (Leader-Follower Right Arm).")
     parser.add_argument("--num-episodes", type=int, default=80, help="Number of episodes to record.")
-    parser.add_argument("--repo-id", type=str, default="Jinyu220/vedio_55", help="Repository ID for the dataset.")
+    parser.add_argument("--repo-id", type=str, default="iantc104/vedio_55", help="Repository ID for the dataset.")
     parser.add_argument("--root", type=str, default="vedio_55", help="Root directory for the dataset.")
     parser.add_argument("--task", type=str, default="vedio_55", help="Task name for the dataset.")
     parser.add_argument("--batch-size", type=int, default=2, help="Number of episodes to record before uploading.")
