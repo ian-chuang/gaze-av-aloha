@@ -157,7 +157,10 @@ class ROSImageRecorder:
     def __init__(self, 
                  camera_names=['cam_high', 'cam_low', 'cam_left_wrist', 'cam_right_wrist'],
                  init_node=True, 
-                 is_debug=False):
+                 is_debug=False,
+                 wait_for_messages=True,
+                 wait_timeout=1.0,
+                 raise_on_timeout=True):
         self.is_debug = is_debug
         self.bridge = CvBridge()
         self.camera_names = camera_names
@@ -172,7 +175,13 @@ class ROSImageRecorder:
             if self.is_debug:
                 setattr(self, f'{cam_name}_timestamps', deque(maxlen=50))
 
-            rospy.wait_for_message(f"/{cam_name}/color/image_raw", Image, timeout=1.0)
+            if wait_for_messages:
+                try:
+                    rospy.wait_for_message(f"/{cam_name}/color/image_raw", Image, timeout=wait_timeout)
+                except rospy.exceptions.ROSException:
+                    rospy.logwarn(f"Timeout waiting for /{cam_name}/color/image_raw (waited {wait_timeout}s). Continuing without data.")
+                    if raise_on_timeout:
+                        raise
 
     def image_cb(self, cam_name, data):
         setattr(self, f'{cam_name}_image', self.bridge.imgmsg_to_cv2(data, desired_encoding='passthrough'))

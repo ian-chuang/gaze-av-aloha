@@ -69,7 +69,11 @@ class RealEnv(gym.Env):
         self._right_fk_fn = create_fk_fn(self._physics, self._right_joints, self._right_eef_site)
         
         # setup ROS image recorder
-        self.image_recorder = ROSImageRecorder(init_node=init_node, camera_names=['cam_high', 'cam_right_wrist'])
+        self.image_recorder = ROSImageRecorder(
+            init_node=init_node,
+            camera_names=['cam_high', 'cam_right_wrist'],
+            wait_for_messages=False,
+        )
 
         # setup bot
         self.right_bot = InterbotixManipulatorXS(robot_model="vx300s", group_name="arm", gripper_name="gripper", robot_name=f'puppet_right', init_node=False)
@@ -197,13 +201,21 @@ def wait_for_user(master_bot_right):
     # disable torque for only gripper joint of master robot to allow user movement
     master_bot_right.dxl.robot_torque_enable("single", "gripper", False)
 
+    last_log = 0
     while True:
         start_time = time.time()
 
         gripper_pos_right = master_bot_right.dxl.joint_states.position[6]
+        gripper_norm = RIGHT_MASTER_GRIPPER_JOINT_NORMALIZE_FN(gripper_pos_right)
 
-        if (gripper_pos_right < right_master_gripper_almost_close):
+        # break once user closes the gripper past ~90% closed
+        if gripper_pos_right < right_master_gripper_almost_close or gripper_norm < 0.2:
             break
+
+        # periodic feedback so user knows the current reading
+        if time.time() - last_log > 1.0:
+            print(f"Waiting for master gripper to close... current={gripper_pos_right} (normalized {gripper_norm}), target<{right_master_gripper_almost_close}")
+            last_log = time.time()
 
         time_until_next_step = REAL_DT - (time.time() - start_time)
         time.sleep(max(0, time_until_next_step))
@@ -221,6 +233,8 @@ def get_master_bot_action(master_bot_right):
     return action
 
 def main():
+    rospy.init_node("leader_follower", anonymous=True)
+
     # source of data
     master_bot_right = InterbotixManipulatorXS(
         robot_model="wx250s",
