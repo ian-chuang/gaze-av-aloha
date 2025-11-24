@@ -4,6 +4,9 @@ import select
 import sys
 import time
 import traceback
+import threading
+import queue
+from typing import Optional
 
 import numpy as np
 import rospy
@@ -22,6 +25,68 @@ from gaze_av_aloha.robot.env_leader_follower import (
 
 # Dataset
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+try:
+    from sound_play.libsoundplay import SoundClient
+except ImportError:
+    SoundClient = None
+
+# Global sound client reused between resets
+_sound_client: Optional[SoundClient] = None
+
+
+def play_reset_sound():
+    """Play an audible cue when reset completes; fall back to a terminal bell."""
+    global _sound_client
+    if SoundClient is None:
+        print("\a", end="", flush=True)
+        return
+    try:
+        if _sound_client is None:
+            _sound_client = SoundClient(blocking=False)
+            time.sleep(0.1)
+        _sound_client.say("reset")
+    except Exception:
+        print("\a", end="", flush=True)
+
+
+class BackgroundUploader:
+    """Upload dataset batches without blocking the main recording loop."""
+
+    def __init__(self, dataset: LeRobotDataset):
+        self.dataset = dataset
+        self.queue: queue.Queue = queue.Queue()
+        self.thread = threading.Thread(target=self._worker, daemon=True)
+        self.thread.start()
+
+    def submit(self, batch_start: int, batch_end: int):
+        """Queue an upload for a batch (for logging only)."""
+        self.queue.put((batch_start, batch_end))
+
+    def flush(self):
+        """Wait for all queued uploads to finish."""
+        self.queue.join()
+
+    def close(self):
+        """Stop the worker thread."""
+        self.queue.put(None)
+        self.queue.join()
+        self.thread.join()
+
+    def _worker(self):
+        while True:
+            task = self.queue.get()
+            if task is None:
+                self.queue.task_done()
+                break
+            batch_start, batch_end = task
+            try:
+                print(f"[Uploader] Uploading episodes {batch_start} to {batch_end}...")
+                self.dataset.push_to_hub()
+                print(f"[Uploader] Upload complete for episodes {batch_start} to {batch_end}.")
+            except Exception as e:
+                print(f"[Uploader] Upload failed for episodes {batch_start} to {batch_end}: {e}")
+            finally:
+                self.queue.task_done()
 
 
 def _user_requested_stop():
@@ -40,6 +105,7 @@ def run_episode(dataset: LeRobotDataset, env: RealEnv, master_bot_right, episode
     # 1. Reset Puppet and Master
     reset_puppet_env(env, master_bot_right)
     reset_master_arm(master_bot_right)
+    play_reset_sound()
 
     # 2. Wait for user to trigger start (Close Master Gripper)
     print(f"Episode {episode_idx}: Close RIGHT master gripper to start recording.")
@@ -154,6 +220,7 @@ def main(cfg):
         )
 
     current_episode = dataset.num_episodes
+    uploader = BackgroundUploader(dataset)
     print(f"Resuming at episode index {current_episode}.")
 
     if dataset.num_episodes < cfg['num_episodes']:
@@ -188,18 +255,22 @@ def main(cfg):
 
             # Upload to Hugging Face (Optional batching)
             if current_episode % cfg['batch_size'] == 0:
-                dataset.push_to_hub()
-                print(f"Uploaded episodes {current_episode - cfg['batch_size']} to {current_episode - 1} to Hugging Face.")
+                batch_start = current_episode - cfg['batch_size']
+                batch_end = current_episode - 1
+                uploader.submit(batch_start, batch_end)
+                print(f"Queued upload for episodes {batch_start} to {batch_end}.")
 
+    uploader.flush()
+    uploader.close()
     print("Data collection complete.")
 
 if __name__ == "__main__":
     # ROS Setup
     parser = argparse.ArgumentParser(description="Record simulation episodes for AV Aloha (Leader-Follower Right Arm).")
     parser.add_argument("--num-episodes", type=int, default=80, help="Number of episodes to record.")
-    parser.add_argument("--repo-id", type=str, default="iantc104/vedio_55", help="Repository ID for the dataset.")
-    parser.add_argument("--root", type=str, default="vedio_55", help="Root directory for the dataset.")
-    parser.add_argument("--task", type=str, default="vedio_55", help="Task name for the dataset.")
+    parser.add_argument("--repo-id", type=str, default="iantc104/datasets_leader", help="Repository ID for the dataset.")
+    parser.add_argument("--root", type=str, default="datasets_leader", help="Root directory for the dataset.")
+    parser.add_argument("--task", type=str, default="toothbrush", help="Task name for the dataset.")
     parser.add_argument("--batch-size", type=int, default=2, help="Number of episodes to record before uploading.")
     args = parser.parse_args()
     
