@@ -6,7 +6,8 @@ import time
 import traceback
 import threading
 import queue
-from typing import Optional
+import inspect
+from typing import Optional, Callable
 
 import numpy as np
 import rospy
@@ -97,6 +98,82 @@ class BackgroundUploader:
                 self.queue.task_done()
 
 
+class BackgroundEpisodeWorker:
+    """
+    Persist episodes and handle uploads in the background so recording can start immediately.
+    """
+
+    def __init__(
+        self,
+        dataset: LeRobotDataset,
+        dataset_factory: Callable[[], LeRobotDataset],
+    ):
+        self.dataset = dataset
+        self.dataset_factory = dataset_factory
+        self.queue: queue.Queue = queue.Queue()
+        self._save_supports_buffer = self._detect_buffer_arg(dataset)
+        # Use a dedicated dataset handle for saving if we cannot pass buffers directly.
+        self._save_dataset = dataset if self._save_supports_buffer else self.dataset_factory()
+        self.thread = threading.Thread(target=self._worker, daemon=True)
+        self.thread.start()
+
+    def submit_save(self, episode_buffer, episode_idx: int):
+        self.queue.put(("save", episode_buffer, episode_idx))
+
+    def submit_upload(self, batch_start: int, batch_end: int):
+        self.queue.put(("upload", batch_start, batch_end))
+
+    def flush(self):
+        self.queue.join()
+
+    def close(self):
+        self.queue.put(None)
+        self.queue.join()
+        self.thread.join()
+
+    def _detect_buffer_arg(self, dataset: LeRobotDataset) -> bool:
+        try:
+            sig = inspect.signature(dataset.save_episode)
+            return "episode_buffer" in sig.parameters
+        except Exception:
+            return False
+
+    def _worker(self):
+        while True:
+            task = self.queue.get()
+            if task is None:
+                self.queue.task_done()
+                break
+            kind, *payload = task
+            try:
+                if kind == "save":
+                    episode_buffer, episode_idx = payload
+                    self._save_episode(episode_buffer, episode_idx)
+                elif kind == "upload":
+                    batch_start, batch_end = payload
+                    print(f"[Uploader] Uploading episodes {batch_start} to {batch_end}...")
+                    self._save_dataset.push_to_hub()
+                    print(f"[Uploader] Upload complete for episodes {batch_start} to {batch_end}.")
+            except Exception as e:
+                print(f"[BackgroundWorker] Task {kind} failed: {e}")
+            finally:
+                self.queue.task_done()
+
+    def _save_episode(self, episode_buffer, episode_idx: int):
+        try:
+            if self._save_supports_buffer:
+                self._save_dataset.save_episode(episode_buffer=episode_buffer)
+            else:
+                # Fallback for older APIs that rely on episode_buffer on the instance.
+                prev_buffer = getattr(self._save_dataset, "episode_buffer", None)
+                self._save_dataset.episode_buffer = episode_buffer
+                self._save_dataset.save_episode()
+                self._save_dataset.episode_buffer = prev_buffer
+            print(f"Episode {episode_idx} saved in background.")
+        except Exception as e:
+            print(f"[BackgroundWorker] Save failed for episode {episode_idx}: {e}")
+
+
 def _user_requested_stop():
     """Return True if user pressed Enter in the terminal."""
     r, _, _ = select.select([sys.stdin], [], [], 0)
@@ -111,8 +188,14 @@ def run_episode(dataset: LeRobotDataset, env: RealEnv, master_bot_right, episode
     Runs a single data recording episode using Leader-Follower teleoperation.
     """
     # 1. Reset Puppet and Master
-    reset_puppet_env(env, master_bot_right)
-    reset_master_arm(master_bot_right)
+    reset_threads = [
+        threading.Thread(target=reset_puppet_env, args=(env, master_bot_right)),
+        threading.Thread(target=reset_master_arm, args=(master_bot_right,)),
+    ]
+    for t in reset_threads:
+        t.start()
+    for t in reset_threads:
+        t.join()
     play_reset_sound()
 
     # 2. Wait for user to trigger start (Close Master Gripper)
@@ -197,12 +280,13 @@ def main(cfg):
 
     num_cameras = 2 # Right Wrist + Overhead
     dataset_root = os.path.join(cfg['root'], cfg['repo_id'])
+    image_writer_config = {"num_threads": num_cameras, "num_processes": 4 * num_cameras}
 
     # Create or resume dataset
     if os.path.exists(dataset_root):
         print(f"Dataset exists. Resuming from {dataset_root}")
         dataset = LeRobotDataset(repo_id=cfg['repo_id'], root=dataset_root)
-        dataset.start_image_writer(num_threads=num_cameras, num_processes=4 * num_cameras)
+        dataset.start_image_writer(**image_writer_config)
     else:
         dataset = LeRobotDataset.create(
             repo_id=cfg['repo_id'],
@@ -230,9 +314,15 @@ def main(cfg):
         )
 
     current_episode = dataset.num_episodes
-    uploader = BackgroundUploader(dataset)
     dataset.episode_buffer = dataset.create_episode_buffer(episode_index=current_episode)
     print(f"Resuming at episode index {current_episode}.")
+
+    def dataset_factory_for_saving():
+        ds = LeRobotDataset(repo_id=cfg['repo_id'], root=dataset_root)
+        ds.start_image_writer(**image_writer_config)
+        return ds
+
+    background_worker = BackgroundEpisodeWorker(dataset, dataset_factory_for_saving)
 
     if current_episode < cfg['num_episodes']:
         # RealEnv (Right Arm Only)
@@ -261,9 +351,10 @@ def main(cfg):
                 dataset.episode_buffer = dataset.create_episode_buffer(episode_index=current_episode)
                 continue
 
-            # Save to Disk
-            dataset.save_episode()
-            print(f"Episode {episode_idx} saved.")
+            # Save to Disk in the background
+            episode_buffer_to_save = dataset.episode_buffer
+            background_worker.submit_save(episode_buffer_to_save, episode_idx)
+            print(f"Episode {episode_idx} queued for saving.")
             current_episode += 1
             dataset.episode_buffer = dataset.create_episode_buffer(episode_index=current_episode)
 
@@ -271,21 +362,21 @@ def main(cfg):
             if current_episode % cfg['batch_size'] == 0:
                 batch_start = current_episode - cfg['batch_size']
                 batch_end = current_episode - 1
-                uploader.submit(batch_start, batch_end)
+                background_worker.submit_upload(batch_start, batch_end)
                 print(f"Queued upload for episodes {batch_start} to {batch_end}.")
 
-    uploader.flush()
-    uploader.close()
+    background_worker.flush()
+    background_worker.close()
     print("Data collection complete.")
 
 if __name__ == "__main__":
     # ROS Setup
     parser = argparse.ArgumentParser(description="Record simulation episodes for AV Aloha (Leader-Follower Right Arm).")
     parser.add_argument("--num-episodes", type=int, default=100, help="Number of episodes to record.")
-    parser.add_argument("--repo-id", type=str, default="iantc104/datasets_leader", help="Repository ID for the dataset.")
-    parser.add_argument("--root", type=str, default="datasets_leader", help="Root directory for the dataset.")
-    parser.add_argument("--task", type=str, default="toothbrush_lf", help="Task name for the dataset.")
-    parser.add_argument("--batch-size", type=int, default=10, help="Number of episodes to record before uploading.")
+    parser.add_argument("--repo-id", type=str, default="iantc104/store_drawer_lf", help="Repository ID for the dataset.")
+    parser.add_argument("--root", type=str, default="datasets_leader/store_drawer_lf", help="Root directory for the dataset.")
+    parser.add_argument("--task", type=str, default="store_drawer", help="Task name for the dataset.")
+    parser.add_argument("--batch-size", type=int, default=5, help="Number of episodes to record before uploading.")
     args = parser.parse_args()
     
     args_dict = vars(args)
