@@ -72,6 +72,7 @@ class RealEnv(gym.Env):
         self.image_recorder = ROSImageRecorder(
             init_node=init_node,
             camera_names=['cam_high', 'cam_right_wrist'],
+            wait_timeout=5.0,
         )
 
         # setup bot
@@ -205,9 +206,12 @@ def wait_for_user(master_bot_right):
 
         gripper_pos_right = master_bot_right.dxl.joint_states.position[6]
         gripper_norm = RIGHT_MASTER_GRIPPER_JOINT_NORMALIZE_FN(gripper_pos_right)
+        
+        print(f'\rRight Master Gripper Pos: {gripper_pos_right} | Normalized: {gripper_norm} ', end='')
 
         # break once user closes the gripper past ~90% closed
-        if gripper_pos_right < right_master_gripper_almost_close or gripper_norm < 0.2:
+        if gripper_pos_right < right_master_gripper_almost_close:
+            print('\nMaster gripper closed. Starting...')
             break
 
         time_until_next_step = REAL_DT - (time.time() - start_time)

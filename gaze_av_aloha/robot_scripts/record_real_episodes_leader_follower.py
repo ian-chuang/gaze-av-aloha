@@ -27,26 +27,34 @@ from gaze_av_aloha.robot.env_leader_follower import (
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 try:
     from sound_play.libsoundplay import SoundClient
-except ImportError:
+except Exception:
     SoundClient = None
 
 # Global sound client reused between resets
 _sound_client: Optional[SoundClient] = None
 
 
+def _beep(times: int = 2, gap: float = 0.08):
+    """Emit a system bell multiple times to make the cue noticeable."""
+    for _ in range(times):
+        print("\a", end="", flush=True)
+        time.sleep(gap)
+
+
 def play_reset_sound():
-    """Play an audible cue when reset completes; fall back to a terminal bell."""
+    """Play an audible cue when reset completes; combines TTS (if available) and a bell."""
     global _sound_client
-    if SoundClient is None:
-        print("\a", end="", flush=True)
-        return
-    try:
-        if _sound_client is None:
-            _sound_client = SoundClient(blocking=False)
-            time.sleep(0.1)
-        _sound_client.say("reset")
-    except Exception:
-        print("\a", end="", flush=True)
+    # Try voice if sound_play is available
+    if SoundClient is not None:
+        try:
+            if _sound_client is None:
+                _sound_client = SoundClient(blocking=False)
+                time.sleep(0.1)
+            _sound_client.say("reset")
+        except Exception:
+            pass
+    # Always emit a bell so there is a clear cue
+    _beep(times=3, gap=0.07)
 
 
 class BackgroundUploader:
@@ -166,8 +174,10 @@ def confirm_episode(episode_idx):
     while True:
         resp = input(f"Episode {episode_idx} complete. Save? [Y/n]: ").strip().lower()
         if resp in ("", "y", "yes"):
+            _beep(times=2, gap=0.05)
             return True
         if resp in ("n", "no"):
+            _beep(times=1, gap=0.15)
             return False
         print("Please enter 'y' or 'n'.")
 
@@ -221,14 +231,15 @@ def main(cfg):
 
     current_episode = dataset.num_episodes
     uploader = BackgroundUploader(dataset)
+    dataset.episode_buffer = dataset.create_episode_buffer(episode_index=current_episode)
     print(f"Resuming at episode index {current_episode}.")
 
-    if dataset.num_episodes < cfg['num_episodes']:
+    if current_episode < cfg['num_episodes']:
         # RealEnv (Right Arm Only)
         env = RealEnv(init_node=False) 
 
         while True:
-            if dataset.num_episodes >= cfg['num_episodes']:
+            if current_episode >= cfg['num_episodes']:
                 break
 
             episode_idx = current_episode
@@ -238,6 +249,7 @@ def main(cfg):
 
             if not ok:
                 dataset.clear_episode_buffer()
+                dataset.episode_buffer = dataset.create_episode_buffer(episode_index=current_episode)
                 continue
 
             # Confirm Save/Discard
@@ -246,12 +258,14 @@ def main(cfg):
             if not ok:
                 dataset.clear_episode_buffer()
                 print(f"Episode {episode_idx} discarded.")
+                dataset.episode_buffer = dataset.create_episode_buffer(episode_index=current_episode)
                 continue
 
             # Save to Disk
             dataset.save_episode()
             print(f"Episode {episode_idx} saved.")
             current_episode += 1
+            dataset.episode_buffer = dataset.create_episode_buffer(episode_index=current_episode)
 
             # Upload to Hugging Face (Optional batching)
             if current_episode % cfg['batch_size'] == 0:
@@ -267,11 +281,11 @@ def main(cfg):
 if __name__ == "__main__":
     # ROS Setup
     parser = argparse.ArgumentParser(description="Record simulation episodes for AV Aloha (Leader-Follower Right Arm).")
-    parser.add_argument("--num-episodes", type=int, default=80, help="Number of episodes to record.")
+    parser.add_argument("--num-episodes", type=int, default=100, help="Number of episodes to record.")
     parser.add_argument("--repo-id", type=str, default="iantc104/datasets_leader", help="Repository ID for the dataset.")
     parser.add_argument("--root", type=str, default="datasets_leader", help="Root directory for the dataset.")
-    parser.add_argument("--task", type=str, default="toothbrush", help="Task name for the dataset.")
-    parser.add_argument("--batch-size", type=int, default=2, help="Number of episodes to record before uploading.")
+    parser.add_argument("--task", type=str, default="toothbrush_lf", help="Task name for the dataset.")
+    parser.add_argument("--batch-size", type=int, default=10, help="Number of episodes to record before uploading.")
     args = parser.parse_args()
     
     args_dict = vars(args)

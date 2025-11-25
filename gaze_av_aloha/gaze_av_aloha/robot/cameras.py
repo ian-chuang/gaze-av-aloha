@@ -159,7 +159,7 @@ class ROSImageRecorder:
                  init_node=True, 
                  is_debug=False,
                  wait_for_messages=True,
-                 wait_timeout=1.0,
+                 wait_timeout=2.0,
                  raise_on_timeout=True):
         self.is_debug = is_debug
         self.bridge = CvBridge()
