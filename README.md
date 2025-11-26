@@ -1,3 +1,6 @@
+export FLARE_DATASETS_DIR="/home/ianchuang/gaze-av-aloha/gym_av_aloha/outputs"
+
+
 # Look, Focus, Act: Efficient and Robust Robot Learning via Human Gaze and Foveated Vision Transformers
 
 ![hero](./media/hero.gif)
