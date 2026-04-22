@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <package format="2">
-  <name>vx300s_7dof_description</name>
+  <name>wx250s_7dof_description</name>
   <version>0.0.0</version>
   <description>The interbotix_xsarm_descriptions package</description>
   <maintainer email="trsupport@trossenrobotics.com">Solomon Wiznitzer</maintainer>

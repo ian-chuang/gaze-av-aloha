@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8.3)
-project(vx300s_7dof_description)
+project(wx250s_7dof_description)
 
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)

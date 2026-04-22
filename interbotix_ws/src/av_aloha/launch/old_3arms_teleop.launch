@@ -66,7 +66,7 @@
     type="static_transform_publisher"
     args="0 0 0 0 0 0 /world /$(arg robot_name_puppet_middle)/base_link"/>
 
-  <!-- <include file="$(find realsense2_camera)/launch/rs_camera.launch">
+  <include file="$(find realsense2_camera)/launch/rs_camera.launch">
       <arg name="camera" value="cam_left_wrist"/>
       <arg name="serial_no" value="230322272239"/>
       <arg name="color_width" value="640"/>
@@ -80,11 +80,9 @@
       <arg name="color_width" value="640"/>
       <arg name="color_height" value="480"/>
       <arg name="color_fps" value="60"/>
-  </include> -->
+  </include>
 
-  
-
-  <!-- <include file="$(find realsense2_camera)/launch/rs_camera.launch">
+  <include file="$(find realsense2_camera)/launch/rs_camera.launch">
       <arg name="camera" value="cam_high"/>
       <arg name="serial_no" value="230322270396"/>
       <arg name="color_width" value="640"/>
@@ -98,5 +96,5 @@
       <arg name="color_width" value="640"/>
       <arg name="color_height" value="480"/>
       <arg name="color_fps" value="60"/>
-  </include> -->
+  </include>
 </launch>
