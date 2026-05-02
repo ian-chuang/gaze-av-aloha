@@ -1,3 +1,6 @@
 [submodule "gym_av_aloha"]
 	path = gym_av_aloha
 	url = https://github.com/Soltanilara/gym_av_aloha
+[submodule "pyroki"]
+	path = pyroki
+	url = https://github.com/chungmin99/pyroki
