@@ -1,6 +1,7 @@
 import time
 import numpy as np
 import viser
+from scipy.spatial.transform import Rotation as R
 
 from viser.extras import ViserUrdf
 from yourdfpy import URDF
@@ -92,9 +93,25 @@ def main():
     T_robot_target = np.eye(4)
 
     T_robot_target[:3,3] = np.array([
-        -0.5,
+        -0.2,
         0.0,
-        0.5,
+        0.45,
+    ])
+
+    initial_rot = R.from_euler(
+        "xyz",
+        #[0, 90, 0],
+        [90, 0, 90],
+        degrees=True,
+    )
+
+    quat_xyzw = initial_rot.as_quat()
+
+    R_robot_target = np.array([
+        quat_xyzw[3],
+        quat_xyzw[0],
+        quat_xyzw[1],
+        quat_xyzw[2],
     ])
 
     # # ========================================================
@@ -156,11 +173,11 @@ def main():
             headset_data.r_pos
         )
 
-        # controller_frame.wxyz = (
-        #     xyzw_to_wxyz(
-        #         headset_data.r_quat
-        #     )
-        # )
+        controller_frame.wxyz = (
+            xyzw_to_wxyz(
+                headset_data.r_quat
+            )
+        )
 
         # ----------------------------------------------------
         # BUTTON STATE
@@ -197,17 +214,6 @@ def main():
                 current_controller_right[:3,3]
             )
 
-            # R_remap = np.array([
-            #     [ 0, -1,  0],
-            #     [ 1,  0,  0],
-            #     [ 0,  0,  1],
-            # ])
-
-            # aligned_controller[:3,:3] = (
-            #     aligned_controller[:3,:3]
-            #     @ R_remap
-            # )
-
             # ------------------------------------------------
             # SAVE REFERENCE FRAMES
             # ------------------------------------------------
@@ -216,7 +222,22 @@ def main():
                 aligned_controller.copy()
             )
 
-            start_robot_pose = T_robot_target.copy()
+            start_robot_pose = (
+                T_robot_target.copy()
+            )
+
+            start_controller_rot = (
+                current_controller_right[:3,:3].copy()
+            )
+
+            start_robot_rot = (
+                R.from_quat([
+                    R_robot_target[1],
+                    R_robot_target[2],
+                    R_robot_target[3],
+                    R_robot_target[0],
+                ]).as_matrix()
+            )
 
             print("Teleop ENABLED")
 
@@ -244,36 +265,136 @@ def main():
             # ROBOT TARGET FRAME
             # ------------------------------------------------
 
-            T_robot_target = (
-                transform_coordinates(
-                    current_controller_right,
-                    start_controller_pose,
-                    start_robot_pose,
+
+            if teleop_active:
+
+                # ----------------------------------------
+                # controller motion since teleop start
+                # ----------------------------------------
+
+                delta = (
+                    current_controller_right[:3,3]
+                    - start_controller_pose[:3,3]
                 )
-            )
 
-            # R_remap = np.array([
-            #     [ 0, -1,  0],
-            #     [ 1,  0,  0],
-            #     [ 0,  0,  1],
-            # ])
+                # ----------------------------------------
+                # remap controller axes
+                # ----------------------------------------
 
-            # T_robot_target[:3,3] = (
-            #     R_remap @ T_robot_target[:3,3]
-            # )
+                R_remap = np.array([
+                    [0, 1, 0],
+                    [-1, 0, 0],
+                    [0, 0, 1],
+                ])
 
-            # relative_motion = (
-            #     T_robot_target[:3,3]
-            #     - start_robot_pose[:3,3]
-            # )
+                delta = R_remap @ delta
 
-            # relative_motion = (
-            #     R_remap @ relative_motion
-            # )
+                # ----------------------------------------
+                # apply to robot target
+                # ----------------------------------------
 
-            # T_robot_target[:3,3] = (
-            #     start_robot_pose[:3,3]
-            #     + relative_motion
+                T_robot_target[:3,3] = (
+                    start_robot_pose[:3,3]
+                    + delta
+                )
+
+                # --------------------------------------------
+                # controller orientation
+                # --------------------------------------------
+
+                #R_target = current_controller_right[:3,:3]
+
+                # --------------------------------------------
+                # rotate gripper so it faces forward
+                # --------------------------------------------
+
+                # R_offset = np.array([
+                #     [0, 0, 1],
+                #     [1, 0, 0],
+                #     [0, 1, 0],
+                # ])
+
+                # yaw = np.deg2rad(-45)
+                # roll = np.deg2rad(-90)
+
+                # R_yaw = np.array([
+                #     [ np.cos(yaw), -np.sin(yaw), 0],
+                #     [ np.sin(yaw),  np.cos(yaw), 0],
+                #     [ 0,             0,          1],
+                # ])
+
+                # R_roll = np.array([
+                #     [1, 0,              0             ],
+                #     [0, np.cos(roll),  -np.sin(roll)],
+                #     [0, np.sin(roll),   np.cos(roll)],
+                # ])
+
+                # R_offset = R_yaw @ R_roll
+
+                # ----------------------------------------
+                # relative controller rotation
+                # ----------------------------------------
+
+                
+
+                R_delta = (
+                    start_controller_rot.T
+                    @ current_controller_right[:3,:3]
+                )
+
+                # R_axis_remap = np.array([
+                #     [0, 1, 0],
+                #     [0, 0, -1],
+                #     [1, 0, 0],
+                # ])
+
+                R_axis_remap = np.array([
+                    [0, 0, -1],
+                    [0, 1, 0],
+                    [1, 0, 0],
+                ])
+
+                R_delta_remapped = (
+                    R_axis_remap
+                    @ R_delta
+                    @ R_axis_remap.T
+                )
+
+                # ----------------------------------------
+                # apply calibration offset
+                # ----------------------------------------
+
+                R_target = (
+                    start_robot_rot
+                    @ R_delta_remapped
+                    #@ R_offset
+                )
+                
+               # R_target = R_target @ R_offset
+
+                # --------------------------------------------
+                # matrix -> quaternion
+                # scipy gives xyzw
+                # --------------------------------------------
+
+                quat_xyzw = (
+                    R.from_matrix(R_target)
+                    .as_quat()
+                )
+
+                R_robot_target = np.array([
+                    quat_xyzw[3],
+                    quat_xyzw[0],
+                    quat_xyzw[1],
+                    quat_xyzw[2],
+                ])
+
+            # T_robot_target = (
+            #     transform_coordinates(
+            #         current_controller_right,
+            #         start_controller_pose,
+            #         start_robot_pose,
+            #     )
             # )
 
         # ====================================================
@@ -293,15 +414,10 @@ def main():
             ),
 
             # --------------------------------------------
-            # FIXED ORIENTATION FOR NOW
+            # TARGET ORIENTATION
             # --------------------------------------------
 
-            target_wxyz=np.array([
-                1.0,
-                0.0,
-                0.0,
-                0.0,
-            ]),
+            target_wxyz=R_robot_target,
         )
 
         # ----------------------------------------------------
