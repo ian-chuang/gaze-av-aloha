@@ -12,10 +12,11 @@ sys.path.append("/home/devi/giava/pyroki/examples")
 import pyroki_snippets as pks
 
 from webrtc_headset import WebRTCHeadset
-from headset_control import HeadsetFullControl as HeadsetControl
 
 from transform_utils import (
     pose2mat,
+    transform_coordinates,
+    align_rotation_to_z_axis,
     xyzw_to_wxyz,
 )
 
@@ -26,9 +27,6 @@ from transform_utils import (
 URDF_PATH = "/home/devi/giava/giava.urdf"
 
 RIGHT_EE_LINK = "rightgripper_base"
-RIGHT_EE_INDEX = 8
-
-POSITION_SCALE = 1.0
 
 # ============================================================
 # MAIN
@@ -42,9 +40,6 @@ def main():
 
     headset = WebRTCHeadset()
     headset.run_in_thread()
-
-    headset_control = HeadsetControl()
-    headset_control.reset()
 
     # ========================================================
     # ROBOT
@@ -73,25 +68,13 @@ def main():
     )
 
     # ========================================================
-    # VISUALIZATION FRAMES
+    # DEBUG FRAME
     # ========================================================
 
     controller_frame = server.scene.add_frame(
         "/vr/right_controller",
         axes_length=0.15,
         axes_radius=0.01,
-    )
-
-    target_frame = server.scene.add_frame(
-        "/target/right",
-        axes_length=0.12,
-        axes_radius=0.008,
-    )
-
-    ee_frame = server.scene.add_frame(
-        "/ee/right",
-        axes_length=0.10,
-        axes_radius=0.006,
     )
 
     # ========================================================
@@ -103,14 +86,32 @@ def main():
     )
 
     # ========================================================
-    # INITIAL TARGET
+    # INITIAL ROBOT TARGET
     # ========================================================
 
-    right_robot_pose = np.array([
-        0.35,
-        0.25,
-        0.35,
+    T_robot_target = np.eye(4)
+
+    T_robot_target[:3,3] = np.array([
+        -0.5,
+        0.0,
+        0.5,
     ])
+
+    # # ========================================================
+    # # TELEOP FRAME CHANGE
+    # # ========================================================
+
+    # T_teleop_frame = np.eye(4)
+
+    # T_teleop_frame[:3,:3] = np.array([
+    #     [ 0,  1,  0],
+    #     [-1,  0,  0],
+    #     [ 0,  0,  1],
+    # ])
+
+    # T_teleop_frame[:3,3] = (
+    #     T_robot_target[:3,3]
+    # )
 
     # ========================================================
     # TELEOP STATE
@@ -118,19 +119,8 @@ def main():
 
     teleop_active = False
 
-    T_right_ref = None
-
-    right_robot_ref = None
-
-    # ========================================================
-    # AXIS MAPPING
-    # ========================================================
-
-    R_vr_to_robot = np.array([
-        [ 0,  0, -1],
-        [ 1,  0,  0],
-        [ 0,  1,  0],
-    ])
+    start_controller_pose = None
+    start_robot_pose = None
 
     # ========================================================
     # MAIN LOOP
@@ -150,23 +140,27 @@ def main():
             continue
 
         # ----------------------------------------------------
-        # BUILD TRANSFORM
+        # CURRENT CONTROLLER POSE
         # ----------------------------------------------------
 
-        T_right = pose2mat(
+        current_controller_right = pose2mat(
             headset_data.r_pos,
             headset_data.r_quat,
         )
 
         # ----------------------------------------------------
-        # VISUALIZE CONTROLLER
+        # VISUALIZE RAW CONTROLLER FRAME
         # ----------------------------------------------------
 
-        controller_frame.position = headset_data.r_pos
-
-        controller_frame.wxyz = xyzw_to_wxyz(
-            headset_data.r_quat
+        controller_frame.position = (
+            headset_data.r_pos
         )
+
+        # controller_frame.wxyz = (
+        #     xyzw_to_wxyz(
+        #         headset_data.r_quat
+        #     )
+        # )
 
         # ----------------------------------------------------
         # BUTTON STATE
@@ -176,9 +170,9 @@ def main():
             headset_data.r_button_one
         )
 
-        # ----------------------------------------------------
+        # ====================================================
         # TELEOP START
-        # ----------------------------------------------------
+        # ====================================================
 
         if (
             button_pressed
@@ -187,17 +181,48 @@ def main():
 
             teleop_active = True
 
-            T_right_ref = T_right.copy()
+            # ------------------------------------------------
+            # CALIBRATE CONTROLLER FRAME
+            # ------------------------------------------------
 
-            right_robot_ref = (
-                right_robot_pose.copy()
+            aligned_controller = np.eye(4)
+
+            aligned_controller[:3,:3] = (
+                align_rotation_to_z_axis(
+                    current_controller_right[:3,:3]
+                )
             )
+
+            aligned_controller[:3,3] = (
+                current_controller_right[:3,3]
+            )
+
+            # R_remap = np.array([
+            #     [ 0, -1,  0],
+            #     [ 1,  0,  0],
+            #     [ 0,  0,  1],
+            # ])
+
+            # aligned_controller[:3,:3] = (
+            #     aligned_controller[:3,:3]
+            #     @ R_remap
+            # )
+
+            # ------------------------------------------------
+            # SAVE REFERENCE FRAMES
+            # ------------------------------------------------
+
+            start_controller_pose = (
+                aligned_controller.copy()
+            )
+
+            start_robot_pose = T_robot_target.copy()
 
             print("Teleop ENABLED")
 
-        # ----------------------------------------------------
+        # ====================================================
         # TELEOP STOP
-        # ----------------------------------------------------
+        # ====================================================
 
         elif (
             not button_pressed
@@ -208,59 +233,69 @@ def main():
 
             print("Teleop DISABLED")
 
-        # ----------------------------------------------------
+        # ====================================================
         # RUN TELEOP
-        # ----------------------------------------------------
+        # ====================================================
 
         if teleop_active:
 
             # ------------------------------------------------
-            # PURE CONTROLLER DELTA
+            # MAP CONTROLLER MOTION INTO
+            # ROBOT TARGET FRAME
             # ------------------------------------------------
 
-            controller_delta = (
-                T_right[:3,3]
-                - T_right_ref[:3,3]
+            T_robot_target = (
+                transform_coordinates(
+                    current_controller_right,
+                    start_controller_pose,
+                    start_robot_pose,
+                )
             )
 
-            # ------------------------------------------------
-            # MAP VR FRAME -> ROBOT FRAME
-            # ------------------------------------------------
+            # R_remap = np.array([
+            #     [ 0, -1,  0],
+            #     [ 1,  0,  0],
+            #     [ 0,  0,  1],
+            # ])
 
-            delta_robot = (
-                R_vr_to_robot
-                @ controller_delta
-            )
+            # T_robot_target[:3,3] = (
+            #     R_remap @ T_robot_target[:3,3]
+            # )
 
-            delta_robot *= POSITION_SCALE
+            # relative_motion = (
+            #     T_robot_target[:3,3]
+            #     - start_robot_pose[:3,3]
+            # )
 
-            # ------------------------------------------------
-            # UPDATE TARGET
-            # ------------------------------------------------
+            # relative_motion = (
+            #     R_remap @ relative_motion
+            # )
 
-            right_robot_pose = (
-                right_robot_ref
-                + delta_robot
-            )
+            # T_robot_target[:3,3] = (
+            #     start_robot_pose[:3,3]
+            #     + relative_motion
+            # )
 
-        # ----------------------------------------------------
-        # VISUALIZE TARGET
-        # ----------------------------------------------------
-
-        target_frame.position = (
-            right_robot_pose
-        )
-
-        # ----------------------------------------------------
+        # ====================================================
         # SOLVE IK
-        # ----------------------------------------------------
+        # ====================================================
 
         q_new = pks.solve_ik(
             robot=robot,
             target_link_name=RIGHT_EE_LINK,
-            target_position=right_robot_pose,
 
-            # fixed orientation
+            # --------------------------------------------
+            # POSITION TARGET
+            # --------------------------------------------
+
+            target_position=(
+                T_robot_target[:3,3]
+            ),
+
+            # --------------------------------------------
+            # FIXED ORIENTATION FOR NOW
+            # --------------------------------------------
+
             target_wxyz=np.array([
                 1.0,
                 0.0,
@@ -269,12 +304,16 @@ def main():
             ]),
         )
 
+        # ----------------------------------------------------
+        # UPDATE ROBOT STATE
+        # ----------------------------------------------------
+
         if q_new is not None:
             q = q_new
 
-        # ----------------------------------------------------
-        # UPDATE ROBOT VISUALIZATION
-        # ----------------------------------------------------
+        # ====================================================
+        # UPDATE VISUALIZATION
+        # ====================================================
 
         joint_dict = {
             name: value
@@ -288,37 +327,9 @@ def main():
             joint_dict
         )
 
-        # ----------------------------------------------------
-        # FORWARD KINEMATICS
-        # ----------------------------------------------------
-
-        fk = robot.forward_kinematics(q)
-
-        T_right_ee = fk[RIGHT_EE_INDEX]
-
-        # ----------------------------------------------------
-        # VISUALIZE EE
-        # ----------------------------------------------------
-
-        ee_frame.position = np.array(
-            T_right_ee[:3]
-        )
-
-        ee_frame.wxyz = np.array([
-            T_right_ee[6],
-            T_right_ee[3],
-            T_right_ee[4],
-            T_right_ee[5],
-        ])
-
-        # ----------------------------------------------------
+        # ====================================================
         # DEBUG
-        # ----------------------------------------------------
-
-        err = np.linalg.norm(
-            right_robot_pose
-            - np.array(T_right_ee[:3])
-        )
+        # ====================================================
 
         elapsed_ms = (
             time.time()
@@ -327,7 +338,7 @@ def main():
 
         print(
             f"teleop={teleop_active} "
-            f"err={err:.3f} "
+            f"target={T_robot_target[:3,3]} "
             f"dt={elapsed_ms:.1f}ms"
         )
 
