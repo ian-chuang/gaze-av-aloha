@@ -21,41 +21,25 @@ from transform_utils import (
     xyzw_to_wxyz,
 )
 
-# ============================================================
+
 # CONFIG
-# ============================================================
 
 URDF_PATH = "/home/devi/giava/giava.urdf"
 
 RIGHT_EE_LINK = "rightgripper_base"
 
-# ============================================================
-# MAIN
-# ============================================================
-
 def main():
 
-    # ========================================================
     # HEADSET
-    # ========================================================
-
     headset = WebRTCHeadset()
     headset.run_in_thread()
 
-    # ========================================================
     # ROBOT
-    # ========================================================
-
     urdf = URDF.load(URDF_PATH)
-
     robot = pk.Robot.from_urdf(urdf)
 
-    # ========================================================
     # VISER
-    # ========================================================
-
     server = viser.ViserServer()
-
     server.scene.add_grid(
         "/ground",
         width=2,
@@ -68,28 +52,25 @@ def main():
         root_node_name="/base",
     )
 
-    # ========================================================
     # DEBUG FRAME
-    # ========================================================
-
     controller_frame = server.scene.add_frame(
         "/vr/right_controller",
         axes_length=0.15,
         axes_radius=0.01,
     )
 
-    # ========================================================
-    # ROBOT STATE
-    # ========================================================
+    ee_frame = server.scene.add_frame(
+        "/ee",
+        axes_length=0.15,
+        axes_radius=0.01,
+    )
 
+    # ROBOT STATE
     q = np.zeros(
         robot.joints.num_actuated_joints
     )
 
-    # ========================================================
     # INITIAL ROBOT TARGET
-    # ========================================================
-
     T_robot_target = np.eye(4)
 
     T_robot_target[:3,3] = np.array([
@@ -101,7 +82,7 @@ def main():
     initial_rot = R.from_euler(
         "xyz",
         #[0, 90, 0],
-        [90, 0, 90],
+        [-90, 0, -90],
         degrees=True,
     )
 
@@ -114,61 +95,28 @@ def main():
         quat_xyzw[2],
     ])
 
-    # # ========================================================
-    # # TELEOP FRAME CHANGE
-    # # ========================================================
-
-    # T_teleop_frame = np.eye(4)
-
-    # T_teleop_frame[:3,:3] = np.array([
-    #     [ 0,  1,  0],
-    #     [-1,  0,  0],
-    #     [ 0,  0,  1],
-    # ])
-
-    # T_teleop_frame[:3,3] = (
-    #     T_robot_target[:3,3]
-    # )
-
-    # ========================================================
-    # TELEOP STATE
-    # ========================================================
-
     teleop_active = False
 
     start_controller_pose = None
     start_robot_pose = None
 
-    # ========================================================
-    # MAIN LOOP
-    # ========================================================
-
     while True:
 
         start_time = time.time()
 
-        # ----------------------------------------------------
         # RECEIVE HEADSET DATA
-        # ----------------------------------------------------
-
         headset_data = headset.receive_data()
 
         if headset_data is None:
             continue
 
-        # ----------------------------------------------------
         # CURRENT CONTROLLER POSE
-        # ----------------------------------------------------
-
         current_controller_right = pose2mat(
             headset_data.r_pos,
             headset_data.r_quat,
         )
 
-        # ----------------------------------------------------
         # VISUALIZE RAW CONTROLLER FRAME
-        # ----------------------------------------------------
-
         controller_frame.position = (
             headset_data.r_pos
         )
@@ -179,18 +127,12 @@ def main():
             )
         )
 
-        # ----------------------------------------------------
         # BUTTON STATE
-        # ----------------------------------------------------
-
         button_pressed = (
             headset_data.r_button_one
         )
 
-        # ====================================================
         # TELEOP START
-        # ====================================================
-
         if (
             button_pressed
             and not teleop_active
@@ -198,10 +140,7 @@ def main():
 
             teleop_active = True
 
-            # ------------------------------------------------
             # CALIBRATE CONTROLLER FRAME
-            # ------------------------------------------------
-
             aligned_controller = np.eye(4)
 
             aligned_controller[:3,:3] = (
@@ -214,10 +153,7 @@ def main():
                 current_controller_right[:3,3]
             )
 
-            # ------------------------------------------------
             # SAVE REFERENCE FRAMES
-            # ------------------------------------------------
-
             start_controller_pose = (
                 aligned_controller.copy()
             )
@@ -241,10 +177,7 @@ def main():
 
             print("Teleop ENABLED")
 
-        # ====================================================
         # TELEOP STOP
-        # ====================================================
-
         elif (
             not button_pressed
             and teleop_active
@@ -254,32 +187,23 @@ def main():
 
             print("Teleop DISABLED")
 
-        # ====================================================
         # RUN TELEOP
-        # ====================================================
-
         if teleop_active:
 
-            # ------------------------------------------------
             # MAP CONTROLLER MOTION INTO
             # ROBOT TARGET FRAME
-            # ------------------------------------------------
 
 
             if teleop_active:
 
-                # ----------------------------------------
                 # controller motion since teleop start
-                # ----------------------------------------
 
                 delta = (
                     current_controller_right[:3,3]
                     - start_controller_pose[:3,3]
                 )
 
-                # ----------------------------------------
                 # remap controller axes
-                # ----------------------------------------
 
                 R_remap = np.array([
                     [0, 1, 0],
@@ -289,93 +213,59 @@ def main():
 
                 delta = R_remap @ delta
 
-                # ----------------------------------------
                 # apply to robot target
-                # ----------------------------------------
 
                 T_robot_target[:3,3] = (
                     start_robot_pose[:3,3]
                     + delta
                 )
 
-                # --------------------------------------------
-                # controller orientation
-                # --------------------------------------------
-
-                #R_target = current_controller_right[:3,:3]
-
-                # --------------------------------------------
-                # rotate gripper so it faces forward
-                # --------------------------------------------
-
-                # R_offset = np.array([
-                #     [0, 0, 1],
-                #     [1, 0, 0],
-                #     [0, 1, 0],
-                # ])
-
-                # yaw = np.deg2rad(-45)
-                # roll = np.deg2rad(-90)
-
-                # R_yaw = np.array([
-                #     [ np.cos(yaw), -np.sin(yaw), 0],
-                #     [ np.sin(yaw),  np.cos(yaw), 0],
-                #     [ 0,             0,          1],
-                # ])
-
-                # R_roll = np.array([
-                #     [1, 0,              0             ],
-                #     [0, np.cos(roll),  -np.sin(roll)],
-                #     [0, np.sin(roll),   np.cos(roll)],
-                # ])
-
-                # R_offset = R_yaw @ R_roll
-
-                # ----------------------------------------
-                # relative controller rotation
-                # ----------------------------------------
-
-                
-
                 R_delta = (
                     start_controller_rot.T
                     @ current_controller_right[:3,:3]
                 )
 
-                # R_axis_remap = np.array([
-                #     [0, 1, 0],
-                #     [0, 0, -1],
-                #     [1, 0, 0],
-                # ])
-
-                R_axis_remap = np.array([
-                    [0, 0, -1],
-                    [0, 1, 0],
-                    [1, 0, 0],
-                ])
-
-                R_delta_remapped = (
-                    R_axis_remap
-                    @ R_delta
-                    @ R_axis_remap.T
+                controller_rpy = (
+                    R.from_matrix(R_delta)
+                    .as_euler("xyz", degrees=False)
                 )
 
-                # ----------------------------------------
-                # apply calibration offset
-                # ----------------------------------------
+                rotvec = (
+                    R.from_matrix(R_delta)
+                    .as_rotvec()
+                )
+
+                print("controller semantic rpy")
+                print(controller_rpy)
+
+                pitch = rotvec[1]
+                yaw   = rotvec[0]
+                roll  = rotvec[2]
+
+                # tried 012, 210, 120 (pitch makes sense but is directionally reversed!), 102 (this makes sense but yes pitch still dir rev)
+
+                rotvec_ee = np.array([
+                    -pitch,
+                    yaw,
+                    roll,
+                ])
+
+                R_local_delta = (
+                    R.from_rotvec(rotvec_ee)
+                    .as_matrix()
+                )
 
                 R_target = (
                     start_robot_rot
-                    @ R_delta_remapped
-                    #@ R_offset
+                    @ R_local_delta
                 )
+
+                
                 
                # R_target = R_target @ R_offset
 
-                # --------------------------------------------
                 # matrix -> quaternion
-                # scipy gives xyzw
-                # --------------------------------------------
+                # scipy gives xyzw----
 
                 quat_xyzw = (
                     R.from_matrix(R_target)
@@ -389,47 +279,82 @@ def main():
                     quat_xyzw[2],
                 ])
 
-            # T_robot_target = (
-            #     transform_coordinates(
-            #         current_controller_right,
-            #         start_controller_pose,
-            #         start_robot_pose,
-            #     )
-            # )
+                R_ee = R.from_quat([
+                    ee_wxyz[1],
+                    ee_wxyz[2],
+                    ee_wxyz[3],
+                    ee_wxyz[0],
+                ]).as_matrix()
 
-        # ====================================================
+                R_error = (
+                    R_target
+                    @ R_ee.T
+                )
+
+                error_euler = (
+                    R.from_matrix(R_error)
+                    .as_euler("xyz", degrees=True)
+                )
+
+                controller_x = current_controller_right[:3,0]
+                controller_y = current_controller_right[:3,1]
+                controller_z = current_controller_right[:3,2]
+
+                ee_x = R_ee[:,0]
+                ee_y = R_ee[:,1]
+                ee_z = R_ee[:,2]
+
+                print("\nCONTROLLER AXES")
+                print("x:", controller_x)
+                print("y:", controller_y)
+                print("z:", controller_z)
+
+                print("\nEE AXES")
+                print("x:", ee_x)
+                print("y:", ee_y)
+                print("z:", ee_z)
+
         # SOLVE IK
-        # ====================================================
 
         q_new = pks.solve_ik(
             robot=robot,
             target_link_name=RIGHT_EE_LINK,
 
-            # --------------------------------------------
             # POSITION TARGET
-            # --------------------------------------------
 
             target_position=(
                 T_robot_target[:3,3]
             ),
 
-            # --------------------------------------------
             # TARGET ORIENTATION
-            # --------------------------------------------
 
             target_wxyz=R_robot_target,
         )
 
-        # ----------------------------------------------------
         # UPDATE ROBOT STATE
-        # ----------------------------------------------------
 
         if q_new is not None:
             q = q_new
 
-        # ====================================================
+            fk = robot.forward_kinematics(q)
+
+            ee_index = robot.links.names.index(
+                RIGHT_EE_LINK
+            )
+
+            ee_pose = np.array(
+                fk[ee_index]
+            )
+
+            ee_wxyz = ee_pose[:4]
+            ee_position = ee_pose[4:]
+
+
+            ee_frame.position = ee_position
+
+            ee_frame.wxyz = ee_wxyz
+
         # UPDATE VISUALIZATION
-        # ====================================================
 
         joint_dict = {
             name: value
@@ -443,26 +368,7 @@ def main():
             joint_dict
         )
 
-        # ====================================================
-        # DEBUG
-        # ====================================================
-
-        elapsed_ms = (
-            time.time()
-            - start_time
-        ) * 1000.0
-
-        print(
-            f"teleop={teleop_active} "
-            f"target={T_robot_target[:3,3]} "
-            f"dt={elapsed_ms:.1f}ms"
-        )
-
         time.sleep(0.01)
-
-# ============================================================
-# ENTRY
-# ============================================================
 
 if __name__ == "__main__":
     main()
