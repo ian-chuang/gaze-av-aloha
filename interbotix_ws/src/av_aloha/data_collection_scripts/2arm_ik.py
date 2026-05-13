@@ -54,7 +54,6 @@ def matrix_from_wxyz(wxyz):
         wxyz[0],
     ]).as_matrix()
 
-
 # MAIN
 
 def main():
@@ -143,14 +142,14 @@ def main():
     T_left_target = np.eye(4)
 
     T_left_target[:3,3] = np.array([
-        -0.2,
-        0.25,
+        0.1,
+        0,
         0.45,
     ])
 
     left_initial_rot = R.from_euler(
         "xyz",
-        [90, 0, 90],
+        [-90, 0, 90],
         degrees=True,
     )
 
@@ -185,6 +184,8 @@ def main():
         [-1, 0, 0],
         [0, 0, 1],
     ])
+
+    # FK INDICES
 
     right_index = robot.links.names.index(
         RIGHT_EE_LINK
@@ -325,159 +326,150 @@ def main():
 
             print("BIMANUAL TELEOP DISABLED")
 
-        # RIGHT TELEOP
+        # TELEOP
 
         if teleop_active:
 
+            # RIGHT TELEOP
+
             # TRANSLATION
 
-            delta = (
+            delta_right = (
                 current_controller_right[:3,3]
                 - right_start_controller_pose[:3,3]
             )
 
-            delta = R_remap @ delta
+            delta_right = R_remap @ delta_right
 
             T_right_target[:3,3] = (
                 right_start_robot_pose[:3,3]
-                + delta
+                + delta_right
             )
 
             # ROTATION
 
-            R_delta = (
+            R_delta_right = (
                 right_start_controller_rot.T
                 @ current_controller_right[:3,:3]
             )
 
-            rotvec = (
-                R.from_matrix(R_delta)
+            rotvec_right = (
+                R.from_matrix(R_delta_right)
                 .as_rotvec()
             )
 
-            # semantic mapping
+            pitch_right = rotvec_right[1]
+            yaw_right   = rotvec_right[0]
+            roll_right  = rotvec_right[2]
 
-            pitch = rotvec[1]
-            yaw   = rotvec[0]
-            roll  = rotvec[2]
-
-            rotvec_ee = np.array([
-                -pitch,
-                yaw,
-                roll,
+            rotvec_ee_right = np.array([
+                -pitch_right,
+                yaw_right,
+                roll_right,
             ])
 
-            R_local_delta = (
-                R.from_rotvec(rotvec_ee)
+            R_local_delta_right = (
+                R.from_rotvec(rotvec_ee_right)
                 .as_matrix()
             )
 
-            R_target = (
+            R_target_right = (
                 right_start_robot_rot
-                @ R_local_delta
+                @ R_local_delta_right
             )
 
             R_right_target = (
-                wxyz_from_matrix(R_target)
+                wxyz_from_matrix(
+                    R_target_right
+                )
             )
 
-        # LEFT TELEOP
+            # LEFT TELEOP
 
             # TRANSLATION
 
-            delta = (
+            delta_left = (
                 current_controller_left[:3,3]
                 - left_start_controller_pose[:3,3]
             )
 
-            delta = R_remap @ delta
+            delta_left = R_remap @ delta_left
 
             T_left_target[:3,3] = (
                 left_start_robot_pose[:3,3]
-                + delta
+                + delta_left
             )
 
             # ROTATION
 
-            R_delta = (
+            R_delta_left = (
                 left_start_controller_rot.T
                 @ current_controller_left[:3,:3]
             )
 
-            rotvec = (
-                R.from_matrix(R_delta)
+            rotvec_left = (
+                R.from_matrix(R_delta_left)
                 .as_rotvec()
             )
 
-            # mirrored semantic mapping
+            print("\nLEFT CONTROLLER ROTVEC")
+            print(rotvec_left)
 
-            pitch = rotvec[1]
-            yaw   = rotvec[0]
-            roll  = rotvec[2]
+            print("x component:", rotvec_left[0])
+            print("y component:", rotvec_left[1])
+            print("z component:", rotvec_left[2])
 
-            rotvec_ee = np.array([
-                -pitch,
-                -yaw,
-                -roll,
+            pitch_left = rotvec_left[1]
+            yaw_left   = rotvec_left[0]
+            roll_left  = rotvec_left[2]
+
+            rotvec_ee_left = np.array([
+                -pitch_left,
+                yaw_left,
+                roll_left,
             ])
 
-            R_local_delta = (
-                R.from_rotvec(rotvec_ee)
+            R_local_delta_left = (
+                R.from_rotvec(rotvec_ee_left)
                 .as_matrix()
             )
 
-            R_target = (
+            R_target_left = (
                 left_start_robot_rot
-                @ R_local_delta
+                @ R_local_delta_left
             )
 
             R_left_target = (
-                wxyz_from_matrix(R_target)
+                wxyz_from_matrix(
+                    R_target_left
+                )
             )
 
-        # ============================================================
-        # IK
-        # ============================================================
+            # IK
 
-        # RIGHT IK
+            solution = pks.solve_ik_with_multiple_targets(
+                robot=robot,
 
-        q_right = pks.solve_ik(
-            robot=robot,
-            target_link_name=RIGHT_EE_LINK,
+                target_link_names=[
+                    RIGHT_EE_LINK,
+                    LEFT_EE_LINK,
+                ],
 
-            target_position=(
-                T_right_target[:3,3]
-            ),
+                target_positions=np.array([
+                    T_right_target[:3,3],
+                    T_left_target[:3,3],
+                ]),
 
-            target_wxyz=R_right_target,
+                target_wxyzs=np.array([
+                    R_right_target,
+                    R_left_target,
+                ]),
+            )
 
-            previous_q=q,
-        )
+            if solution is not None:
+                q = solution
 
-        if q_right is not None:
-            q = q_right
-
-        # LEFT IK
-
-        q_left = pks.solve_ik(
-            robot=robot,
-            target_link_name=LEFT_EE_LINK,
-
-            target_position=(
-                T_left_target[:3,3]
-            ),
-
-            target_wxyz=R_left_target,
-
-            previous_q=q,
-        )
-
-        if q_left is not None:
-            q = q_left
-
-        # ============================================================
         # FK
-        # ============================================================
 
         fk = robot.forward_kinematics(q)
 
