@@ -259,8 +259,6 @@ def main():
                     start_robot_rot
                     @ R_local_delta
                 )
-
-                
                 
                # R_target = R_target @ R_offset
 
@@ -296,7 +294,7 @@ def main():
                     .as_euler("xyz", degrees=True)
                 )
 
-                controller_x = current_controller_right[:3,0]
+                """ controller_x = current_controller_right[:3,0]
                 controller_y = current_controller_right[:3,1]
                 controller_z = current_controller_right[:3,2]
 
@@ -312,7 +310,7 @@ def main():
                 print("\nEE AXES")
                 print("x:", ee_x)
                 print("y:", ee_y)
-                print("z:", ee_z)
+                print("z:", ee_z) """
 
         # SOLVE IK
 
@@ -363,6 +361,23 @@ def main():
                 q,
             )
         }
+
+        
+
+        if headset_data.r_hand_trigger > 0.001:
+            print(f"right trigger is pressed! {headset_data.r_hand_trigger}")
+
+            gripper_value = 0.0
+
+        else:
+
+            gripper_value = 0.041
+
+        joint_dict["rightright_finger"] = gripper_value
+
+        for k, v in vars(headset_data).items():
+            if isinstance(v, (int, float)):
+                print(k, v)
 
         urdf_vis.update_cfg(
             joint_dict

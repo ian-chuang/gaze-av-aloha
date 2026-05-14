@@ -18,8 +18,11 @@ import pyroki_snippets as pks
 
 URDF_PATH = "/home/devi/giava/giava.urdf"
 
-RIGHT_EE_LINK = "rightgripper_base"
+# RIGHT_EE_LINK = "rightgripper_base"
 
+# LEFT_EE_LINK = "leftgripper_base"
+
+CAMERA_EE_LINK = "middlecamera_body"
 
 # MAIN
 
@@ -156,7 +159,7 @@ def main():
 
         q_new = pks.solve_ik(
             robot=robot,
-            target_link_name=RIGHT_EE_LINK,
+            target_link_name=CAMERA_EE_LINK,
             target_position=target_position,
             target_wxyz=target_wxyz,
         )
