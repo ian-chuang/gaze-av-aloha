@@ -28,6 +28,10 @@ URDF_PATH = "/home/devi/giava/giava.urdf"
 
 LEFT_EE_LINK  = "leftgripper_base"
 
+CONTROL_DT = 0.1
+
+
+
 def wxyz_from_matrix(R_mat):
 
     quat_xyzw = (
@@ -62,6 +66,22 @@ def main():
     urdf = URDF.load(URDF_PATH)
     robot = pk.Robot.from_urdf(urdf)
 
+    # INDICES
+
+    LEFT_ARM_NAMES = [
+        "leftwaist",
+        "leftshoulder",
+        "leftelbow",
+        "leftforearm_roll",
+        "leftwrist_angle",
+        "leftwrist_rotate",
+    ]
+
+    left_arm_indices = [
+        robot.joints.actuated_names.index(name)
+        for name in LEFT_ARM_NAMES
+    ]
+
     # ROBOT STATE
     q = np.zeros(
         robot.joints.num_actuated_joints
@@ -75,6 +95,7 @@ def main():
         0,
         0.45,
     ])
+
 
     initial_rot = R.from_euler(
         "xyz",
@@ -99,45 +120,13 @@ def main():
 
     rospy.init_node("vr_left_arm_teleop")
 
-    """
-
     bot = InterbotixManipulatorXS(
         robot_model="wx250s",
         group_name="arm",
         gripper_name="gripper",
         robot_name="puppet_left",
-        init_node=False,
-    )
-
-    bot.core.robot_set_operating_modes(
-        "group",
-        "arm",
-        "position",
-    )
-
-    bot.core.robot_set_motor_registers(
-        "group",
-        "arm",
-        "Profile_Velocity",
-        2000,
-    )
-
-    bot.core.robot_set_motor_registers(
-        "group",
-        "arm",
-        "Profile_Acceleration",
-        300,
-    )
-
-    """
-
-    bot = InterbotixManipulatorXS(
-        robot_model="wx250s",
-        group_name="arm",
-        gripper_name="gripper",
-        robot_name="puppet_left",
-        moving_time=0.2,
-        accel_time=0.05,
+        moving_time=1.0,
+        accel_time=0.3,
         init_node=False,
     )
 
@@ -240,6 +229,55 @@ def main():
             teleop_active = False
 
             print("Teleop DISABLED")
+        
+        """ T_robot_target[:3,3] = np.array([
+            0.25 + 0.05*np.sin(time.time()),
+            0.0,
+            0.15,
+        ]) """
+
+        delta = (
+            current_controller_right[:3,3]
+            - start_controller_pose[:3,3]
+        )
+
+        scale = 0.6
+
+        delta *= scale
+
+        T_robot_target[:3,3] = (
+            start_robot_pose[:3,3]
+            + delta
+        )
+
+        """
+        CLIPPING
+        T_robot_target[0,3] = np.clip(
+            T_robot_target[0,3],
+            0.15,
+            0.40,
+        )
+
+        T_robot_target[1,3] = np.clip(
+            T_robot_target[1,3],
+            -0.25,
+            0.25,
+        )
+
+        T_robot_target[2,3] = np.clip(
+            T_robot_target[2,3],
+            0.05,
+            0.30,
+        )
+
+        # SMOOTHING
+        alpha = 0.15
+
+        left_arm_q = (
+            alpha * left_arm_q
+            + (1 - alpha) * prev_q
+        )
+        """
 
         # RUN TELEOP
         if teleop_active:
@@ -378,16 +416,56 @@ def main():
         
         # SOLVE IK
 
-        q = np.zeros(23)
+        """ q = np.zeros(23)
 
         q[0] = np.sin(2*t)
 
         bot.arm.set_joint_positions(
-            q[:6].tolist(),
+            q[8:14].tolist(),
             blocking=False,
         )
 
+        t += 0.03 """
+
+        q_new = pks.solve_ik(
+            robot=robot,
+            target_link_name=LEFT_EE_LINK,
+
+            target_position=T_robot_target[:3,3],
+
+            # TEMPORARILY REMOVE ORIENTATION
+            target_wxyz=R_robot_target,
+        )
+
+        print(robot.joints.actuated_names)
+
+        if q_new is not None:
+
+            q_prev = q
+
+            q = q_new
+
+            left_arm_q = q[left_arm_indices]
+
+            print("left arm q:", left_arm_q)
+
+            bot.arm.set_joint_positions(
+                left_arm_q.tolist(),
+                blocking=True,
+            )
+
+            print(np.linalg.norm(left_arm_q - q_prev[8:14]))
+
+        else:
+
+            print("IK FAILED")
+        
         t += 0.03
+
+        time.sleep(0.05)
+
+        print("delta:", delta)
+        print("target:", T_robot_target[:3,3])
 
         # q_new = pks.solve_ik(
         #     robot=robot,
@@ -440,7 +518,7 @@ def main():
         #     # ])
 
         #     bot.arm.set_joint_positions(
-        #         q[:6],
+        #         q[8:14],
         #         blocking=False,
         #     )
 
@@ -474,15 +552,6 @@ def main():
 
         #     t += 0.03
 
-        # # UPDATE VISUALIZATION
-
-        # joint_dict = {
-        #     name: value
-        #     for name, value in zip(
-        #         robot.joints.actuated_names,
-        #         q,
-        #     )
-        # }
 
         # # GRIPPER CONTROL
 
