@@ -8,6 +8,10 @@ wandb/
 *.pth
 *.pt
 
+# Secrets
+serviceAccountKey.json
+signalingSettings.json
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

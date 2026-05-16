@@ -1,11 +1,14 @@
 Panels:
   - Class: rviz/Displays
-    Help Height: 78
+    Help Height: 138
     Name: Displays
     Property Tree Widget:
-      Expanded: ~
+      Expanded:
+        - /RobotModel1
+        - /TF1
+        - /TF1/Tree1
       Splitter Ratio: 0.5777778029441833
-    Tree Height: 379
+    Tree Height: 841
   - Class: rviz/Selection
     Name: Selection
   - Class: rviz/Tool Properties
@@ -14,14 +17,13 @@ Panels:
       - /2D Nav Goal1
       - /Publish Point1
     Name: Tool Properties
-    Splitter Ratio: 0.588679016
+    Splitter Ratio: 0.5886790156364441
   - Class: rviz/Views
     Expanded:
       - /Current View1
     Name: Views
     Splitter Ratio: 0.5
   - Class: rviz/Time
-    Experimental: false
     Name: Time
     SyncMode: 0
     SyncSource: ""
@@ -35,13 +37,13 @@ Toolbars:
 Visualization Manager:
   Class: ""
   Displays:
-    - Alpha: 0.699999988
+    - Alpha: 0.699999988079071
       Cell Size: 0.25
       Class: rviz/Grid
       Color: 255; 255; 255
       Enabled: true
       Line Style:
-        Line Width: 0.0299999993
+        Line Width: 0.029999999329447746
         Value: Lines
       Name: Grid
       Normal Cell Count: 0
@@ -63,73 +65,69 @@ Visualization Manager:
         Expand Link Details: false
         Expand Tree: false
         Link Tree Style: Links in Alphabetic Order
-        world:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-        wx250s/base_link:
+        puppet_left/base_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
-        wx250s/ee_arm_link:
+        puppet_left/ee_arm_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
-        wx250s/ee_gripper_link:
+        puppet_left/ee_gripper_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
-        wx250s/fingers_link:
+        puppet_left/fingers_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
-        wx250s/gripper_bar_link:
-          Alpha: 1
-          Show Axes: false
-          Show Trail: false
-          Value: true
-        wx250s/gripper_link:
+        puppet_left/gripper_bar_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
-        wx250s/gripper_prop_link:
+        puppet_left/gripper_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
-        wx250s/left_finger_link:
+        puppet_left/gripper_prop_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
-        wx250s/lower_forearm_link:
+        puppet_left/left_finger_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
-        wx250s/right_finger_link:
+        puppet_left/lower_forearm_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
-        wx250s/shoulder_link:
+        puppet_left/right_finger_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
-        wx250s/upper_arm_link:
+        puppet_left/shoulder_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
-        wx250s/upper_forearm_link:
+        puppet_left/upper_arm_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
           Value: true
-        wx250s/wrist_link:
+        puppet_left/upper_forearm_link:
+          Alpha: 1
+          Show Axes: false
+          Show Trail: false
+          Value: true
+        puppet_left/wrist_link:
           Alpha: 1
           Show Axes: false
           Show Trail: false
@@ -142,63 +140,134 @@ Visualization Manager:
       Visual Enabled: true
     - Class: rviz/TF
       Enabled: true
+      Filter (blacklist): ""
+      Filter (whitelist): ""
       Frame Timeout: 15
       Frames:
         All Enabled: false
+        puppet_left/base_link:
+          Value: true
+        puppet_left/ee_arm_link:
+          Value: true
+        puppet_left/ee_gripper_link:
+          Value: true
+        puppet_left/fingers_link:
+          Value: true
+        puppet_left/gripper_bar_link:
+          Value: true
+        puppet_left/gripper_link:
+          Value: true
+        puppet_left/gripper_prop_link:
+          Value: true
+        puppet_left/left_finger_link:
+          Value: true
+        puppet_left/lower_forearm_link:
+          Value: true
+        puppet_left/right_finger_link:
+          Value: true
+        puppet_left/shoulder_link:
+          Value: true
+        puppet_left/upper_arm_link:
+          Value: true
+        puppet_left/upper_forearm_link:
+          Value: true
+        puppet_left/wrist_link:
+          Value: true
+        puppet_middle/base_link:
+          Value: true
+        puppet_middle/camera_roll_link:
+          Value: true
+        puppet_middle/lower_forearm_link:
+          Value: true
+        puppet_middle/shoulder_link:
+          Value: true
+        puppet_middle/upper_arm_link:
+          Value: true
+        puppet_middle/upper_forearm_link:
+          Value: true
+        puppet_middle/wrist_link:
+          Value: true
+        puppet_right/base_link:
+          Value: true
+        puppet_right/ee_arm_link:
+          Value: true
+        puppet_right/ee_gripper_link:
+          Value: true
+        puppet_right/fingers_link:
+          Value: true
+        puppet_right/gripper_bar_link:
+          Value: true
+        puppet_right/gripper_link:
+          Value: true
+        puppet_right/gripper_prop_link:
+          Value: true
+        puppet_right/left_finger_link:
+          Value: true
+        puppet_right/lower_forearm_link:
+          Value: true
+        puppet_right/right_finger_link:
+          Value: true
+        puppet_right/shoulder_link:
+          Value: true
+        puppet_right/upper_arm_link:
+          Value: true
+        puppet_right/upper_forearm_link:
+          Value: true
+        puppet_right/wrist_link:
+          Value: true
         world:
           Value: true
-        wx250s/base_link:
-          Value: true
-        wx250s/ee_arm_link:
-          Value: true
-        wx250s/ee_gripper_link:
-          Value: true
-        wx250s/fingers_link:
-          Value: true
-        wx250s/gripper_bar_link:
-          Value: true
-        wx250s/gripper_link:
-          Value: true
-        wx250s/gripper_prop_link:
-          Value: true
-        wx250s/left_finger_link:
-          Value: true
-        wx250s/lower_forearm_link:
-          Value: true
-        wx250s/right_finger_link:
-          Value: true
-        wx250s/shoulder_link:
-          Value: true
-        wx250s/upper_arm_link:
-          Value: true
-        wx250s/upper_forearm_link:
-          Value: true
-        wx250s/wrist_link:
-          Value: true
-      Marker Scale: 0.150000006
+      Marker Alpha: 1
+      Marker Scale: 0.15000000596046448
       Name: TF
       Show Arrows: true
       Show Axes: true
       Show Names: true
       Tree:
         world:
-          wx250s/base_link:
-            wx250s/shoulder_link:
-              wx250s/upper_arm_link:
-                wx250s/upper_forearm_link:
-                  wx250s/lower_forearm_link:
-                    wx250s/wrist_link:
-                      wx250s/gripper_link:
-                        wx250s/ee_arm_link:
-                          wx250s/gripper_bar_link:
-                            wx250s/fingers_link:
-                              wx250s/ee_gripper_link:
+          puppet_left/base_link:
+            puppet_left/shoulder_link:
+              puppet_left/upper_arm_link:
+                puppet_left/upper_forearm_link:
+                  puppet_left/lower_forearm_link:
+                    puppet_left/wrist_link:
+                      puppet_left/gripper_link:
+                        puppet_left/ee_arm_link:
+                          puppet_left/gripper_bar_link:
+                            puppet_left/fingers_link:
+                              puppet_left/ee_gripper_link:
                                 {}
-                              wx250s/left_finger_link:
+                              puppet_left/left_finger_link:
                                 {}
-                              wx250s/right_finger_link:
+                              puppet_left/right_finger_link:
                                 {}
-                          wx250s/gripper_prop_link:
+                          puppet_left/gripper_prop_link:
+                            {}
+          puppet_middle/base_link:
+            puppet_middle/shoulder_link:
+              puppet_middle/upper_arm_link:
+                puppet_middle/upper_forearm_link:
+                  puppet_middle/lower_forearm_link:
+                    puppet_middle/wrist_link:
+                      puppet_middle/camera_roll_link:
+                        {}
+          puppet_right/base_link:
+            puppet_right/shoulder_link:
+              puppet_right/upper_arm_link:
+                puppet_right/upper_forearm_link:
+                  puppet_right/lower_forearm_link:
+                    puppet_right/wrist_link:
+                      puppet_right/gripper_link:
+                        puppet_right/ee_arm_link:
+                          puppet_right/gripper_bar_link:
+                            puppet_right/fingers_link:
+                              puppet_right/ee_gripper_link:
+                                {}
+                              puppet_right/left_finger_link:
+                                {}
+                              puppet_right/right_finger_link:
+                                {}
+                          puppet_right/gripper_prop_link:
                             {}
       Update Interval: 0
       Value: true
@@ -217,7 +286,10 @@ Visualization Manager:
     - Class: rviz/FocusCamera
     - Class: rviz/Measure
     - Class: rviz/SetInitialPose
+      Theta std deviation: 0.2617993950843811
       Topic: /initialpose
+      X std deviation: 0.5
+      Y std deviation: 0.5
     - Class: rviz/SetGoal
       Topic: /move_base_simple/goal
     - Class: rviz/PublishPoint
@@ -227,35 +299,35 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/Orbit
-      Distance: 1.5
+      Distance: 2.6639702320098877
       Enable Stereo Rendering:
-        Stereo Eye Separation: 0.0599999987
+        Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
         Swap Stereo Eyes: false
         Value: false
+      Field of View: 0.7853981852531433
       Focal Point:
         X: 0
         Y: 0
         Z: 0
       Focal Shape Fixed Size: false
-      Focal Shape Size: 0.0500000007
+      Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
-      Near Clip Distance: 0.00999999978
-      Pitch: 0.785398185
+      Near Clip Distance: 0.009999999776482582
+      Pitch: 0.9153978824615479
       Target Frame: <Fixed Frame>
-      Value: Orbit (rviz)
-      Yaw: 0.785398185
+      Yaw: 3.2535722255706787
     Saved: ~
 Window Geometry:
   Displays:
     collapsed: false
-  Height: 1016
+  Height: 1697
   Hide Left Dock: false
   Hide Right Dock: false
   Interbotix Control Panel:
     collapsed: false
-  QMainWindow State: 000000ff00000000fd0000000400000000000001920000035afc020000000dfb0000001200530065006c0065006300740069006f006e00000001e10000009b0000005c00fffffffb0000001e0054006f006f006c002000500072006f007000650072007400690065007302000001ed000001df00000185000000a3fb000000120056006900650077007300200054006f006f02000001df000002110000018500000122fb000000200054006f006f006c002000500072006f0070006500720074006900650073003203000002880000011d000002210000017afb000000100044006900730070006c006100790073010000003d00000206000000c900fffffffb0000002000730065006c0065006300740069006f006e00200062007500660066006500720200000138000000aa0000023a00000294fb00000014005700690064006500530074006500720065006f02000000e6000000d2000003ee0000030bfb0000000c004b0069006e0065006300740200000186000001060000030c00000261fb000000180054006f00720071007500650045006e00610062006c006500000002fe000000990000000000000000fb0000001a0054006f007200710075006500200045006e00610062006c00650000000300000000b20000000000000000fb0000001a0054006f007200710075006500200045006e00610062006c00650000000316000000810000000000000000fb0000001a0054006f007200710075006500200045006e00610062006c006501000002fd0000009a0000000000000000fb000000300049006e0074006500720062006f00740069007800200043006f006e00740072006f006c002000500061006e0065006c01000002490000014e0000001600ffffff000000010000010f00000396fc0200000003fb0000001e0054006f006f006c002000500072006f00700065007200740069006500730100000041000000780000000000000000fb0000000a00560069006500770073000000002800000396000000a400fffffffb0000001200530065006c0065006300740069006f006e010000025a000000b200000000000000000000000200000490000000a9fc0100000001fb0000000a00560069006500770073030000004e00000080000002e10000019700000003000007380000003efc0100000002fb0000000800540069006d0065010000000000000738000002eb00fffffffb0000000800540069006d00650100000000000004500000000000000000000005a00000035a00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
+  QMainWindow State: 000000ff00000000fd00000004000000000000051e0000059bfc020000000dfb0000001200530065006c0065006300740069006f006e00000001e10000009b000000b000fffffffb0000001e0054006f006f006c002000500072006f007000650072007400690065007302000001ed000001df00000185000000b0fb000000120056006900650077007300200054006f006f02000001df000002110000018500000122fb000000200054006f006f006c002000500072006f0070006500720074006900650073003203000002880000011d000002210000017afb000000100044006900730070006c006100790073010000006e000004410000018200fffffffb0000002000730065006c0065006300740069006f006e00200062007500660066006500720200000138000000aa0000023a00000294fb00000014005700690064006500530074006500720065006f02000000e6000000d2000003ee0000030bfb0000000c004b0069006e0065006300740200000186000001060000030c00000261fb000000180054006f00720071007500650045006e00610062006c006500000002fe000000990000000000000000fb0000001a0054006f007200710075006500200045006e00610062006c00650000000300000000b20000000000000000fb0000001a0054006f007200710075006500200045006e00610062006c00650000000316000000810000000000000000fb0000001a0054006f007200710075006500200045006e00610062006c006501000002fd0000009a0000000000000000fb000000300049006e0074006500720062006f00740069007800200043006f006e00740072006f006c002000500061006e0065006c01000004bb0000014e0000014e0000014e000000010000010f00000396fc0200000003fb0000001e0054006f006f006c002000500072006f00700065007200740069006500730100000041000000780000000000000000fb0000000a005600690065007700730000000028000003960000013200fffffffb0000001200530065006c0065006300740069006f006e010000025a000000b200000000000000000000000200000490000000a9fc0100000001fb0000000a00560069006500770073030000004e00000080000002e1000001970000000300000b540000005efc0100000002fb0000000800540069006d0065010000000000000b54000006dc00fffffffb0000000800540069006d006501000000000000045000000000000000000000062a0000059b00000004000000040000000800000008fc0000000100000002000000010000000a0054006f006f006c00730100000000ffffffff0000000000000000
   Selection:
     collapsed: false
   Time:
@@ -264,6 +336,6 @@ Window Geometry:
     collapsed: false
   Views:
     collapsed: false
-  Width: 1855
+  Width: 2900
   X: 65
-  Y: 24
+  Y: 54
