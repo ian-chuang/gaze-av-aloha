@@ -1,36 +1,140 @@
-import rospy
 import time
+import rospy
+import numpy as np
 
 from interbotix_xs_modules.arm import InterbotixManipulatorXS
 
-rospy.init_node("test_arm")
 
-bot = InterbotixManipulatorXS(
-    robot_model="wx250s",
-    group_name="arm",
-    gripper_name="gripper",
-    robot_name="puppet_left",
-    moving_time=2.0,
-    accel_time=0.3,
-    init_node=False,
-)
+def print_joint_states(bot):
 
-time.sleep(1)
+    names = bot.arm.core.joint_states.name
+    pos = bot.arm.core.joint_states.position
 
-print("moving")
+    joint_map = dict(zip(names, pos))
 
-bot.arm.set_joint_positions(
-    [0.5, 0, 0, 0, 0, 0],
-    blocking=True,
-)
+    print("\njoint states:")
 
-time.sleep(1)
+    for k, v in joint_map.items():
+        print(f"{k}: {round(v, 3)}")
 
-bot.arm.set_joint_positions(
-    [0, 0.5, 0, 0, 0, 0],
-    blocking=True,
-)
 
-print("done")
+def main():
 
-time.sleep(5)
+    rospy.init_node("real_vx300s_test")
+
+    bot = InterbotixManipulatorXS(
+        robot_model="vx300s",
+        group_name="arm",
+        gripper_name="gripper",
+        robot_name="puppet_left",
+        moving_time=2.0,
+        accel_time=0.3,
+        init_node=False,
+    )
+
+    rospy.sleep(1.0)
+
+    print("\n========================")
+    print("CONNECTED")
+    print("========================")
+
+    print("\njoint names:")
+    print(bot.arm.group_info.joint_names)
+
+    # --------------------------------------------------
+    # FORCE OPERATING MODE
+    # --------------------------------------------------
+
+    print("\nsetting operating mode...")
+
+    bot.dxl.robot_set_operating_modes(
+        "group",
+        "arm",
+        "position",
+    )
+
+    rospy.sleep(0.5)
+
+    # --------------------------------------------------
+    # ENABLE TORQUE
+    # --------------------------------------------------
+
+    print("enabling torque...")
+
+    bot.dxl.robot_torque_enable(
+        "group",
+        "arm",
+        True,
+    )
+
+    rospy.sleep(0.5)
+
+    # --------------------------------------------------
+    # PRINT CURRENT STATES
+    # --------------------------------------------------
+
+    print_joint_states(bot)
+
+    # --------------------------------------------------
+    # TEST 1
+    # --------------------------------------------------
+
+    print("\n========================")
+    print("TEST 1")
+    print("========================")
+
+    cmd1 = [0.3, -0.3, 0.5, 0.0, 0.0, 0.0]
+
+    print("sending:")
+    print(cmd1)
+
+    bot.arm.set_joint_positions(
+        cmd1,
+        moving_time=2.0,
+        accel_time=0.5,
+        blocking=True,
+    )
+
+    rospy.sleep(1.0)
+
+    print_joint_states(bot)
+
+    # --------------------------------------------------
+    # TEST 2
+    # --------------------------------------------------
+
+    print("\n========================")
+    print("TEST 2")
+    print("========================")
+
+    cmd2 = [-0.3, 0.3, -0.5, 0.0, 0.0, 0.0]
+
+    print("sending:")
+    print(cmd2)
+
+    bot.arm.set_joint_positions(
+        cmd2,
+        moving_time=2.0,
+        accel_time=0.5,
+        blocking=True,
+    )
+
+    rospy.sleep(1.0)
+
+    print_joint_states(bot)
+
+    # --------------------------------------------------
+    # HOME
+    # --------------------------------------------------
+
+    print("\nreturning home...")
+
+    bot.arm.go_to_home_pose()
+
+    rospy.sleep(2.0)
+
+    print("\nDONE")
+
+
+if __name__ == "__main__":
+    main()
