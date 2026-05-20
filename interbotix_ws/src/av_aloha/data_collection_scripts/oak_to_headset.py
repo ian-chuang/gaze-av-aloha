@@ -57,7 +57,7 @@ while pipeline.isRunning():
     if headset_data is None:
         continue 
 
-    # --- Extract positions ---
+    """ # --- Extract positions ---
     h_pos = headset_data.h_pos
     l_pos = headset_data.l_pos
     r_pos = headset_data.r_pos
@@ -79,4 +79,4 @@ while pipeline.isRunning():
         f"R-H: ({r_rel[0]:.3f}, {r_rel[1]:.3f}, {r_rel[2]:.3f})"
     )
 
-    headset.send_feedback(feedback)
+    headset.send_feedback(feedback) """
