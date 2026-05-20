@@ -13,6 +13,8 @@
   <arg name="mode_configs"                      default="$(find interbotix_xsarm_control)/config/modes.yaml"/>
   <arg name="load_configs"                      default="true"/>
   <arg name="use_sim"                           default="false"/>
+  <arg name="port" default="/dev/ttyUSB0"/>
+  <arg name="baudrate" default="1000000"/>
 
   <arg name="xs_sdk_type" value="xs_sdk" unless="$(arg use_sim)"/>
   <arg name="xs_sdk_type" value="xs_sdk_sim" if="$(arg use_sim)"/>
@@ -38,6 +40,8 @@
     <param name="motor_configs"                   value="$(arg motor_configs)"/>
     <param name="mode_configs"                    value="$(arg mode_configs)"/>
     <param name="load_configs"                    value="$(arg load_configs)"/>
+    <param name="port" value="$(arg port)"/>
+    <param name="baudrate" value="$(arg baudrate)"/>
   </node>
 
 </launch>

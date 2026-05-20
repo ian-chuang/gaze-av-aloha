@@ -23,9 +23,10 @@
     <arg name="robot_name"                        value="$(arg robot_name_puppet_left)"/>
     <arg name="base_link_frame"                   value="$(arg base_link_puppet)"/>
     <arg name="use_world_frame"                   value="false"/>
-    <arg name="use_rviz"                          value="$(arg use_rviz)"/>
+    <arg name="use_rviz"                          value="false"/>
     <arg name="mode_configs"                      value="$(arg puppet_modes_left)"/>
-    <arg name="use_sim"                           value="$(arg use_sim)"/>
+    <arg name="use_sim"                           value="false"/>
+    <arg name="port" value="/dev/ttyUSB0"/>
   </include>
 
   <include if="$(arg launch_driver)" file="$(find interbotix_xsarm_control)/launch/xsarm_control.launch">
@@ -35,7 +36,8 @@
     <arg name="use_world_frame"                   value="false"/>
     <arg name="use_rviz"                          value="false"/>
     <arg name="mode_configs"                      value="$(arg puppet_modes_right)"/>
-    <arg name="use_sim"                           value="$(arg use_sim)"/>
+    <arg name="use_sim"                           value="false"/>
+    <arg name="port" value="/dev/ttyUSB1"/>
   </include>
 
   <include if="$(arg launch_driver)" file="$(find wx250s_7dof_description)/launch/xsarm_control.launch">
@@ -45,7 +47,8 @@
     <arg name="use_world_frame"                   value="false"/>
     <arg name="use_rviz"                          value="false"/>
     <arg name="mode_configs"                      value="$(arg puppet_modes_middle)"/>
-    <arg name="use_sim"                           value="$(arg use_sim)"/>
+    <arg name="use_sim"                           value="false"/>
+    <arg name="port" value="/dev/ttyUSB2"/>
   </include>
 
   <node
@@ -66,7 +69,7 @@
     type="static_transform_publisher"
     args="0 0 0 0 0 0 /world /$(arg robot_name_puppet_middle)/base_link"/>
 
-  <!-- <include file="$(find realsense2_camera)/launch/rs_camera.launch">
+  <include file="$(find realsense2_camera)/launch/rs_camera.launch">
       <arg name="camera" value="cam_left_wrist"/>
       <arg name="serial_no" value="230322272239"/>
       <arg name="color_width" value="640"/>
@@ -80,7 +83,7 @@
       <arg name="color_width" value="640"/>
       <arg name="color_height" value="480"/>
       <arg name="color_fps" value="60"/>
-  </include> -->
+  </include>
 
   <!-- <include file="$(find realsense2_camera)/launch/rs_camera.launch">
       <arg name="camera" value="cam_high"/>
