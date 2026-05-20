@@ -244,6 +244,7 @@ def main():
 
     left_bot.dxl.robot_set_operating_modes("single", "gripper", "current_based_position")
     left_bot.dxl.robot_torque_enable("single", "gripper", True)
+    #left_bot.dxl.robot_set_operating_modes("group", "arm", "position")
 
     right_bot = InterbotixManipulatorXS(
         robot_model="vx300s",
@@ -257,6 +258,7 @@ def main():
 
     right_bot.dxl.robot_set_operating_modes("single", "gripper", "current_based_position")
     right_bot.dxl.robot_torque_enable("single", "gripper", True)
+    #right_bot.dxl.robot_set_operating_modes("group", "arm", "position")
 
     middle_bot = InterbotixManipulatorXS(
         robot_model="wx250s",
@@ -280,7 +282,7 @@ def main():
         True,
     )
 
-    middle_q = [0.010737866163253784, -1.8990682363510132, 0.03221359848976135, -0.08590292930603027, 2.175184726715088, 1.5999419689178467, 0.0]
+    middle_q = [0.05, -1.5, 0.05, -0.08, 2.0, 1.4, 0.0]
 
     # middle_bot.arm.set_joint_positions(
     #     middle_q.tolist(),
@@ -289,7 +291,7 @@ def main():
     # )
 
     middle_bot.arm.set_joint_positions(
-        middle_q,
+        middle_q[:6],
         moving_time=2.0,
         accel_time=0.5,
         blocking=True,
@@ -329,12 +331,6 @@ def main():
     q[middle_arm_indices] = np.array(
         middle_q
     )
-
-    # --------------------------------------------------------
-    # MIDDLE ARM INITIAL CONFIG
-    # --------------------------------------------------------
-
-    
 
     # ========================================================
     # FK
@@ -400,21 +396,21 @@ def main():
 
     full_joint_velocity_limits = np.ones(
         robot.joints.num_actuated_joints
-    ) * 4.0
+    ) * 3.0
 
     # ========================================================
     # REMAP
     # ========================================================
 
     R_remap_left = np.array([
-        [0, -1, 0],
-        [1, 0, 0],
+        [0, 1, 0],
+        [-1, 0, 0],
         [0, 0, 1],
     ])
 
     R_remap_right = np.array([
         [0, 1, 0],
-        [1, 0, 0],
+        [-1, 0, 0],
         [0, 0, 1],
     ])
 
@@ -464,6 +460,12 @@ def main():
         )
 
         left_trigger = headset_data.l_index_trigger
+        right_trigger = headset_data.r_index_trigger
+
+        """ 
+        Debugging controller triggers (left/right, index/hand)
+        
+        left_trigger = headset_data.l_index_trigger
         if left_trigger > 0:
             print("LEFT TRIGGER:", left_trigger)
         right_trigger = headset_data.r_index_trigger
@@ -475,7 +477,7 @@ def main():
             print("LEFT HAND TRIGGER:", left_trigger2)
         right_trigger2 = headset_data.r_hand_trigger
         if right_trigger2 > 0:
-            print("RIGHT HAND TRIGGER:", right_trigger2)
+            print("RIGHT HAND TRIGGER:", right_trigger2) """
 
         # ====================================================
         # ENABLE TELEOP
