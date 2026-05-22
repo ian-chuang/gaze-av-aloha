@@ -56,7 +56,6 @@ POSITION_SCALE = 1.0
 
 ALPHA = 0.2
 
-
 # ============================================================
 # HELPERS
 # ============================================================
@@ -70,33 +69,7 @@ def quat_xyzw_to_wxyz(q):
         q[2],
     ])
 
-RIGHT_ARM_NOMINAL = np.array([
-    -0.38644996,
-    -1.12195969,
-    1.15191531,
-    1.26696038,
-    0.38959768,
-    -1.54413652,
-])
 
-LEFT_ARM_NOMINAL = np.array([
-    0.03241233,
-    -1.17097342,
-    0.98509574,
-    0.19366860,
-    0.99780756,
-    -0.36708522,
-])
-
-MIDDLE_ARM_NOMINAL = np.array([
-    0.05,
-    -1.5,
-    0.05,
-    -0.08,
-    2.0,
-    1.4,
-    0.0,
-])
 
 # ============================================================
 # MAIN
@@ -148,6 +121,8 @@ def main():
 
     time.sleep(0.5)
 
+
+
     # ========================================================
     # ROBOT MODEL
     # ========================================================
@@ -160,11 +135,11 @@ def main():
         urdf
     )
 
-    for name in robot.joints.actuated_names:
+    # for name in robot.joints.actuated_names:
 
-        if "middle" in name:
+    #     if "middle" in name:
 
-            print(name)
+    #         print(name)
 
     # ========================================================
     # JOINT GROUPS
@@ -309,9 +284,9 @@ def main():
         True,
     )
 
-    left_q = [0.0, -1.9, 1.65, 0.0, 0.65, 0.0, 0.0]
+    left_q = [0.0, -1.8, 1.6, 0.0, 0.6, 0.0, 0.0]
 
-    right_q = [0.0, -1.8, 1.6, 0.0, 0.7, 0.0, 0.0]
+    right_q = [0.0, -1.8, 1.6, 0.0, 0.6, 0.0, 0.0]
 
     middle_q = [0.05, -1.5, 0.05, -0.08, 2.0, 1.4, 0.0]
 
@@ -377,13 +352,6 @@ def main():
         middle_q
     )
 
-    q_nominal = q.copy()
-
-    q_nominal[left_arm_indices] = LEFT_ARM_NOMINAL
-
-    q_nominal[right_arm_indices] = RIGHT_ARM_NOMINAL
-
-    q_nominal[middle_arm_indices] = MIDDLE_ARM_NOMINAL
 
     # ========================================================
     # FK
@@ -598,6 +566,8 @@ def main():
 
             headset.send_images(left_img, right_img)
 
+            
+
             # ------------------------------------------------
             # LEFT DELTA
             # ------------------------------------------------
@@ -706,17 +676,17 @@ def main():
                 @ left_start_controller_rot.T
             )
 
-            left_euler = R.from_matrix(
-                left_delta_rot
-            ).as_euler("xyz")
+            # left_euler = R.from_matrix(
+            #     left_delta_rot
+            # ).as_euler("xyz")
 
-            # invert pitch
-            left_euler[1] *= -1
+            # # invert pitch
+            # #left_euler[1] *= -1
 
-            left_delta_rot = R.from_euler(
-                "xyz",
-                left_euler
-            ).as_matrix()
+            # left_delta_rot = R.from_euler(
+            #     "xyz",
+            #     left_euler
+            # ).as_matrix()
 
             right_delta_rot = (
                 right_current_rot
@@ -728,14 +698,14 @@ def main():
             #     @ left_start_robot_rot
             # )
 
-            left_delta_rot_robot = (
-                R_remap_left
-                @ left_delta_rot
-                @ R_remap_left.T
-            )
+            # left_delta_rot_robot = (
+            #     R_remap_left
+            #     @ left_delta_rot
+            #     @ R_remap_left.T
+            # )
 
             left_target_rot = (
-                left_delta_rot_robot
+                left_delta_rot
                 @ left_start_robot_rot
             )
 
@@ -849,19 +819,6 @@ def main():
                 T_right = jaxlie.SE3(
                     fk[right_ee_index]
                 ).as_matrix()
-
-                print(
-                    "left:",
-                    np.round(
-                        left_target_position,
-                        3
-                    ),
-                    "right:",
-                    np.round(
-                        right_target_position,
-                        3
-                    ),
-                )
 
             else:
 
