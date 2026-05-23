@@ -1,3 +1,4 @@
+#from lerobot.lerobot.common.robots import config
 import rospy
 import time
 import numpy as np
@@ -18,6 +19,9 @@ import jaxlie
 
 from webrtc_headset import WebRTCHeadset
 from transform_utils import pose2mat
+
+import pyrealsense2 as rs
+import numpy as np
 
 import sys
 sys.path.append(
@@ -52,7 +56,7 @@ CONTROL_DT = 0.05
 MOVING_TIME = 0.07
 ACCEL_TIME = 0.02
 
-POSITION_SCALE = 1.0
+POSITION_SCALE = 1.8
 
 ALPHA = 0.2
 
@@ -68,8 +72,6 @@ def quat_xyzw_to_wxyz(q):
         q[1],
         q[2],
     ])
-
-
 
 # ============================================================
 # MAIN
@@ -96,11 +98,11 @@ def main():
     feedback = HeadsetFeedback()
     headset_control.reset()
 
-    # ---- Setup pipeline ----
-    pipeline = dai.Pipeline()
+    # ---- Setup OAK pipeline ----
+    oak_pipeline = dai.Pipeline()
 
-    cam_left = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_B)
-    cam_right = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_C)
+    cam_left = oak_pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_B)
+    cam_right = oak_pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_C)
 
     left_out = cam_left.requestOutput(
         (1280, 800),
@@ -117,11 +119,44 @@ def main():
     q_left = left_out.createOutputQueue()
     q_right = right_out.createOutputQueue()
 
-    pipeline.start()
+    oak_pipeline.start()
 
     time.sleep(0.5)
 
+    # Realsense cameras
 
+    CAMERA_SERIALS = {
+        "left_wrist":  "230322272239",
+        "right_wrist": "230322270105",
+        "top_scene":   "230322270396",
+        "low_scene":   "230322271312",
+    }
+
+    pipelines = {}
+
+    for name, serial in CAMERA_SERIALS.items():
+
+        pipeline = rs.pipeline()
+
+        config = rs.config()
+
+        config.enable_device(serial)
+
+        # config.enable_stream(
+        #     rs.stream.depth,
+        #     640,
+        #     480,
+        #     rs.format.z16,
+        #     30,
+        # )
+
+        config.enable_stream(rs.stream.color, 848, 480, rs.format.bgr8, 60)
+
+        pipeline.start(config)
+
+        pipelines[name] = pipeline
+
+        print(f"Started: {name}")
 
     # ========================================================
     # ROBOT MODEL
@@ -134,12 +169,6 @@ def main():
     robot = pk.Robot.from_urdf(
         urdf
     )
-
-    # for name in robot.joints.actuated_names:
-
-    #     if "middle" in name:
-
-    #         print(name)
 
     # ========================================================
     # JOINT GROUPS
@@ -566,7 +595,31 @@ def main():
 
             headset.send_images(left_img, right_img)
 
-            
+            # REALSENSE IMAGES
+
+            for name, pipeline in pipelines.items():
+
+                frames = pipeline.wait_for_frames()
+
+                # depth_frame = frames.get_depth_frame()
+                color_frame = frames.get_color_frame()
+
+                if not color_frame:
+                    continue
+
+                # depth_image = np.asanyarray(
+                #     depth_frame.get_data()
+                # )
+
+                color_image = np.asanyarray(
+                    color_frame.get_data()
+                )
+
+                print(
+                    f"{name}: "
+                    # f"{depth_image.shape} "
+                    f"{color_image.shape}"
+                )
 
             # ------------------------------------------------
             # LEFT DELTA
