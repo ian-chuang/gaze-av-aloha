@@ -25,8 +25,6 @@ from webrtc_headset import WebRTCHeadset
 from transform_utils import pose2mat
 import pyroki_snippets as pks
 
-import time
-
 import logging
 
 logging.basicConfig(
@@ -43,9 +41,8 @@ TIMING_LOG = {
     "loop": [],
     "key": [],
     "headset": [],
-    "ik_block": [],
-    "left_ik": [],
-    "right_ik": [],
+    "ik_solve": [],
+    "ik_section": [],
     "cmd": [],
     "log": [],
 }
@@ -98,64 +95,45 @@ MIDDLE_ARM_NAMES = [
 LEFT_RESET_Q = np.array([0.0, -1.27, 0.99, 0.0, 0.35, 0.0], dtype=float)
 RIGHT_RESET_Q = np.array([0.0, -1.27, 0.99, 0.0, 0.35, 0.0], dtype=float)
 MIDDLE_INIT_Q = np.array([0.05, -1.5, 0.05, -0.08, 2.0, 1.4, 0.0], dtype=float)
+       # 12.5 Hz solve/publish loop
 
-CONTROL_DT = 0.02          # 50 Hz input loop
-IK_DT = 0.08               # 12.5 Hz solve/publish loop
+# POS_WEIGHT = 40.0
+# ORI_WEIGHT = 0.5           # or 0.0 if you can tolerate fixed wrist orientation
+# DQ_WEIGHT = 0.15
 
-POS_WEIGHT = 40.0
-ORI_WEIGHT = 0.5           # or 0.0 if you can tolerate fixed wrist orientation
-DQ_WEIGHT = 0.15
+# MAX_EE_STEP = 0.012        # meters per IK solve
+# MAX_JOINT_STEP = np.array([0.03, 0.03, 0.04, 0.06, 0.06, 0.08])
 
-MAX_EE_STEP = 0.012        # meters per IK solve
-MAX_JOINT_STEP = np.array([0.03, 0.03, 0.04, 0.06, 0.06, 0.08])
-
-ARM_MOVING_TIME = 0.18
-ARM_ACCEL_TIME = 0.06
-ALPHA = 0.3
-POSITION_SCALE = 2.0
+# ARM_MOVING_TIME = 0.18
+# ARM_ACCEL_TIME = 0.06
+# ALPHA = 0.3
+# POSITION_SCALE = 2.0
 
 latest_key = None
 recording = False
 frame_queues = {name: Queue(maxsize=30) for name in CAMERA_SERIALS}
 writer_threads = {}
 
-def solve_single_arm_ik(
-    robot,
-    target_link_name,
-    target_position,
-    target_wxyz,
-    prev_q=None,
-    smoothness_weight=0.0,
-    q_rest=None,
-    rest_weight=0.0,
-):
-    return pks.solve_ik_with_multiple_targets(
-        robot=robot,
-        target_link_names=[target_link_name],
-        target_wxyzs=np.asarray([target_wxyz], dtype=float),
-        target_positions=np.asarray([target_position], dtype=float),
-        q_prev=prev_q,
-        smoothness_weight=smoothness_weight,
-        q_rest=q_rest,
-        rest_weight=rest_weight,
-    )
+def clamp_joint_step(q_curr, q_target, max_step):
+    dq = np.clip(q_target - q_curr, -max_step, max_step)
+    return q_curr + dq
 
-def clamp_cartesian_step(target, current, max_step):
-    delta = target - current
-    n = np.linalg.norm(delta)
-    if n > max_step:
-        delta *= (max_step / n)
-    return current + delta
 
-def clamp_joint_step(q_target, q_current, max_step):
-    dq = q_target - q_current
-    dq = np.clip(dq, -max_step, max_step)
-    return q_current + dq
+def clamp_cartesian_step(target, prev_target, max_step):
+    delta = target - prev_target
+    norm = np.linalg.norm(delta)
+    if norm > max_step and norm > 1e-9:
+        delta *= (max_step / norm)
+    return prev_target + delta
+
+
+def quat_xyzw_to_wxyz(q_xyzw):
+    return np.array([q_xyzw[3], q_xyzw[0], q_xyzw[1], q_xyzw[2]], dtype=float)
 
 @dataclass
 class TeleopConfig:
-    control_dt: float = 0.02
-    position_scale: float = 1.0
+    control_dt: float = 0.05
+    position_scale: float = 2.0
     alpha: float = 0.3
     arm_cmd_dt: float = 0.10
     moving_time: float = 0.20
@@ -163,6 +141,9 @@ class TeleopConfig:
     max_ee_step: float = 0.010
     max_joint_step: np.ndarray = None
     full_joint_velocity_limits_value: float = 3.0
+    pos_weight: float = 40.0
+    ori_weight: float = 0.5
+    dq_weight: float = 0.15
     R_remap_left: np.ndarray = None
     R_remap_right: np.ndarray = None
 
@@ -196,24 +177,11 @@ class RobotCommandState:
     last_left_cmd: np.ndarray = None
     last_right_cmd: np.ndarray = None
 
-
-def quat_xyzw_to_wxyz(q):
-    return np.array([q[3], q[0], q[1], q[2]], dtype=float)
-
-
-def clamp_joint_step(q_curr, q_target, max_step):
-    dq = q_target - q_curr
-    dq = np.clip(dq, -max_step, max_step)
-    return q_curr + dq
-
-
-def clamp_cartesian_step(target, prev_target, max_step):
-    delta = target - prev_target
-    norm = np.linalg.norm(delta)
-    if norm > max_step:
-        delta = delta * (max_step / norm)
-    return prev_target + delta
-
+@dataclass
+class CommandKinematicsState:
+    q_cmd: np.ndarray = None
+    T_left_cmd: np.ndarray = None
+    T_right_cmd: np.ndarray = None
 
 def publish_grippers(left_bot, right_bot, left_trigger, right_trigger):
     left_cmd = JointSingleCommand(name="gripper")
@@ -271,30 +239,30 @@ def compute_bimanual_targets(cfg, state, left_controller, right_controller, T_le
     return left_target_pos, right_target_pos, left_target_wxyz, right_target_wxyz
 
 
-def maybe_send_arm_commands(cfg, cmd_state, now, q_new, q, left_arm_indices, right_arm_indices, left_bot, right_bot):
-    if q_new is None:
-        return False, "ik_failed"
-    if (now - cmd_state.last_arm_cmd_time) < cfg.arm_cmd_dt:
-        return False, "rate_limited"
+# def maybe_send_arm_commands(cfg, cmd_state, now, q_new, q, left_arm_indices, right_arm_indices, left_bot, right_bot):
+#     if q_new is None:
+#         return False, "ik_failed"
+#     if (now - cmd_state.last_arm_cmd_time) < cfg.arm_cmd_dt:
+#         return False, "rate_limited"
 
-    left_measured = np.array(left_bot.dxl.joint_states.position[:6], dtype=float)
-    right_measured = np.array(right_bot.dxl.joint_states.position[:6], dtype=float)
+#     left_measured = np.array(left_bot.dxl.joint_states.position[:6], dtype=float)
+#     right_measured = np.array(right_bot.dxl.joint_states.position[:6], dtype=float)
 
-    left_target_q = np.array(q_new[left_arm_indices], dtype=float)
-    right_target_q = np.array(q_new[right_arm_indices], dtype=float)
+#     left_target_q = np.array(q_new[left_arm_indices], dtype=float)
+#     right_target_q = np.array(q_new[right_arm_indices], dtype=float)
 
-    left_safe_q = clamp_joint_step(left_measured, left_target_q, cfg.max_joint_step)
-    right_safe_q = clamp_joint_step(right_measured, right_target_q, cfg.max_joint_step)
+#     left_safe_q = clamp_joint_step(left_measured, left_target_q, cfg.max_joint_step)
+#     right_safe_q = clamp_joint_step(right_measured, right_target_q, cfg.max_joint_step)
 
-    left_bot.arm.set_joint_positions(left_safe_q.tolist(), moving_time=cfg.moving_time, accel_time=cfg.accel_time, blocking=False)
-    right_bot.arm.set_joint_positions(right_safe_q.tolist(), moving_time=cfg.moving_time, accel_time=cfg.accel_time, blocking=False)
+#     left_bot.arm.set_joint_positions(left_safe_q.tolist(), moving_time=cfg.moving_time, accel_time=cfg.accel_time, blocking=False)
+#     right_bot.arm.set_joint_positions(right_safe_q.tolist(), moving_time=cfg.moving_time, accel_time=cfg.accel_time, blocking=False)
 
-    q[left_arm_indices] = left_safe_q
-    q[right_arm_indices] = right_safe_q
-    cmd_state.last_left_cmd = left_safe_q.copy()
-    cmd_state.last_right_cmd = right_safe_q.copy()
-    cmd_state.last_arm_cmd_time = now
-    return True, "sent"
+#     q[left_arm_indices] = left_safe_q
+#     q[right_arm_indices] = right_safe_q
+#     cmd_state.last_left_cmd = left_safe_q.copy()
+#     cmd_state.last_right_cmd = right_safe_q.copy()
+#     cmd_state.last_arm_cmd_time = now
+#     return True, "sent"
 
 
 def safe_move_arm_joints(bot, target_q, total_time=3.0, step_time=0.25, accel_ratio=0.35):
@@ -314,12 +282,62 @@ def safe_move_arm_joints(bot, target_q, total_time=3.0, step_time=0.25, accel_ra
         bot.arm.set_joint_positions(q_cmd.tolist(), moving_time=move_t, accel_time=accel_t, blocking=True)
 
 
-def move_to_reset_pose(left_bot, right_bot):
+# def move_to_reset_pose(left_bot, right_bot):
+#     print("\nMoving LEFT arm safely...")
+#     safe_move_arm_joints(left_bot, LEFT_RESET_Q, total_time=4.0, step_time=0.3)
+#     print("\nMoving RIGHT arm safely...")
+#     safe_move_arm_joints(right_bot, RIGHT_RESET_Q, total_time=4.0, step_time=0.3)
+    
+def move_to_reset_pose(
+    left_bot,
+    right_bot,
+    q,
+    cmd_kin,
+    cmd_state,
+    left_arm_indices,
+    right_arm_indices,
+    middle_arm_indices,
+    robot,
+    left_ee_index,
+    right_ee_index,
+    cfg,
+    full_joint_velocity_limits,
+):
     print("\nMoving LEFT arm safely...")
     safe_move_arm_joints(left_bot, LEFT_RESET_Q, total_time=4.0, step_time=0.3)
     print("\nMoving RIGHT arm safely...")
     safe_move_arm_joints(right_bot, RIGHT_RESET_Q, total_time=4.0, step_time=0.3)
 
+    # Update global commanded state
+    q[left_arm_indices] = LEFT_RESET_Q.copy()
+    q[right_arm_indices] = RIGHT_RESET_Q.copy()
+    q[middle_arm_indices] = MIDDLE_INIT_Q.copy()
+
+    _, T_left, T_right = refresh_fk(robot, q, left_ee_index, right_ee_index)
+
+    cmd_kin.q_cmd = q.copy()
+    cmd_kin.T_left_cmd = T_left.copy()
+    cmd_kin.T_right_cmd = T_right.copy()
+    cmd_state.last_left_cmd = LEFT_RESET_Q.copy()
+    cmd_state.last_right_cmd = RIGHT_RESET_Q.copy()
+
+    cmd_state.last_arm_cmd_time = 0.0  # reset command timer so next teleop is allowed immediately
+
+    # _ = pks.solve_trajectories_ik(
+    #     robot=robot,
+    #     target_link_names=[LEFT_EE_LINK, RIGHT_EE_LINK],
+    #     target_wxyzs=[
+    #         quat_xyzw_to_wxyz(R.from_matrix(T_left[:3, :3]).as_quat()),
+    #         quat_xyzw_to_wxyz(R.from_matrix(T_right[:3, :3]).as_quat()),
+    #     ],
+    #     target_positions=[T_left[:3, 3], T_right[:3, 3]],
+    #     prev_q=cmd_kin.q_cmd,
+    #     dt=cfg.arm_cmd_dt,
+    #     joint_velocity_limits=full_joint_velocity_limits,
+    #     pos_weight=cfg.pos_weight,
+    #     ori_weight=cfg.ori_weight,
+    #     dq_weight=cfg.dq_weight,
+    # )
 
 def append_episode_step(episode_data, left_joint_positions, right_joint_positions, left_gripper_state, right_gripper_state,
                         cmd_state, left_gripper_action, right_gripper_action):
@@ -470,9 +488,8 @@ def save_timing_log(task_name, episode_idx):
         loop=np.array(TIMING_LOG["loop"], dtype=float),
         key=np.array(TIMING_LOG["key"], dtype=float),
         headset=np.array(TIMING_LOG["headset"], dtype=float),
-        ik_block=np.array(TIMING_LOG["ik_block"], dtype=float),
-        left_ik=np.array(TIMING_LOG["left_ik"], dtype=float),
-        right_ik=np.array(TIMING_LOG["right_ik"], dtype=float),
+        ik_solve=np.array(TIMING_LOG["ik_solve"], dtype=float),
+        ik_section=np.array(TIMING_LOG["ik_section"], dtype=float),
         cmd=np.array(TIMING_LOG["cmd"], dtype=float),
         log=np.array(TIMING_LOG["log"], dtype=float),
     )
@@ -612,10 +629,6 @@ def main():
 
     pipelines = setup_cameras()
     robot, left_arm_indices, right_arm_indices, middle_arm_indices, left_ee_index, right_ee_index = build_robot_model()
-    target_link_indices = np.array([
-        robot.links.names.index(LEFT_EE_LINK),
-        robot.links.names.index(RIGHT_EE_LINK),
-    ], dtype=np.int32)
     left_bot, right_bot, middle_bot = create_bots(cfg)
     initialize_bots(left_bot, right_bot, middle_bot)
 
@@ -625,7 +638,23 @@ def main():
     q[middle_arm_indices] = np.array(MIDDLE_INIT_Q, dtype=float)
 
     fk, T_left, T_right = refresh_fk(robot, q, left_ee_index, right_ee_index)
+    cmd_kin = CommandKinematicsState(q_cmd=q.copy(), T_left_cmd=T_left.copy(), T_right_cmd=T_right.copy())
     full_joint_velocity_limits = np.ones(robot.joints.num_actuated_joints) * cfg.full_joint_velocity_limits_value
+
+    solve_bimanual_ik, warmup_bimanual_ik, _ = pks.make_bimanual_ik_solver(
+        robot=robot,
+        left_target_link_name=LEFT_EE_LINK,
+        right_target_link_name=RIGHT_EE_LINK,
+    )
+
+    warmup_bimanual_ik(
+        prev_q=cmd_kin.q_cmd.copy(),
+        joint_velocity_limits=full_joint_velocity_limits,
+        dt=cfg.arm_cmd_dt,
+        pos_weight=cfg.pos_weight,
+        ori_weight=cfg.ori_weight,
+        dq_weight=cfg.dq_weight,
+    )
 
     teleop_state = TeleopSessionState()
     cmd_state = RobotCommandState(
@@ -672,12 +701,22 @@ def main():
             stop_teleop_session(teleop_state)
             recording = False
             print("\nTeleop DISABLED. MOVING TO RESET POSE")
-            move_to_reset_pose(left_bot, right_bot)
-            q[left_arm_indices] = np.array(left_bot.dxl.joint_states.position[:6], dtype=float)
-            q[right_arm_indices] = np.array(right_bot.dxl.joint_states.position[:6], dtype=float)
-            fk, T_left, T_right = refresh_fk(robot, q, left_ee_index, right_ee_index)
+            move_to_reset_pose(
+                left_bot,
+                right_bot,
+                q,
+                cmd_kin,
+                cmd_state,
+                left_arm_indices,
+                right_arm_indices,
+                middle_arm_indices,
+                robot,
+                left_ee_index,
+                right_ee_index,
+                cfg,
+                full_joint_velocity_limits,
+            )
             print("\nRobot reset.")
-            # measure key-handling duration and skip rest of loop
             t_key_elapsed = now() - t_key_start
             print(f"[TIMING] key section: {t_key_elapsed*1000:.2f} ms")
             continue
@@ -739,7 +778,7 @@ def main():
         t_ik_start = now()
 
         if button_pressed and not teleop_state.active:
-            start_teleop_session(teleop_state, left_controller, right_controller, T_left, T_right)
+            start_teleop_session(teleop_state, left_controller, right_controller, cmd_kin.T_left_cmd, cmd_kin.T_right_cmd)
             print("\nTeleop ENABLED")
         elif (not button_pressed) and teleop_state.active:
             stop_teleop_session(teleop_state)
@@ -751,133 +790,74 @@ def main():
         )
 
         if teleop_state.active:
-            # ------------------------------------------------
-            # Compute positional and rotational targets
-            # (replaces the old LEFT/RIGHT DELTA + ROTATION block)
-            # ------------------------------------------------
             left_target_pos, right_target_pos, left_target_wxyz, right_target_wxyz = compute_bimanual_targets(
-                cfg, teleop_state, left_controller, right_controller, T_left, T_right
+                cfg,
+                teleop_state,
+                left_controller,
+                right_controller,
+                cmd_kin.T_left_cmd,
+                cmd_kin.T_right_cmd,
             )
 
-            now_ik = now()
-            if (now_ik - cmd_state.last_arm_cmd_time) >= cfg.arm_cmd_dt:
-                t_single_ik_start = now()
-
-                # =================================================
-                # WHOLE BODY TRAJECTORIES IK
-                # =================================================
-                t_ik_solve_start = now()
-                q_new = pks.solve_trajectories_ik(
-                    robot=robot,
-                    target_link_names=[LEFT_EE_LINK, RIGHT_EE_LINK],
-                    target_wxyzs=[
-                        left_target_wxyz,
-                        right_target_wxyz,
-                    ],
-                    target_positions=[
-                        left_target_pos,
-                        right_target_pos,
-                    ],
-                    prev_q=q,
+            t_solve_start = now()
+            if (t_solve_start - cmd_state.last_arm_cmd_time) >= cfg.arm_cmd_dt:
+                q_new = solve_bimanual_ik(
+                    left_target_position=left_target_pos,
+                    right_target_position=right_target_pos,
+                    left_target_wxyz=left_target_wxyz,
+                    right_target_wxyz=right_target_wxyz,
+                    prev_q=cmd_kin.q_cmd,
                     dt=cfg.arm_cmd_dt,
                     joint_velocity_limits=full_joint_velocity_limits,
-                    pos_weight=POS_WEIGHT,
-                    ori_weight=ORI_WEIGHT,
-                    dq_weight=DQ_WEIGHT,
+                    pos_weight=cfg.pos_weight,
+                    ori_weight=cfg.ori_weight,
+                    dq_weight=cfg.dq_weight,
+                    block_until_ready=True,
                 )
-                t_ik_elapsed = now() - t_ik_solve_start
+                t_solve_elapsed = now() - t_solve_start
 
-                # =================================================
-                # PER-ARM COMMANDS (same as before)
-                # =================================================
-                left_measured = np.array(left_bot.dxl.joint_states.position[:6], dtype=float)
-                right_measured = np.array(right_bot.dxl.joint_states.position[:6], dtype=float)
+                if q_new is not None:
+                    left_target_q = np.asarray(q_new[left_arm_indices], dtype=float)
+                    right_target_q = np.asarray(q_new[right_arm_indices], dtype=float)
 
-                left_target_q = q_new[left_arm_indices]
-                right_target_q = q_new[right_arm_indices]
+                    left_prev_cmd = cmd_state.last_left_cmd if cmd_state.last_left_cmd is not None else cmd_kin.q_cmd[left_arm_indices]
+                    right_prev_cmd = cmd_state.last_right_cmd if cmd_state.last_right_cmd is not None else cmd_kin.q_cmd[right_arm_indices]
 
-                t_cmd_start = now()
-                left_q_cmd = clamp_joint_step(left_measured, left_target_q, cfg.max_joint_step)
-                right_q_cmd = clamp_joint_step(right_measured, right_target_q, cfg.max_joint_step)
+                    t_cmd_start = now()
+                    left_q_cmd = clamp_joint_step(left_prev_cmd, left_target_q, cfg.max_joint_step)
+                    right_q_cmd = clamp_joint_step(right_prev_cmd, right_target_q, cfg.max_joint_step)
 
-                left_bot.arm.set_joint_positions(
-                    left_q_cmd.tolist(),
-                    moving_time=cfg.moving_time,
-                    accel_time=cfg.accel_time,
-                    blocking=False,
-                )
-                right_bot.arm.set_joint_positions(
-                    right_q_cmd.tolist(),
-                    moving_time=cfg.moving_time,
-                    accel_time=cfg.accel_time,
-                    blocking=False,
-                )
+                    left_bot.arm.set_joint_positions(
+                        left_q_cmd.tolist(),
+                        moving_time=cfg.moving_time,
+                        accel_time=cfg.accel_time,
+                        blocking=False,
+                    )
+                    right_bot.arm.set_joint_positions(
+                        right_q_cmd.tolist(),
+                        moving_time=cfg.moving_time,
+                        accel_time=cfg.accel_time,
+                        blocking=False,
+                    )
+                    t_cmd_elapsed = now() - t_cmd_start
 
-                q[:] = q_new
-                cmd_state.last_left_cmd = left_q_cmd.copy()
-                cmd_state.last_right_cmd = right_q_cmd.copy()
-                cmd_state.last_arm_cmd_time = now()
+                    cmd_kin.q_cmd[left_arm_indices] = left_q_cmd
+                    cmd_kin.q_cmd[right_arm_indices] = right_q_cmd
 
-                fk, T_left, T_right = refresh_fk(robot, q, left_ee_index, right_ee_index)
+                    fk_cmd = robot.forward_kinematics(cmd_kin.q_cmd)
+                    cmd_kin.T_left_cmd = jaxlie.SE3(fk_cmd[left_ee_index]).as_matrix()
+                    cmd_kin.T_right_cmd = jaxlie.SE3(fk_cmd[right_ee_index]).as_matrix()
 
-                t_cmd_elapsed = now() - t_cmd_start
-                t_single_ik_elapsed = now() - t_single_ik_start
+                    cmd_state.last_left_cmd = left_q_cmd.copy()
+                    cmd_state.last_right_cmd = right_q_cmd.copy()
+                    cmd_state.last_arm_cmd_time = now()
 
-                TIMING_LOG["ik_block"].append(t_ik_elapsed)
-                TIMING_LOG["cmd"].append(t_cmd_elapsed)
+                    TIMING_LOG["ik_solve"].append(t_solve_elapsed)
+                    TIMING_LOG["cmd"].append(t_cmd_elapsed)
 
-                logging.info(
-                    f"[TIMING] traj-IK: solve={t_ik_elapsed*1000:.2f} ms, "
-                    f"cmd={t_cmd_elapsed*1000:.2f} ms, "
-                    f"block={t_single_ik_elapsed*1000:.2f} ms"
-                )
-
-                # extract per-arm commands
-                left_measured = np.array(left_bot.dxl.joint_states.position[:6], dtype=float)
-                right_measured = np.array(right_bot.dxl.joint_states.position[:6], dtype=float)
-
-                left_target_q = q_new[left_arm_indices]
-                right_target_q = q_new[right_arm_indices]
-
-                # clamp joint steps
-                t_cmd_start = now()
-                left_q_cmd = clamp_joint_step(left_measured, left_target_q, cfg.max_joint_step)
-                right_q_cmd = clamp_joint_step(right_measured, right_target_q, cfg.max_joint_step)
-
-                # send commands
-                left_bot.arm.set_joint_positions(
-                    left_q_cmd.tolist(),
-                    moving_time=cfg.moving_time,
-                    accel_time=cfg.accel_time,
-                    blocking=False,
-                )
-                right_bot.arm.set_joint_positions(
-                    right_q_cmd.tolist(),
-                    moving_time=cfg.moving_time,
-                    accel_time=cfg.accel_time,
-                    blocking=False,
-                )
-
-                # update full q with the IK solution (or at least arms)
-                q[:] = q_new
-                cmd_state.last_left_cmd = left_q_cmd.copy()
-                cmd_state.last_right_cmd = right_q_cmd.copy()
-                cmd_state.last_arm_cmd_time = now()
-
-                # refresh FK
-                fk, T_left, T_right = refresh_fk(robot, q, left_ee_index, right_ee_index)
-
-                t_cmd_elapsed = now() - t_cmd_start
-                t_single_ik_elapsed = now() - t_single_ik_start
-
-                TIMING_LOG["ik_block"].append(t_ik_elapsed)
-                TIMING_LOG["cmd"].append(t_cmd_elapsed)
-
-                logging.info(
-                    f"[TIMING] full-IK: solve={t_ik_elapsed*1000:.2f} ms, "
-                    f"cmd={t_cmd_elapsed*1000:.2f} ms, "
-                    f"block={t_single_ik_elapsed*1000:.2f} ms"
-                )
+                    logging.info(
+                        f"[TIMING] ik={t_solve_elapsed*1000:.2f} ms, cmd={t_cmd_elapsed*1000:.2f} ms"
+                    )
 
         t_ik_elapsed = now() - t_ik_start
 
@@ -913,7 +893,7 @@ def main():
         TIMING_LOG["loop"].append(loop_elapsed)
         TIMING_LOG["key"].append(t_key_elapsed)
         TIMING_LOG["headset"].append(t_headset_elapsed)
-        TIMING_LOG["ik_block"].append(t_ik_elapsed)
+        TIMING_LOG["ik_section"].append(t_ik_elapsed)
         TIMING_LOG["log"].append(t_log_elapsed)
 
         if loop_elapsed > cfg.control_dt:
@@ -921,7 +901,7 @@ def main():
                 f"[TIMING] overrun: loop={loop_elapsed*1000:.2f} ms, "
                 f"key={t_key_elapsed*1000:.2f} ms, "
                 f"headset={t_headset_elapsed*1000:.2f} ms, "
-                f"ik_block={t_ik_elapsed*1000:.2f} ms, "
+                f"ik_section={t_ik_elapsed*1000:.2f} ms, "
                 f"log={t_log_elapsed*1000:.2f} ms"
             )
 
