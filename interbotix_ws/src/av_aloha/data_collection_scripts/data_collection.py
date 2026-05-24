@@ -59,9 +59,8 @@ CAMERA_SERIALS = {
 }
 
 TASKS = {
-    1: "pick_up_cup",
-    2: "stack_blocks",
-    3: "open_drawer",
+    1: "screwdriver_insertion",
+    2: "block_square",
 }
 
 LEFT_ARM_NAMES = [
@@ -94,7 +93,8 @@ MIDDLE_ARM_NAMES = [
 
 LEFT_RESET_Q = np.array([0.0, -1.27, 0.99, 0.0, 0.35, 0.0], dtype=float)
 RIGHT_RESET_Q = np.array([0.0, -1.27, 0.99, 0.0, 0.35, 0.0], dtype=float)
-MIDDLE_INIT_Q = np.array([0.05, -1.5, 0.05, -0.08, 2.0, 1.4, 0.0], dtype=float)
+MIDDLE_INIT_Q = np.array([-1.5, -1.9, 1.5, 0.0, 0.6, 1.8, 0.0], dtype=float)
+# MIDDLE_INIT_Q = np.array([0.05, -1.5, 0.05, -0.08, 2.0, 1.4, 0.0], dtype=float)
        # 12.5 Hz solve/publish loop
 
 # POS_WEIGHT = 40.0
@@ -109,10 +109,39 @@ MIDDLE_INIT_Q = np.array([0.05, -1.5, 0.05, -0.08, 2.0, 1.4, 0.0], dtype=float)
 # ALPHA = 0.3
 # POSITION_SCALE = 2.0
 
+from interbotix_xs_msgs.srv import RegisterValues, RegisterValuesRequest
+
+GRIPPER_CURRENT_LIMIT = 200
+
+def set_register(robot_name, motor_name, reg_name, value):
+    service_name = f"/{robot_name}/set_motor_registers"
+    rospy.wait_for_service(service_name)
+    srv = rospy.ServiceProxy(service_name, RegisterValues)
+
+    req = RegisterValuesRequest()
+    req.cmd_type = "single"
+    req.name = motor_name
+    req.reg = reg_name
+    req.value = value
+    return srv(req)
+
 latest_key = None
 recording = False
 frame_queues = {name: Queue(maxsize=30) for name in CAMERA_SERIALS}
 writer_threads = {}
+
+def digital_zoom(frame, zoom=1.6):
+    h, w = frame.shape[:2]
+    new_w = int(w / zoom)
+    new_h = int(h / zoom)
+
+    x1 = (w - new_w) // 2
+    y1 = (h - new_h) // 2
+    x2 = x1 + new_w
+    y2 = y1 + new_h
+
+    cropped = frame[y1:y2, x1:x2]
+    return cv2.resize(cropped, (w, h), interpolation=cv2.INTER_LINEAR)
 
 def clamp_joint_step(q_curr, q_target, max_step):
     dq = np.clip(q_target - q_curr, -max_step, max_step)
@@ -131,30 +160,41 @@ def quat_xyzw_to_wxyz(q_xyzw):
     return np.array([q_xyzw[3], q_xyzw[0], q_xyzw[1], q_xyzw[2]], dtype=float)
 
 @dataclass
+class GripperState:
+    closing: bool = False
+    holding: bool = False
+    hold_position: float = 0.0
+
+@dataclass
 class TeleopConfig:
     control_dt: float = 0.05
-    position_scale: float = 2.0
-    alpha: float = 0.3
-    arm_cmd_dt: float = 0.10
-    moving_time: float = 0.20
-    accel_time: float = 0.08
-    max_ee_step: float = 0.010
+    position_scale: float = 1.35
+    alpha: float = 0.22
+    arm_cmd_dt: float = 0.16
+    moving_time: float = 0.14
+    accel_time: float = 0.04
+    max_ee_step: float = 0.007
     max_joint_step: np.ndarray = None
-    full_joint_velocity_limits_value: float = 3.0
+    full_joint_velocity_limits_value: float = 2.3
     pos_weight: float = 40.0
-    ori_weight: float = 0.5
-    dq_weight: float = 0.15
+    ori_weight: float = 0.25
+    dq_weight: float = 0.18
     R_remap_left: np.ndarray = None
     R_remap_right: np.ndarray = None
+    joint_reached_tol: float = 0.03
+    ee_reached_tol: float = 0.01
+    cmd_timeout: float = 0.25
 
     def __post_init__(self):
         if self.max_joint_step is None:
-            self.max_joint_step = np.array([0.03, 0.03, 0.04, 0.06, 0.06, 0.08], dtype=float)
+            self.max_joint_step = np.array(
+                [0.022, 0.022, 0.032, 0.045, 0.045, 0.055],
+                dtype=float
+            )
         if self.R_remap_left is None:
             self.R_remap_left = np.array([[0, 1, 0], [-1, 0, 0], [0, 0, 1]], dtype=float)
         if self.R_remap_right is None:
             self.R_remap_right = np.array([[0, 1, 0], [-1, 0, 0], [0, 0, 1]], dtype=float)
-
 
 @dataclass
 class TeleopSessionState:
@@ -182,16 +222,6 @@ class CommandKinematicsState:
     q_cmd: np.ndarray = None
     T_left_cmd: np.ndarray = None
     T_right_cmd: np.ndarray = None
-
-def publish_grippers(left_bot, right_bot, left_trigger, right_trigger):
-    left_cmd = JointSingleCommand(name="gripper")
-    right_cmd = JointSingleCommand(name="gripper")
-    left_cmd.cmd = -1.7 if left_trigger > 0 else 0.1
-    right_cmd.cmd = -1.7 if right_trigger > 0 else 0.1
-    left_bot.gripper.core.pub_single.publish(left_cmd)
-    right_bot.gripper.core.pub_single.publish(right_cmd)
-    return left_cmd.cmd, right_cmd.cmd
-
 
 def start_teleop_session(state, left_controller, right_controller, T_left, T_right):
     state.active = True
@@ -264,6 +294,16 @@ def compute_bimanual_targets(cfg, state, left_controller, right_controller, T_le
 #     cmd_state.last_arm_cmd_time = now
 #     return True, "sent"
 
+def update_gripper(
+    bot,
+    trigger_pressed,
+    close_position=-1.7,
+    open_position=0.1,
+):
+    cmd = JointSingleCommand(name="gripper")
+    cmd.cmd = close_position if trigger_pressed else open_position
+    bot.gripper.core.pub_single.publish(cmd)
+    return cmd.cmd
 
 def safe_move_arm_joints(bot, target_q, total_time=3.0, step_time=0.25, accel_ratio=0.35):
     current_q = np.array(bot.dxl.joint_states.position[:6], dtype=float)
@@ -378,6 +418,7 @@ def camera_worker(name, pipeline):
 
             t_convert_start = now()
             frame = np.asanyarray(color_frame.get_data())
+            frame = digital_zoom(frame, zoom=1.8)
             t_convert_elapsed = now() - t_convert_start
 
             timestamp = now()
@@ -519,6 +560,8 @@ def create_bots(cfg):
         accel_time=cfg.accel_time,
         init_node=False,
     )
+    left_bot.dxl.robot_torque_enable("single", "gripper", False)
+    set_register("puppet_left", "gripper", "Current_Limit", GRIPPER_CURRENT_LIMIT)
     left_bot.dxl.robot_set_operating_modes("single", "gripper", "current_based_position")
     left_bot.dxl.robot_torque_enable("single", "gripper", True)
 
@@ -531,6 +574,8 @@ def create_bots(cfg):
         accel_time=cfg.accel_time,
         init_node=False,
     )
+    right_bot.dxl.robot_torque_enable("single", "gripper", False)
+    set_register("puppet_right", "gripper", "Current_Limit", GRIPPER_CURRENT_LIMIT)
     right_bot.dxl.robot_set_operating_modes("single", "gripper", "current_based_position")
     right_bot.dxl.robot_torque_enable("single", "gripper", True)
 
@@ -631,6 +676,9 @@ def main():
     robot, left_arm_indices, right_arm_indices, middle_arm_indices, left_ee_index, right_ee_index = build_robot_model()
     left_bot, right_bot, middle_bot = create_bots(cfg)
     initialize_bots(left_bot, right_bot, middle_bot)
+    update_gripper(left_bot, False)
+    update_gripper(right_bot, False)
+    rospy.sleep(0.5)
 
     q = np.zeros(robot.joints.num_actuated_joints)
     q[left_arm_indices] = np.array(left_bot.dxl.joint_states.position[:6], dtype=float)
@@ -671,7 +719,7 @@ def main():
     task_name = TASKS[task_idx]
     print(f"\nSelected task: {task_name}")
 
-    episode_idx = 0
+    episode_idx = int(sys.argv[1]) if len(sys.argv) > 1 else 0
     episode_data = []
     left_gripper_action = 0.1
     right_gripper_action = 0.1
@@ -785,9 +833,8 @@ def main():
             print("\nTeleop DISABLED")
 
         # NOTE: you currently define these inside the loop; that’s fine for now, we just time around IK
-        left_gripper_action, right_gripper_action = publish_grippers(
-            left_bot, right_bot, left_trigger, right_trigger
-        )
+        left_gripper_action = update_gripper(left_bot, left_trigger > 0)
+        right_gripper_action = update_gripper(right_bot, right_trigger > 0)
 
         if teleop_state.active:
             left_target_pos, right_target_pos, left_target_wxyz, right_target_wxyz = compute_bimanual_targets(
