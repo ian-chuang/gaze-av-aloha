@@ -40,6 +40,7 @@ def now():
     return time.monotonic()
 
 dataset_finalized = False
+camera_shutdown = False
 
 # CONSTANTS 
 
@@ -82,7 +83,8 @@ latest_frame_timestamps = {name: None for name in CAMERA_SERIALS}
 frame_lock = threading.Lock()
 camera_ring_buffers = {name: deque(maxlen=600) for name in CAMERA_SERIALS}
 
-RIGHT_RESET_Q = np.array([0.0, -1.27, 0.99, 0.0, 0.35, 0.0], dtype=float)
+RIGHT_START_Q = np.array([0.0, -1.27, 0.99, 0.0, 0.35, 0.0], dtype=float)
+RIGHT_REST_Q = np.array([0.0, -1.6, 1.5, 0.0, 0.7, 0.0], dtype=float)
 
 from interbotix_xs_msgs.srv import RegisterValues, RegisterValuesRequest
 
@@ -175,11 +177,11 @@ class EpisodeBuffer:
 class TeleopConfig:
     control_dt: float = 1.0 / 30.0
     position_scale: float = 1.35
-    alpha: float = 0.22
-    arm_cmd_dt: float = 1.0 / 30.0 # 0.016
+    alpha: float = 0.3 # previously at 0.22
+    arm_cmd_dt: float = 1.0 / 30.0 # previously at 0.016
     moving_time: float = 0.14
     accel_time: float = 0.04
-    max_ee_step: float = 0.007
+    max_ee_step: float = 0.02 # previously at 0.015
     max_joint_step: np.ndarray = None
     full_joint_velocity_limits_value: float = 2.3
     pos_weight: float = 40.0
@@ -193,7 +195,7 @@ class TeleopConfig:
     def __post_init__(self):
         if self.max_joint_step is None:
             self.max_joint_step = np.array(
-                [0.022, 0.022, 0.032, 0.045, 0.045, 0.055],
+                [0.05, 0.05, 0.06, 0.08, 0.08, 0.10],
                 dtype=float
             )
         if self.R_remap_right is None:
@@ -277,7 +279,34 @@ def safe_move_arm_joints(bot, target_q, total_time=3.0, step_time=0.25, accel_ra
     for q_cmd in waypoints:
         bot.arm.set_joint_positions(q_cmd.tolist(), moving_time=move_t, accel_time=accel_t, blocking=True)
 
-def move_to_reset_pose(
+def move_to_pose(
+    right_bot,
+    q,
+    cmd_kin,
+    cmd_state,
+    right_arm_indices,
+    robot,
+    right_ee_index,
+    cfg,
+    full_joint_velocity_limits,
+    target_q,
+    description="pose",
+    total_time=4.0,
+    step_time=0.3,
+):
+    print(f"\nMoving RIGHT arm safely to {description}...")
+    safe_move_arm_joints(right_bot, target_q, total_time=total_time, step_time=step_time)
+
+    # Update internal state to match
+    q[right_arm_indices] = target_q.copy()
+
+    _, T_right = refresh_fk(robot, q, right_ee_index)
+    cmd_kin.q_cmd = q.copy()
+    cmd_kin.T_right_cmd = T_right.copy()
+    cmd_state.last_right_cmd = target_q.copy()
+    cmd_state.last_arm_cmd_time = 0.0
+
+def move_to_start_pose(
     right_bot,
     q,
     cmd_kin,
@@ -288,17 +317,46 @@ def move_to_reset_pose(
     cfg,
     full_joint_velocity_limits,
 ):
-    print("\nMoving RIGHT arm safely...")
-    safe_move_arm_joints(right_bot, RIGHT_RESET_Q, total_time=4.0, step_time=0.3)
+    move_to_pose(
+        right_bot,
+        q,
+        cmd_kin,
+        cmd_state,
+        right_arm_indices,
+        robot,
+        right_ee_index,
+        cfg,
+        full_joint_velocity_limits,
+        target_q=RIGHT_START_Q,
+        description="START pose",
+    )
 
-    q[right_arm_indices] = RIGHT_RESET_Q.copy()
-
-    _, T_right = refresh_fk(robot, q, right_ee_index)
-    cmd_kin.q_cmd = q.copy()
-    cmd_kin.T_right_cmd = T_right.copy()
-    cmd_state.last_right_cmd = RIGHT_RESET_Q.copy()
-    cmd_state.last_arm_cmd_time = 0.0
-
+def move_to_rest_pose(
+    right_bot,
+    q,
+    cmd_kin,
+    cmd_state,
+    right_arm_indices,
+    robot,
+    right_ee_index,
+    cfg,
+    full_joint_velocity_limits,
+):
+    move_to_pose(
+        right_bot,
+        q,
+        cmd_kin,
+        cmd_state,
+        right_arm_indices,
+        robot,
+        right_ee_index,
+        cfg,
+        full_joint_velocity_limits,
+        target_q=RIGHT_REST_Q,
+        description="FINAL REST pose",
+        total_time=4.0,
+        step_time=0.3,
+    )
 
 
 def keyboard_listener():
@@ -306,12 +364,13 @@ def keyboard_listener():
     while True:
         latest_key = input().strip()
 
+
 def camera_worker(name, pipeline):
     frame_count = 0
     stored_count = 0
     last_report = now()
 
-    while True:
+    while not camera_shutdown:
         try:
             frames = pipeline.wait_for_frames()
             color_frame = frames.get_color_frame()
@@ -364,6 +423,8 @@ def camera_worker(name, pipeline):
                 stored_count = 0
 
         except RuntimeError as e:
+            if camera_shutdown:
+                break
             print(f"{name} camera error: {e}")
             continue
 
@@ -497,7 +558,7 @@ def solve_single_arm_ik(
     )
 
 def initialize_bot(right_bot):
-    right_bot.arm.set_joint_positions(RIGHT_RESET_Q.tolist(), moving_time=2.0, accel_time=0.5, blocking=True)
+    right_bot.arm.set_joint_positions(RIGHT_START_Q.tolist(), moving_time=2.0, accel_time=0.5, blocking=True)
     time.sleep(2)
     rospy.sleep(2.0)
 
@@ -544,6 +605,108 @@ def refresh_fk(robot, q, right_ee_index):
     T_right = jaxlie.SE3(fk[right_ee_index]).as_matrix()
     return fk, T_right
 
+def ask_yes_no(prompt: str, default: Optional[bool] = None) -> bool:
+    """Ask user a yes/no question and return True for yes, False for no."""
+    while True:
+        suffix = " [y/n] "
+        if default is True:
+            suffix = " [Y/n] "
+        elif default is False:
+            suffix = " [y/N] "
+        ans = input(prompt + suffix).strip().lower()
+
+        if ans == "" and default is not None:
+            return default
+        if ans in ("y", "yes"):
+            return True
+        if ans in ("n", "no"):
+            return False
+        print("Please answer 'y' or 'n'.")
+
+def safe_shutdown(
+    right_bot,
+    pipelines,
+    dataset,
+    collecting_episode,
+    episode_buffer,
+    episode_has_frames,
+    task_name,
+    episode_idx,
+    robot,
+    q,
+    cmd_kin,
+    cmd_state,
+    right_arm_indices,
+    right_ee_index,
+    cfg,
+    full_joint_velocity_limits,
+):
+    global dataset_finalized
+    global camera_shutdown
+    # 1. Handle active episode
+    if collecting_episode and episode_buffer is not None:
+        if episode_has_frames:
+            save = ask_yes_no(
+                "\nAn episode is currently being recorded. Save it before quitting?",
+                default=True,
+            )
+            if save:
+                ok = finalize_episode_to_dataset(
+                    dataset=dataset,
+                    episode_buffer=episode_buffer,
+                    task_name=task_name,
+                    episode_idx=episode_idx,
+                    max_cam_dt=0.10,
+                )
+                if ok:
+                    print("\nEPISODE SAVED ON QUIT")
+                    episode_idx += 1
+                    dataset_finalized = False
+            else:
+                print("\nDiscarding current in-memory episode on quit.")
+        else:
+            print("\nNo frames in current episode. Discarding.")
+
+        collecting_episode = False
+        episode_buffer = None
+
+    # 2. Move robot to rest pose
+    try:
+        print("\nMoving arm to rest pose before shutdown...")
+        move_to_rest_pose(
+            right_bot,
+            q,
+            cmd_kin,
+            cmd_state,
+            right_arm_indices,
+            robot,
+            right_ee_index,
+            cfg,
+            full_joint_velocity_limits,
+        )
+        print("\nRobot at rest pose.")
+    except Exception as e:
+        print(f"\nWarning: failed to move robot to rest pose: {e}")
+
+    # 3. Consolidate dataset if needed
+    if not dataset_finalized:
+        try:
+            dataset.consolidate()
+            dataset_finalized = True
+            print("\nDATASET CONSOLIDATED ON EXIT")
+        except Exception as e:
+            print(f"Consolidate failed on exit: {e}")
+
+    # 4. Stop cameras
+    camera_shutdown = True
+    for pipeline in pipelines.values():
+        try:
+            pipeline.stop()
+        except Exception as e:
+            print(f"Error stopping camera pipeline: {e}")
+
+    print("\nShutdown complete.")
+    return episode_idx
 
 def main():
     episode_buffer = None
@@ -552,13 +715,39 @@ def main():
     episode_has_frames = False
     cfg = TeleopConfig()
 
+    # 1. Init ROS
     rospy.init_node("bimanual_vr_teleop")
+
+    # 2. Print tasks and get selection BEFORE starting headset / cameras / keyboard
+    print("\nAVAILABLE TASKS:\n")
+    for idx, name in TASKS.items():
+        print(f"{idx}: {name}")
+
+    # robust selection
+    while True:
+        try:
+            task_idx = int(input("\nSelect task number: ").strip())
+            if task_idx not in TASKS:
+                print("Invalid task number. Try again.")
+                continue
+            break
+        except ValueError:
+            print("Please enter an integer task number.")
+
+    task_name = TASKS[task_idx]
+    print(f"\nSelected task: {task_name}")
+
+    # background keyboard thread to get user input
     threading.Thread(target=keyboard_listener, daemon=True).start()
 
+    # headset thread
     headset = WebRTCHeadset()
     headset.run_in_thread()
 
+    # camera pipelines
     pipelines = setup_cameras()
+
+    # robot initialization
     robot, right_arm_indices, right_ee_index = build_robot_model()
     right_bot = create_bots(cfg)
     initialize_bot(right_bot)
@@ -568,6 +757,7 @@ def main():
     q = np.zeros(robot.joints.num_actuated_joints)
     q[right_arm_indices] = np.array(right_bot.dxl.joint_states.position[:6], dtype=float)
 
+    # calculate the pose of the end effector using fk
     fk, T_right = refresh_fk(robot, q, right_ee_index)
     cmd_kin = CommandKinematicsState(q_cmd=q.copy(), T_right_cmd=T_right.copy())
     full_joint_velocity_limits = np.ones(robot.joints.num_actuated_joints) * cfg.full_joint_velocity_limits_value
@@ -576,17 +766,6 @@ def main():
     cmd_state = RobotCommandState(
         last_right_cmd=np.array(right_bot.dxl.joint_states.position[:6], dtype=float),
     )
-
-    print("\nREADY")
-    print("\nAVAILABLE TASKS:\n")
-    for idx, name in TASKS.items():
-        print(f"{idx}: {name}")
-
-    task_idx = int(input("\nSelect task number: "))
-    if task_idx not in TASKS:
-        raise ValueError(f"Invalid task number: {task_idx}")
-    task_name = TASKS[task_idx]
-    print(f"\nSelected task: {task_name}")
 
     episode_idx = int(sys.argv[1]) if len(sys.argv) > 1 else 0
     right_gripper_action = 0.1
@@ -668,18 +847,6 @@ def main():
         key = latest_key
         latest_key = None
 
-        if key == "c":
-            try:
-                if collecting_episode:
-                    print("\nCannot consolidate while an episode is still being collected. Save or discard it first.")
-                else:
-                    dataset.consolidate()
-                    dataset_finalized = True
-                    print("\nDATASET CONSOLIDATED")
-            except Exception as e:
-                print(f"\nConsolidate failed: {e}")
-
-
         if key == "s":
             try:
                 if not collecting_episode or episode_buffer is None:
@@ -710,14 +877,14 @@ def main():
             stop_teleop_session(teleop_state)
 
             if collecting_episode:
-                print("\nDiscarding current in-memory episode before reset.")
+                print("\nDiscarding current in-memory episode before resetting to start pose.")
                 collecting_episode = False
                 episode_buffer = None
                 episode_has_frames = False
                 reset_timing_log()
 
-            print("\nTeleop DISABLED. MOVING TO RESET POSE")
-            move_to_reset_pose(
+            print("\nTeleop DISABLED. MOVING TO START POSE")
+            move_to_start_pose(
                 right_bot,
                 q,
                 cmd_kin,
@@ -728,7 +895,7 @@ def main():
                 cfg,
                 full_joint_velocity_limits,
             )
-            print("\nRobot reset.")
+            print("\nRobot ready to start.")
             t_key_elapsed = now() - t_key_start
             print(f"[TIMING] key section: {t_key_elapsed*1000:.2f} ms")
             continue
@@ -744,22 +911,24 @@ def main():
         if key == "q":
             print("\nExiting...")
 
-            if collecting_episode:
-                print("\nDiscarding unsaved in-memory episode on exit.")
-                collecting_episode = False
-                episode_buffer = None
-                episode_has_frames = False
-
-            if not dataset_finalized:
-                try:
-                    dataset.consolidate()
-                    dataset_finalized = True
-                    print("\nDATASET CONSOLIDATED ON EXIT")
-                except Exception as e:
-                    print(f"Consolidate failed on exit: {e}")
-
-            for pipeline in pipelines.values():
-                pipeline.stop()
+            episode_idx = safe_shutdown(
+                right_bot=right_bot,
+                pipelines=pipelines,
+                dataset=dataset,
+                collecting_episode=collecting_episode,
+                episode_buffer=episode_buffer,
+                episode_has_frames=episode_has_frames,
+                task_name=task_name,
+                episode_idx=episode_idx,
+                robot=robot,
+                q=q,
+                cmd_kin=cmd_kin,
+                cmd_state=cmd_state,
+                right_arm_indices=right_arm_indices,
+                right_ee_index=right_ee_index,
+                cfg=cfg,
+                full_joint_velocity_limits=full_joint_velocity_limits,
+            )
 
             break
 
