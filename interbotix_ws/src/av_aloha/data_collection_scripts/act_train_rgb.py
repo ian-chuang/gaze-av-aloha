@@ -17,7 +17,7 @@ def make_delta_timestamps(delta_indices, fps):
 
 def main():
     dataset_root = Path(
-        "/home/devi/giava/interbotix_ws/src/av_aloha/data_collection_scripts/dataset/lerobot/block_square/20260524_224911"
+        "/home/devi/giava/interbotix_ws/src/av_aloha/data_collection_scripts/dataset/lerobot/block_square/20260527_135453"
     )
     output_directory = Path("outputs/act_all_rgb_with_vae_c10_a5")
     output_directory.mkdir(parents=True, exist_ok=True)
@@ -84,8 +84,6 @@ def main():
 
     policy = make_policy(cfg, ds_meta=dataset_metadata)
 
-    
-
     policy.train()
     policy.to(device)
 
@@ -118,7 +116,7 @@ def main():
 
     optimizer = cfg.get_optimizer_preset().build(policy.parameters())
 
-    training_steps = 2000
+    training_steps = 500
     log_freq = 10
 
     step = 0
