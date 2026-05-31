@@ -6,7 +6,10 @@ from interbotix_xs_msgs.msg import JointSingleCommand
 from interbotix_xs_msgs.srv import RegisterValues, RegisterValuesRequest
 
 GRIPPER_CURRENT_LIMIT = 200
-RIGHT_RESET_Q = np.array([0.0, -1.27, 0.99, 0.0, 0.35, 0.0], dtype=float)
+# RIGHT_RESET_Q = np.array([0.0, -1.27, 0.99, 0.0, 0.35, 0.0], dtype=float)
+# RIGHT_RESET_Q = np.array([0.1, -0.6, 0.1, 0.0, 1.5, 0.1], dtype=float) # new reset pose looking down higher up
+RIGHT_RESET_Q = np.array([0.11, -0.48, 0.33, -0.03, 1.35, 0.05], dtype=float) # new reset pose
+
 GRIPPER_OPEN = 0.1
 GRIPPER_CLOSED = -1.7
 
@@ -23,9 +26,6 @@ def set_register(robot_name, motor_name, reg_name, value):
 
     return srv(req)
 
-
-
-
 def main():
     rospy.init_node("reset_right_arm", anonymous=True)
 
@@ -34,8 +34,8 @@ def main():
         group_name="arm",
         gripper_name="gripper",
         robot_name="puppet_right",
-        moving_time=2.0,
-        accel_time=0.5,
+        moving_time=4.0,
+        accel_time=1.5,
         init_node=False,
     )
 
@@ -59,26 +59,28 @@ def main():
     print("Moving right arm to reset pose...")
     right_bot.arm.set_joint_positions(
         RIGHT_RESET_Q.tolist(),
-        moving_time=2.0,
-        accel_time=0.5,
+        moving_time=4.0,
+        accel_time=1.5,
         blocking=True,
     )
 
-    cmd = JointSingleCommand(name="gripper")
-    cmd.cmd = GRIPPER_OPEN
-    right_bot.gripper.core.pub_single.publish(cmd)
+    rospy.sleep(1)
 
-    rospy.sleep(0.5)
+    # cmd = JointSingleCommand(name="gripper")
+    # cmd.cmd = GRIPPER_OPEN
+    # right_bot.gripper.core.pub_single.publish(cmd)
 
-    cmd = JointSingleCommand(name="gripper")
-    cmd.cmd = GRIPPER_CLOSED
-    right_bot.gripper.core.pub_single.publish(cmd)\
+    # rospy.sleep(0.5)
+
+    # cmd = JointSingleCommand(name="gripper")
+    # cmd.cmd = GRIPPER_CLOSED
+    # right_bot.gripper.core.pub_single.publish(cmd)\
     
-    rospy.sleep(0.5)
+    # rospy.sleep(0.5)
 
-    cmd = JointSingleCommand(name="gripper")
-    cmd.cmd = GRIPPER_OPEN
-    right_bot.gripper.core.pub_single.publish(cmd)
+    # cmd = JointSingleCommand(name="gripper")
+    # cmd.cmd = GRIPPER_OPEN
+    # right_bot.gripper.core.pub_single.publish(cmd)
 
     rospy.sleep(1.0)
     print("Done.")
