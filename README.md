@@ -1,381 +1,215 @@
-# Look, Focus, Act: Efficient and Robust Robot Learning via Human Gaze and Foveated Vision Transformers
+# Object-Centric Robot Imitation Learning
 
-![hero](./media/hero.gif)
+A robotics research platform for real-world manipulation using VR teleoperation, object-centric perception, transformer-based imitation learning, and optimization-based robot control.
 
-🚀 **Project Website:** [https://ian-chuang.github.io/gaze-av-aloha/](https://ian-chuang.github.io/gaze-av-aloha/)
+---
 
-This repository contains the official code for our paper:
-**"Look, Focus, Act: Efficient and Robust Robot Learning via Human Gaze and Foveated Vision Transformers"**
+## Overview
 
-We propose a human-inspired *foveated vision framework* for robot learning that combines human gaze, [foveated ViTs](https://github.com/facebookresearch/segment_this_thing), and robotic control to enable policies that are both efficient and robust. Our approach reduces ViT computation by 94%, accelerating training by 7× and inference by 3×.
+This repository contains the software infrastructure, training pipelines, and experimental research code used to study robotic manipulation from demonstration.
 
-We collect bimanual robot demonstrations with synchronized human eye-tracking using the AV-ALOHA simulation platform. This repository provides code and instructions for installation, dataset preparation, model training, policy evaluation, and data collection.
+The project began as an exploration of whether explicit object-centric representations could improve the performance and robustness of transformer-based imitation learning policies. Over time, it evolved into a broader platform supporting data collection, perception, policy learning, robot control, and inverse kinematics research on real robotic hardware.
 
-```bibtex
-@misc{chuang2025lookfocusactefficient,
-      title={Look, Focus, Act: Efficient and Robust Robot Learning via Human Gaze and Foveated Vision Transformers}, 
-      author={Ian Chuang and Andrew Lee and Dechen Gao and Jinyu Zou and Iman Soltani},
-      year={2025},
-      eprint={2507.15833},
-      archivePrefix={arXiv},
-      primaryClass={cs.RO},
-      url={https://arxiv.org/abs/2507.15833}, 
-}
+Current research directions include:
+
+* Object-centric visual conditioning for imitation learning
+* Segmentation-assisted robot perception
+* Transformer-based visuomotor policies
+* Demonstration learning from VR teleoperation
+* Real-time robotic manipulation
+* Optimization-based inverse kinematics
+* Learned and model-based control integration
+
+---
+
+## System Architecture
+
+The platform consists of four primary components:
+
+### 1. VR Teleoperation
+
+Human demonstrations are collected through immersive teleoperation using a VR headset and handheld controllers.
+
+The teleoperation stack supports:
+
+* Real-time robot control
+* Episode recording
+* Demonstration replay
+* Data synchronization
+* Multi-camera capture
+
+Demonstrations are automatically logged and converted into datasets suitable for imitation learning.
+
+### 2. Perception
+
+The robot observes the environment through multiple RGB and RGB-D cameras, including both wrist-mounted and external viewpoints.
+
+The perception pipeline supports:
+
+* RGB observations
+* RGB-D observations
+* Object segmentation
+* Object localization
+* Geometric feature extraction
+* Dataset annotation and validation
+
+Object-centric representations are generated using segmentation masks and geometric scene descriptors derived from detected objects.
+
+### 3. Imitation Learning
+
+Policies are trained using Action Chunking with Transformers (ACT).
+
+Rather than predicting a single control command at each timestep, ACT predicts short sequences of future actions, enabling more stable and temporally coherent behavior.
+
+The training stack includes:
+
+* Dataset preprocessing
+* ACT training
+* Hyperparameter sweeps
+* Rollout evaluation
+* Experiment tracking
+* Policy benchmarking
+
+Supported visual representations include:
+
+* Raw RGB observations
+* Segmentation masks
+* Masked RGB inputs
+* Object centroids
+* Object-target vectors
+* Hybrid object-centric encodings
+
+### 4. Robot Control
+
+The repository contains interfaces and utilities for controlling physical robot hardware, including:
+
+* Joint-space control
+* Trajectory execution
+* State estimation
+* Gripper control
+* Real-time policy deployment
+
+---
+
+## Object-Centric Visual Conditioning
+
+A major focus of this repository is the study of object-centric representations for robotic imitation learning.
+
+Traditional behavioral cloning systems must simultaneously learn perception, object identification, and control directly from pixels. This work investigates whether explicitly representing task-relevant objects can simplify learning and improve robustness.
+
+Representations explored include:
+
+* Segmentation masks
+* Object centroids
+* Direction vectors
+* Geometric scene descriptors
+* Hybrid visual-geometric representations
+
+Experiments on real-world manipulation tasks suggest that object-centric conditioning improves object localization, reduces unnecessary corrective behavior, and can outperform purely pixel-based representations despite requiring significantly less information.
+
+---
+
+## Segmentation Pipeline
+
+To generate object-centric observations, we developed a semi-automated segmentation pipeline.
+
+The annotation workflow combines:
+
+* Foundation-model segmentation
+* Classical computer vision techniques
+* Scene-specific heuristics
+* Automated quality control
+* YOLO fine-tuning
+
+The resulting segmentation models run in real time and provide masks that can be used both during training and deployment.
+
+This allows task-relevant scene structure to be made explicit to the policy while maintaining practical deployment constraints.
+
+---
+
+## Experimental Inverse Kinematics Research
+
+The repository also contains ongoing work on optimization-based inverse kinematics and trajectory generation.
+
+Current investigations include:
+
+* Trajectory-constrained IK
+* Collision-aware optimization
+* Manipulability objectives
+* Bimanual IK formulations
+* JAX-based optimization pipelines
+* Integration of learned policies with IK-based controllers
+
+This work is currently experimental and under active development.
+
+---
+
+## Hardware Platform
+
+Current experiments are conducted on:
+
+* Interbotix robotic manipulators
+* Parallel-jaw grippers
+* Intel RealSense RGB-D cameras
+* Wrist-mounted cameras
+* External overhead cameras
+* VR headsets and handheld controllers
+
+---
+
+## Repository Structure
+
+```text
+interbotix_ws/
+├── src/
+│   ├── av_aloha/
+│   │   ├── data_collection_scripts/
+│   │   ├── teleoperation/
+│   │   ├── perception/
+│   │   ├── training/
+│   │   ├── evaluation/
+│   │   └── robot_control/
+│   ├── lerobot/
+│   └── interbotix_ros_*
+│
+├── datasets/
+├── checkpoints/
+├── experiments/
+└── outputs/
 ```
 
-## AV ALOHA Simulation Datasets
+---
 
-Below lists all available AV-ALOHA simulation datasets with human eye-tracking annotations. Each dataset includes over 100 episodes and a link for interactive visualization.
+## Research Contributions
 
-| Dataset | Eye Data | Episodes | Visualization |
-|---------|----------|----------|--------------|
-| [AV ALOHA Sim Peg Insertion](https://huggingface.co/datasets/iantc104/av_aloha_sim_peg_insertion) | ✅ | 100 | [View](https://huggingface.co/spaces/iantc104/av_aloha_visualize_dataset?dataset=iantc104%2Fav_aloha_sim_peg_insertion&episode=0) |
-| [AV ALOHA Sim Cube Transfer](https://huggingface.co/datasets/iantc104/av_aloha_sim_cube_transfer) | ✅ | 200 | [View](https://huggingface.co/spaces/iantc104/av_aloha_visualize_dataset?dataset=iantc104%2Fav_aloha_sim_cube_transfer&episode=0) |
-| [AV ALOHA Sim Thread Needle](https://huggingface.co/datasets/iantc104/av_aloha_sim_thread_needle) | ✅ | 200 | [View](https://huggingface.co/spaces/iantc104/av_aloha_visualize_dataset?dataset=iantc104%2Fav_aloha_sim_thread_needle&episode=0) |
-| [AV ALOHA Sim Pour Test Tube](https://huggingface.co/datasets/iantc104/av_aloha_sim_pour_test_tube) | ✅ | 100 | [View](https://huggingface.co/spaces/iantc104/av_aloha_visualize_dataset?dataset=iantc104%2Fav_aloha_sim_pour_test_tube&episode=0) |
-| [AV ALOHA Sim Hook Package](https://huggingface.co/datasets/iantc104/av_aloha_sim_hook_package) | ✅ | 100 | [View](https://huggingface.co/spaces/iantc104/av_aloha_visualize_dataset?dataset=iantc104%2Fav_aloha_sim_hook_package&episode=0) |
-| [AV ALOHA Sim Slot Insertion](https://huggingface.co/datasets/iantc104/av_aloha_sim_slot_insertion) | ✅ | 100 | [View](https://huggingface.co/spaces/iantc104/av_aloha_visualize_dataset?dataset=iantc104%2Fav_aloha_sim_slot_insertion&episode=0) |
+This repository has been used to investigate:
 
-## Installation
+* Object-centric visual conditioning for ACT policies
+* Segmentation-assisted imitation learning
+* Real-world robot manipulation from demonstration
+* Geometric scene representations for control
+* Teleoperation-driven data collection pipelines
 
-Follow the steps below to set up the environment and install all necessary dependencies.
+Recent experiments suggest that low-dimensional object-centric representations based on centroids and geometric relationships can rival or outperform richer visual inputs on manipulation tasks while requiring substantially less computation.
 
-```bash
-# Clone the repository and initialize submodules
-git clone https://github.com/ian-chuang/gaze-av-aloha.git
-cd gaze-av-aloha
-git submodule init
-git submodule update
+---
 
-# Create and activate a new Conda environment
-conda create -n gaze python=3.10
-conda activate gaze
+## Future Work
 
-# Install LeRobot
-pip install git+https://github.com/huggingface/lerobot.git@483be9aac217c2d8ef16982490f22b2ad091ab46
+Ongoing research directions include:
 
-# Install FFmpeg for video logging
-conda install ffmpeg=7.1.1 -c conda-forge
+* Multi-object manipulation
+* Task-conditioned policies
+* Improved grasp planning
+* Foundation-model-assisted perception
+* Learned world models
+* Integration of optimization-based IK with learned policies
+* Generalization across objects, scenes, and tasks
 
-# Install AV-ALOHA packages
-pip install -e ./gym_av_aloha
-pip install -e ./gaze_av_aloha
-```
+---
 
-### Authentication
+## Associated Research
 
-Make sure you're logged in to both Weights & Biases and Hugging Face:
+This repository accompanies ongoing research in robot imitation learning, object-centric perception, and real-world manipulation.
 
-```bash
-wandb login
-huggingface-cli login
-```
-
-## Download and Preprocess Dataset
-
-We use the [LeRobot dataset format](https://github.com/huggingface/lerobot) for ease of sharing and visualization via Hugging Face.
-However, LeRobot's dataloader can be slow, so we convert each dataset into a custom `AVAlohaDataset` format based on **Zarr** for faster access during training.
-
-### Available Dataset Repository IDs
-
-* `iantc104/av_aloha_sim_cube_transfer`
-* `iantc104/av_aloha_sim_peg_insertion`
-* `iantc104/av_aloha_sim_slot_insertion`
-* `iantc104/av_aloha_sim_hook_package`
-* `iantc104/av_aloha_sim_pour_test_tube`
-* `iantc104/av_aloha_sim_thread_needle`
-
-### Conversion Instructions
-
-To convert a dataset to Zarr format, run the following command from the project root:
-
-```bash
-python gym_av_aloha/scripts/convert_lerobot_to_avaloha.py --repo_id <dataset_repo_id>
-```
-
-For example:
-
-```bash
-python gym_av_aloha/scripts/convert_lerobot_to_avaloha.py --repo_id iantc104/av_aloha_sim_thread_needle
-```
-
-Converted datasets will be saved under:
-
-```
-gym_av_aloha/outputs/
-```
-
-# AV ALOHA Benchmark
-
-Train and evaluate policies using [`train.py`](./gaze_av_aloha/scripts/train.py).
-
-Exact commands used in our simulation experiments are provided in [`experiments.txt`](./experiments.txt).
-Pretrained weights are available and can be loaded via Hydra configuration.
-
-### Pretrained ViT Weights (MAE Pretrained)
-
-* [`iantc104/mae_vitb_vit`](https://huggingface.co/iantc104/mae_vitb_vit)
-* [`iantc104/mae_vitb_low_res_vit`](https://huggingface.co/iantc104/mae_vitb_low_res_vit)
-* [`iantc104/mae_vitb_foveated_vit`](https://huggingface.co/iantc104/mae_vitb_foveated_vit)
-
-### Pretrained Gaze Models (Task‑Specific)
-
-* [`iantc104/gaze_model_av_aloha_sim_cube_transfer`](https://huggingface.co/iantc104/gaze_model_av_aloha_sim_cube_transfer)
-* [`iantc104/gaze_model_av_aloha_sim_peg_insertion`](https://huggingface.co/iantc104/gaze_model_av_aloha_sim_peg_insertion)
-* [`iantc104/gaze_model_av_aloha_sim_slot_insertion`](https://huggingface.co/iantc104/gaze_model_av_aloha_sim_slot_insertion)
-* [`iantc104/gaze_model_av_aloha_sim_hook_package`](https://huggingface.co/iantc104/gaze_model_av_aloha_sim_hook_package)
-* [`iantc104/gaze_model_av_aloha_sim_pour_test_tube`](https://huggingface.co/iantc104/gaze_model_av_aloha_sim_pour_test_tube)
-* [`iantc104/gaze_model_av_aloha_sim_thread_needle`](https://huggingface.co/iantc104/gaze_model_av_aloha_sim_thread_needle)
-
-### Available Task Configs
-
-* `av_aloha_sim_cube_transfer`
-* `av_aloha_sim_peg_insertion`
-* `av_aloha_sim_slot_insertion`
-* `av_aloha_sim_hook_package`
-* `av_aloha_sim_pour_test_tube`
-* `av_aloha_sim_thread_needle`
-
-### Train & Evaluate Policies
-
-**Fov-Act (end-to-end gaze as action):**
-
-```bash
-python gaze_av_aloha/scripts/train.py \
-  policy=foveated_vit_policy \
-  task=<task e.g. av_aloha_sim_thread_needle> \
-  policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_foveated_vit \
-  policy.optimizer_lr_backbone=1e-5 \
-  wandb.enable=true \
-  wandb.project=<project name> \
-  wandb.entity=<your wandb entity> \
-  wandb.job_name=fov-act \
-  device=cuda
-```
-
-**Fov-UNet (two-stage with pretrained gaze model):**
-
-```bash
-python gaze_av_aloha/scripts/train.py \
-  policy=foveated_vit_policy \
-  task=<task e.g. av_aloha_sim_thread_needle> \
-  policy.use_gaze_as_action=false \
-  policy.gaze_model_repo_id=<gaze model e.g. iantc104/gaze_model_av_aloha_sim_thread_needle> \
-  policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_foveated_vit \
-  policy.optimizer_lr_backbone=1e-5 \
-  wandb.enable=true \
-  wandb.project=<project name> \
-  wandb.entity=<your wandb entity> \
-  wandb.job_name=fov-unet \
-  device=cuda
-```
-
-**Fine (full-res ViT baseline):**
-
-```bash
-python gaze_av_aloha/scripts/train.py \
-  policy=vit_policy \
-  task=<task e.g. av_aloha_sim_thread_needle> \
-  policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_vit \
-  policy.optimizer_lr_backbone=1e-5 \
-  wandb.enable=true \
-  wandb.project=<project name> \
-  wandb.entity=<your wandb entity> \
-  wandb.job_name=fine \
-  device=cuda
-```
-
-**Coarse (low-res ViT baseline):**
-
-```bash
-python gaze_av_aloha/scripts/train.py \
-  policy=low_res_vit_policy \
-  task=<task e.g. av_aloha_sim_thread_needle> \
-  policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_low_res_vit \
-  policy.optimizer_lr_backbone=1e-5 \
-  wandb.enable=true \
-  wandb.project=<project name> \
-  wandb.entity=<your wandb entity> \
-  wandb.job_name=coarse \
-  device=cuda
-```
-
-## Additional Resources
-
-### AV-ALOHA Simulation Data Collection
-
-To collect simulation data using AV-ALOHA:
-
-* Install the **AV-ALOHA Unity App** on your Meta Quest Pro headset:
-  👉 [AV-ALOHA Unity App](https://github.com/Soltanilara/av-aloha-unity/tree/eye-tracking)
-* Follow the instructions in [`gym_av_aloha/README.md`](https://github.com/Soltanilara/gym_av_aloha) for detailed steps on data collection.
-
-### MAE Pretraining
-
-We provide MAE-pretrained Vision Transformers used for:
-
-* **Foveated**
-* **Fine (Full-Res)**
-* **Coarse (Low-Res)**
-
-Details and training scripts are located in:
-📄 [`pretrain/README.md`](./pretrain/README.md)
-
-### Gaze Model Training
-
-Train a simple UNet-based model for gaze prediction using the script:
-
-```bash
-python gaze_av_aloha/scripts/train_gaze_model.py --task <task_name>
-```
-
-Supported task names:
-
-* `thread_needle`
-* `pour_test_tube`
-* `hook_package`
-* `slot_insertion`
-* `cube_transfer`
-* `peg_insertion`
-
-The resulting models will be pushed to Hugging Face under the appropriate task-specific repo.
-
-# Real Robot
-
-Install ROS-Noetic
-
-cd interbotix_ws/src
-rosdep install -y --from-paths . --ignore-src --rosdistro noetic
-cd ..
-catkin_make -DPYTHON_EXECUTABLE=/usr/bin/python3
-
-# install opencv from source
-# to fix camera lighting issues go to guvcview, open camera and set default hardware settings
-
-git clone https://github.com/opencv/opencv.git
-cd opencv
-mkdir build
-cd build
-
-#vvv THIS WAS GPT'ed ... just make sure gstreamer is enabled!!!
-cmake -DCMAKE_BUILD_TYPE=RELEASE \
-  -DCMAKE_INSTALL_PREFIX=$(python -c "import sys; print(sys.prefix)") \
-  -DPYTHON3_EXECUTABLE=$(which python) \
-  -DPYTHON3_INCLUDE_DIR=$(python -c "from sysconfig import get_paths; print(get_paths()['include'])") \
-  -DPYTHON3_LIBRARY=$(python -c "import ctypes.util; print(ctypes.util.find_library('python3.10'))") \
-  -DPYTHON3_PACKAGES_PATH=$(python -c "from distutils.sysconfig import get_python_lib; print(get_python_lib())") \
-  -DBUILD_opencv_python3=ON \
-  -DWITH_GSTREAMER=ON .. 
-
-make -j8
-sudo make install
-
-# wheel??? not sure 
-cd python_loader
-python setup.py bdist_wheel
-cd dist
-pip install opencv*.whl
-
-
-
-
-
-
-
-
-
-
-
-# python record_episodes --task_name occluded_insertion --episode_idx 0
-# /home/jinyu/GitHub/gaze-av-aloha/gym_av_aloha/gym_av_aloha/scripts
-
-
-# startup robot
-cd ~/GitHub/gaze-av-aloha
-conda deactivate
-conda deactivate
-conda deactivate
-source /opt/ros/noetic/setup.sh
-source interbotix_ws/devel/setup.sh
-##### EITHER WITH SIMULATION
-roslaunch av_aloha 3arms_teleop.launch use_sim:=true use_rviz:=true
-##### OR REAL
-roslaunch av_aloha 3arms_teleop.launch 
-
-# IN A NEW TERMINAL python script
-cd ~/GitHub/gaze-av-aloha
-conda deactivate
-conda deactivate
-conda deactivate
-source /opt/ros/noetic/setup.sh
-source interbotix_ws/devel/setup.sh
-conda activate gym_av
-cd gaze_av_aloha/gaze_av_aloha/robot
-python env.py
-
-# sleep
-cd ~/GitHub/gaze-av-aloha
-conda deactivate
-conda deactivate
-conda deactivate
-source /opt/ros/noetic/setup.sh
-source interbotix_ws/devel/setup.sh
-cd /home/jinyu/GitHub/gaze-av-aloha/gaze_av_aloha/robot_scripts
-conda activate gym_av
-python sleep.py
-
-#covert data from lerobot to avaloha
-python convert_lerobot_to_avaloha.py --repo_id iantc104/av_aloha_sim_peg_insertion_test --start_episode 0 --end_episode 5
-
-
-# train 
-cd 
-python train.py \
-  policy=foveated_vit_policy \
-  policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_foveated_vit \
-  policy.optimizer_lr_backbone=1e-5 \
-  wandb.enable=true \
-  wandb.project=<project name> \
-  wandb.entity=<your wandb entity> \
-  wandb.job_name=fov-act \
-  device=cuda
-
-
-  CUDA_VISIBLE_DEVICES=0 python gaze_av_aloha/scripts/train.py \
-  policy=vit_policy \
-  policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_vit \
-  policy.optimizer_lr_backbone=1e-5 \
-  wandb.enable=true \
-  wandb.project=avaloha_A40002 \
-  wandb.entity=jinyuzou220-uc-davis \
-  wandb.job_name=peg_insertion_train_ZJY \
-  device=cuda
-
-  CUDA_VISIBLE_DEVICES=0 python gaze_av_aloha/scripts/train.py \
-  policy=foveated_vit_policy \
-  policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_foveated_vit \
-  policy.optimizer_lr_backbone=1e-5 \
-  wandb.enable=true \
-  wandb.project=avaloha_A40002 \
-  wandb.entity=jinyuzou220-uc-davis \
-  wandb.job_name=foveated_peg_insertion_train_ZJY \
-  device=cuda
-
-  CUDA_VISIBLE_DEVICES=0 python gaze_av_aloha/scripts/train.py \
-  policy=foveated_vit_policy \
-  policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_foveated_vit \
-  policy.optimizer_lr_backbone=1e-5 \
-  wandb.enable=true \
-  wandb.project=avaloha_A40002 \
-  wandb.entity=jinyuzou220-uc-davis \
-  wandb.job_name=foveated_peg_insertion_train_ZJY \
-  device=cuda
-
-  CUDA_VISIBLE_DEVICES=0 python gaze_av_aloha/scripts/train.py \
-  policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_foveated_vit \
-  policy.optimizer_lr_backbone=1e-5 \
-  wandb.enable=true \
-  wandb.project=put_tube2 \
-  wandb.entity=jinyuzou220-uc-davis \
-  wandb.job_name=foveated_put_tube2_train_ZJY \
-  device=cuda:0
+If you use this repository in academic work, please cite the associated publications when available.
