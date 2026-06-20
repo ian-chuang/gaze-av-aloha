@@ -207,9 +207,27 @@ Ongoing research directions include:
 * Generalization across objects, scenes, and tasks
 
 ---
-
 ## Associated Research
 
 This repository accompanies ongoing research in robot imitation learning, object-centric perception, and real-world manipulation.
 
 If you use this repository in academic work, please cite the associated publications when available.
+
+---
+config.py
+    Defines system constants.
+
+robot_factory.py
+    Creates robot objects.
+
+arm_controller.py
+    Commands arm motion.
+
+gripper.py
+    Commands gripper motion.
+
+camera_manager.py
+    Manages camera streams.
+
+teleop_utils.py
+    Math and transformations.
