@@ -1,381 +1,241 @@
-# Look, Focus, Act: Efficient and Robust Robot Learning via Human Gaze and Foveated Vision Transformers
+# ALOHA Real Arm Setup and Operation
 
-![hero](./media/hero.gif)
+This repository contains the software used to operate the Aloha bimanipulation robotics platform for teleoperation, robot control, data collection, replay, and dataset uploading. This repository provides everything needed to set up the software stack on a fresh Ubuntu installation and operate the robot for data collection. 
 
-🚀 **Project Website:** [https://ian-chuang.github.io/gaze-av-aloha/](https://ian-chuang.github.io/gaze-av-aloha/)
+This repository builds upon the original ALOHA software stack developed by Tony Zhao et al. If you are setting up a machine from scratch, first install ROS and complete the required Interbotix/ALOHA system configuration. Then follow the GIAVA-specific installation and setup instructions below.
 
-This repository contains the official code for our paper:
-**"Look, Focus, Act: Efficient and Robust Robot Learning via Human Gaze and Foveated Vision Transformers"**
+## Prerequisites
 
-We propose a human-inspired *foveated vision framework* for robot learning that combines human gaze, [foveated ViTs](https://github.com/facebookresearch/segment_this_thing), and robotic control to enable policies that are both efficient and robust. Our approach reduces ViT computation by 94%, accelerating training by 7× and inference by 3×.
+Before installing this repository, complete the following tutorials:
 
-We collect bimanual robot demonstrations with synchronized human eye-tracking using the AV-ALOHA simulation platform. This repository provides code and instructions for installation, dataset preparation, model training, policy evaluation, and data collection.
+- ROS Noetic Installation:
+  https://wiki.ros.org/noetic/Installation/Ubuntu
 
-```bibtex
-@misc{chuang2025lookfocusactefficient,
-      title={Look, Focus, Act: Efficient and Robust Robot Learning via Human Gaze and Foveated Vision Transformers}, 
-      author={Ian Chuang and Andrew Lee and Dechen Gao and Jinyu Zou and Iman Soltani},
-      year={2025},
-      eprint={2507.15833},
-      archivePrefix={arXiv},
-      primaryClass={cs.RO},
-      url={https://arxiv.org/abs/2507.15833}, 
-}
-```
+- Original ALOHA repository:
+  https://github.com/tonyzhaozh/aloha
 
-## AV ALOHA Simulation Datasets
+- Interbotix ROS setup:
+  https://docs.trossenrobotics.com/interbotix_xsarms_docs/
 
-Below lists all available AV-ALOHA simulation datasets with human eye-tracking annotations. Each dataset includes over 100 episodes and a link for interactive visualization.
+Complete the following once on a fresh machine.
 
-| Dataset | Eye Data | Episodes | Visualization |
-|---------|----------|----------|--------------|
-| [AV ALOHA Sim Peg Insertion](https://huggingface.co/datasets/iantc104/av_aloha_sim_peg_insertion) | ✅ | 100 | [View](https://huggingface.co/spaces/iantc104/av_aloha_visualize_dataset?dataset=iantc104%2Fav_aloha_sim_peg_insertion&episode=0) |
-| [AV ALOHA Sim Cube Transfer](https://huggingface.co/datasets/iantc104/av_aloha_sim_cube_transfer) | ✅ | 200 | [View](https://huggingface.co/spaces/iantc104/av_aloha_visualize_dataset?dataset=iantc104%2Fav_aloha_sim_cube_transfer&episode=0) |
-| [AV ALOHA Sim Thread Needle](https://huggingface.co/datasets/iantc104/av_aloha_sim_thread_needle) | ✅ | 200 | [View](https://huggingface.co/spaces/iantc104/av_aloha_visualize_dataset?dataset=iantc104%2Fav_aloha_sim_thread_needle&episode=0) |
-| [AV ALOHA Sim Pour Test Tube](https://huggingface.co/datasets/iantc104/av_aloha_sim_pour_test_tube) | ✅ | 100 | [View](https://huggingface.co/spaces/iantc104/av_aloha_visualize_dataset?dataset=iantc104%2Fav_aloha_sim_pour_test_tube&episode=0) |
-| [AV ALOHA Sim Hook Package](https://huggingface.co/datasets/iantc104/av_aloha_sim_hook_package) | ✅ | 100 | [View](https://huggingface.co/spaces/iantc104/av_aloha_visualize_dataset?dataset=iantc104%2Fav_aloha_sim_hook_package&episode=0) |
-| [AV ALOHA Sim Slot Insertion](https://huggingface.co/datasets/iantc104/av_aloha_sim_slot_insertion) | ✅ | 100 | [View](https://huggingface.co/spaces/iantc104/av_aloha_visualize_dataset?dataset=iantc104%2Fav_aloha_sim_slot_insertion&episode=0) |
+✓ Install ROS Noetic
 
-## Installation
+✓ Install Interbotix
 
-Follow the steps below to set up the environment and install all necessary dependencies.
+✓ Create ~/interbotix_ws
 
-```bash
-# Clone the repository and initialize submodules
-git clone https://github.com/ian-chuang/gaze-av-aloha.git
-cd gaze-av-aloha
-git submodule init
-git submodule update
+✓ Configure udev rules
 
-# Create and activate a new Conda environment
-conda create -n gaze python=3.10
-conda activate gaze
+✓ Configure robot USB ports
 
-# Install LeRobot
+✓ Configure camera USB ports
+
+✓ Verify all devices appear under /dev
+
+✓ Build the workspace
+
+Remember to include all 3 in the Robot Configuration: /dev/ttyDXL_puppet_left, /dev/ttyDXL_puppet_right, /dev/ttyDXL_puppet_middle
+
+## Software Setup
+1 Install ROS
+
+2 Follow instructions from Tony to setup everything
+
+2 Install Miniconda
+
+3 Clone repository
+
+4 Initialize submodules
+
+5 Create environment
+
+6 Install Python packages
+
+7 Configure USB devices
+
+8 Build workspace
+
+9 Verify installation
+
+### System Requirements
+
+Operating System: Ubuntu 20.04 LTS
+
+Required Software:
+ROS Noetic
+Python 3.10
+Conda (Miniconda or Anaconda)
+Git
+
+Installation
+1. Install ROS Noetic
+
+Install ROS Noetic by following the official installation guide.
+
+After installation, verify:
+
+roscore
+2. Clone the Repository real-v2-spr26 branch
+git clone [<repository_url>](https://github.com/Soltanilara/giava/tree/real-v2-spr26/interbotix_ws/src)
+
+cd giava
+
+git submodule update --init --recursive
+
+This repository uses several Git submodules that are required for robot operation.
+
+Current submodules include:
+
+Interbotix
+Pyroki
+LeRobot
+Gym AV
+ALOHA
+3. Create the Conda Environment
+conda env create -f environment.yml
+
+conda activate gym_av
+
+If creating the environment manually:
+
+conda create -n gym_av python=3.10
+
+conda activate gym_av
+4. Install Python Dependencies
+pip install -r requirements.txt
+
+Additional packages requiring manual installation:
+
+LeRobot
 pip install git+https://github.com/huggingface/lerobot.git@483be9aac217c2d8ef16982490f22b2ad091ab46
+aiortc
 
-# Install FFmpeg for video logging
-conda install ffmpeg=7.1.1 -c conda-forge
+The VR teleoperation stack requires a patched fork of aiortc.
 
-# Install AV-ALOHA packages
-pip install -e ./gym_av_aloha
-pip install -e ./gaze_av_aloha
-```
+pip install git+https://github.com/ian-chuang/aiortc.git@91cdb627b2510dba80786f9236277f103617c87a
 
-### Authentication
+Do not install the default PyPI version.
 
-Make sure you're logged in to both Weights & Biases and Hugging Face:
+5. Build the ROS Workspace
+cd interbotix_ws
 
-```bash
-wandb login
-huggingface-cli login
-```
+catkin_make
 
-## Download and Preprocess Dataset
+source devel/setup.bash
+Robot Configuration
+USB Device Naming
 
-We use the [LeRobot dataset format](https://github.com/huggingface/lerobot) for ease of sharing and visualization via Hugging Face.
-However, LeRobot's dataloader can be slow, so we convert each dataset into a custom `AVAlohaDataset` format based on **Zarr** for faster access during training.
+The robot arms use persistent symbolic device names created through udev rules.
 
-### Available Dataset Repository IDs
+Expected devices:
 
-* `iantc104/av_aloha_sim_cube_transfer`
-* `iantc104/av_aloha_sim_peg_insertion`
-* `iantc104/av_aloha_sim_slot_insertion`
-* `iantc104/av_aloha_sim_hook_package`
-* `iantc104/av_aloha_sim_pour_test_tube`
-* `iantc104/av_aloha_sim_thread_needle`
-
-### Conversion Instructions
-
-To convert a dataset to Zarr format, run the following command from the project root:
+/dev/ttyDXL_puppet_left
+/dev/ttyDXL_puppet_right
+/dev/ttyDXL_puppet_middle
 
-```bash
-python gym_av_aloha/scripts/convert_lerobot_to_avaloha.py --repo_id <dataset_repo_id>
-```
-
-For example:
-
-```bash
-python gym_av_aloha/scripts/convert_lerobot_to_avaloha.py --repo_id iantc104/av_aloha_sim_thread_needle
-```
-
-Converted datasets will be saved under:
-
-```
-gym_av_aloha/outputs/
-```
-
-# AV ALOHA Benchmark
-
-Train and evaluate policies using [`train.py`](./gaze_av_aloha/scripts/train.py).
-
-Exact commands used in our simulation experiments are provided in [`experiments.txt`](./experiments.txt).
-Pretrained weights are available and can be loaded via Hydra configuration.
-
-### Pretrained ViT Weights (MAE Pretrained)
+These symbolic links ensure each robot always appears under the same device name regardless of USB enumeration order.
 
-* [`iantc104/mae_vitb_vit`](https://huggingface.co/iantc104/mae_vitb_vit)
-* [`iantc104/mae_vitb_low_res_vit`](https://huggingface.co/iantc104/mae_vitb_low_res_vit)
-* [`iantc104/mae_vitb_foveated_vit`](https://huggingface.co/iantc104/mae_vitb_foveated_vit)
+(Include instructions here for installing the udev rules.)
 
-### Pretrained Gaze Models (Task‑Specific)
+Verify Connected Devices
+ls /dev/ttyDXL*
 
-* [`iantc104/gaze_model_av_aloha_sim_cube_transfer`](https://huggingface.co/iantc104/gaze_model_av_aloha_sim_cube_transfer)
-* [`iantc104/gaze_model_av_aloha_sim_peg_insertion`](https://huggingface.co/iantc104/gaze_model_av_aloha_sim_peg_insertion)
-* [`iantc104/gaze_model_av_aloha_sim_slot_insertion`](https://huggingface.co/iantc104/gaze_model_av_aloha_sim_slot_insertion)
-* [`iantc104/gaze_model_av_aloha_sim_hook_package`](https://huggingface.co/iantc104/gaze_model_av_aloha_sim_hook_package)
-* [`iantc104/gaze_model_av_aloha_sim_pour_test_tube`](https://huggingface.co/iantc104/gaze_model_av_aloha_sim_pour_test_tube)
-* [`iantc104/gaze_model_av_aloha_sim_thread_needle`](https://huggingface.co/iantc104/gaze_model_av_aloha_sim_thread_needle)
+Verify that all expected devices are present before launching the system.
 
-### Available Task Configs
+Repository Structure
+interbotix_ws/
+    src/
+        av_aloha/
+        gym_av_aloha/
+        interbotix_ros_*
+        pyroki/
+        lerobot/
 
-* `av_aloha_sim_cube_transfer`
-* `av_aloha_sim_peg_insertion`
-* `av_aloha_sim_slot_insertion`
-* `av_aloha_sim_hook_package`
-* `av_aloha_sim_pour_test_tube`
-* `av_aloha_sim_thread_needle`
+datasets/
 
-### Train & Evaluate Policies
+outputs/
 
-**Fov-Act (end-to-end gaze as action):**
+checkpoints/
+Running the System
 
-```bash
-python gaze_av_aloha/scripts/train.py \
-  policy=foveated_vit_policy \
-  task=<task e.g. av_aloha_sim_thread_needle> \
-  policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_foveated_vit \
-  policy.optimizer_lr_backbone=1e-5 \
-  wandb.enable=true \
-  wandb.project=<project name> \
-  wandb.entity=<your wandb entity> \
-  wandb.job_name=fov-act \
-  device=cuda
-```
+Activate the environment
 
-**Fov-UNet (two-stage with pretrained gaze model):**
-
-```bash
-python gaze_av_aloha/scripts/train.py \
-  policy=foveated_vit_policy \
-  task=<task e.g. av_aloha_sim_thread_needle> \
-  policy.use_gaze_as_action=false \
-  policy.gaze_model_repo_id=<gaze model e.g. iantc104/gaze_model_av_aloha_sim_thread_needle> \
-  policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_foveated_vit \
-  policy.optimizer_lr_backbone=1e-5 \
-  wandb.enable=true \
-  wandb.project=<project name> \
-  wandb.entity=<your wandb entity> \
-  wandb.job_name=fov-unet \
-  device=cuda
-```
-
-**Fine (full-res ViT baseline):**
-
-```bash
-python gaze_av_aloha/scripts/train.py \
-  policy=vit_policy \
-  task=<task e.g. av_aloha_sim_thread_needle> \
-  policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_vit \
-  policy.optimizer_lr_backbone=1e-5 \
-  wandb.enable=true \
-  wandb.project=<project name> \
-  wandb.entity=<your wandb entity> \
-  wandb.job_name=fine \
-  device=cuda
-```
-
-**Coarse (low-res ViT baseline):**
-
-```bash
-python gaze_av_aloha/scripts/train.py \
-  policy=low_res_vit_policy \
-  task=<task e.g. av_aloha_sim_thread_needle> \
-  policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_low_res_vit \
-  policy.optimizer_lr_backbone=1e-5 \
-  wandb.enable=true \
-  wandb.project=<project name> \
-  wandb.entity=<your wandb entity> \
-  wandb.job_name=coarse \
-  device=cuda
-```
-
-## Additional Resources
-
-### AV-ALOHA Simulation Data Collection
-
-To collect simulation data using AV-ALOHA:
-
-* Install the **AV-ALOHA Unity App** on your Meta Quest Pro headset:
-  👉 [AV-ALOHA Unity App](https://github.com/Soltanilara/av-aloha-unity/tree/eye-tracking)
-* Follow the instructions in [`gym_av_aloha/README.md`](https://github.com/Soltanilara/gym_av_aloha) for detailed steps on data collection.
-
-### MAE Pretraining
-
-We provide MAE-pretrained Vision Transformers used for:
-
-* **Foveated**
-* **Fine (Full-Res)**
-* **Coarse (Low-Res)**
-
-Details and training scripts are located in:
-📄 [`pretrain/README.md`](./pretrain/README.md)
-
-### Gaze Model Training
-
-Train a simple UNet-based model for gaze prediction using the script:
-
-```bash
-python gaze_av_aloha/scripts/train_gaze_model.py --task <task_name>
-```
-
-Supported task names:
-
-* `thread_needle`
-* `pour_test_tube`
-* `hook_package`
-* `slot_insertion`
-* `cube_transfer`
-* `peg_insertion`
-
-The resulting models will be pushed to Hugging Face under the appropriate task-specific repo.
-
-# Real Robot
-
-Install ROS-Noetic
-
-cd interbotix_ws/src
-rosdep install -y --from-paths . --ignore-src --rosdistro noetic
-cd ..
-catkin_make -DPYTHON_EXECUTABLE=/usr/bin/python3
-
-# install opencv from source
-# to fix camera lighting issues go to guvcview, open camera and set default hardware settings
-
-git clone https://github.com/opencv/opencv.git
-cd opencv
-mkdir build
-cd build
-
-#vvv THIS WAS GPT'ed ... just make sure gstreamer is enabled!!!
-cmake -DCMAKE_BUILD_TYPE=RELEASE \
-  -DCMAKE_INSTALL_PREFIX=$(python -c "import sys; print(sys.prefix)") \
-  -DPYTHON3_EXECUTABLE=$(which python) \
-  -DPYTHON3_INCLUDE_DIR=$(python -c "from sysconfig import get_paths; print(get_paths()['include'])") \
-  -DPYTHON3_LIBRARY=$(python -c "import ctypes.util; print(ctypes.util.find_library('python3.10'))") \
-  -DPYTHON3_PACKAGES_PATH=$(python -c "from distutils.sysconfig import get_python_lib; print(get_python_lib())") \
-  -DBUILD_opencv_python3=ON \
-  -DWITH_GSTREAMER=ON .. 
-
-make -j8
-sudo make install
-
-# wheel??? not sure 
-cd python_loader
-python setup.py bdist_wheel
-cd dist
-pip install opencv*.whl
-
-
-
-
-
-
-
-
-
-
-
-# python record_episodes --task_name occluded_insertion --episode_idx 0
-# /home/jinyu/GitHub/gaze-av-aloha/gym_av_aloha/gym_av_aloha/scripts
-
-
-# startup robot
-cd ~/GitHub/gaze-av-aloha
-conda deactivate
-conda deactivate
-conda deactivate
-source /opt/ros/noetic/setup.sh
-source interbotix_ws/devel/setup.sh
-##### EITHER WITH SIMULATION
-roslaunch av_aloha 3arms_teleop.launch use_sim:=true use_rviz:=true
-##### OR REAL
-roslaunch av_aloha 3arms_teleop.launch 
-
-# IN A NEW TERMINAL python script
-cd ~/GitHub/gaze-av-aloha
-conda deactivate
-conda deactivate
-conda deactivate
-source /opt/ros/noetic/setup.sh
-source interbotix_ws/devel/setup.sh
 conda activate gym_av
-cd gaze_av_aloha/gaze_av_aloha/robot
-python env.py
 
-# sleep
-cd ~/GitHub/gaze-av-aloha
-conda deactivate
-conda deactivate
-conda deactivate
-source /opt/ros/noetic/setup.sh
-source interbotix_ws/devel/setup.sh
-cd /home/jinyu/GitHub/gaze-av-aloha/gaze_av_aloha/robot_scripts
-conda activate gym_av
-python sleep.py
+Source ROS
 
-#covert data from lerobot to avaloha
-python convert_lerobot_to_avaloha.py --repo_id iantc104/av_aloha_sim_peg_insertion_test --start_episode 0 --end_episode 5
+source /opt/ros/noetic/setup.bash
 
+Source the workspace
 
-# train 
-cd 
-python train.py \
-  policy=foveated_vit_policy \
-  policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_foveated_vit \
-  policy.optimizer_lr_backbone=1e-5 \
-  wandb.enable=true \
-  wandb.project=<project name> \
-  wandb.entity=<your wandb entity> \
-  wandb.job_name=fov-act \
-  device=cuda
+source ~/interbotix_ws/devel/setup.bash
 
+Launch the robot
 
-  CUDA_VISIBLE_DEVICES=0 python gaze_av_aloha/scripts/train.py \
-  policy=vit_policy \
-  policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_vit \
-  policy.optimizer_lr_backbone=1e-5 \
-  wandb.enable=true \
-  wandb.project=avaloha_A40002 \
-  wandb.entity=jinyuzou220-uc-davis \
-  wandb.job_name=peg_insertion_train_ZJY \
-  device=cuda
+roslaunch ...
+Common Workflows
+Reset Robot
+python reset_arm.py
 
-  CUDA_VISIBLE_DEVICES=0 python gaze_av_aloha/scripts/train.py \
-  policy=foveated_vit_policy \
-  policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_foveated_vit \
-  policy.optimizer_lr_backbone=1e-5 \
-  wandb.enable=true \
-  wandb.project=avaloha_A40002 \
-  wandb.entity=jinyuzou220-uc-davis \
-  wandb.job_name=foveated_peg_insertion_train_ZJY \
-  device=cuda
+Moves the robot to its home configuration.
 
-  CUDA_VISIBLE_DEVICES=0 python gaze_av_aloha/scripts/train.py \
-  policy=foveated_vit_policy \
-  policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_foveated_vit \
-  policy.optimizer_lr_backbone=1e-5 \
-  wandb.enable=true \
-  wandb.project=avaloha_A40002 \
-  wandb.entity=jinyuzou220-uc-davis \
-  wandb.job_name=foveated_peg_insertion_train_ZJY \
-  device=cuda
+Move Robot
+python move_arm.py
 
-  CUDA_VISIBLE_DEVICES=0 python gaze_av_aloha/scripts/train.py \
-  policy.vision_encoder_kwargs.repo_id=iantc104/mae_vitb_foveated_vit \
-  policy.optimizer_lr_backbone=1e-5 \
-  wandb.enable=true \
-  wandb.project=put_tube2 \
-  wandb.entity=jinyuzou220-uc-davis \
-  wandb.job_name=foveated_put_tube2_train_ZJY \
-  device=cuda:0
+Executes a specified joint or Cartesian motion.
+
+Teleoperation
+python teleop.py
+
+Launches the VR teleoperation interface.
+
+Collect Demonstrations
+python record_episodes.py
+
+Records synchronized robot observations and actions.
+
+Replay Demonstrations
+python replay_episode.py
+
+Replays a recorded demonstration on the robot.
+
+Upload Dataset
+python upload_dataset.py
+
+Converts and uploads demonstrations to the LeRobot dataset format.
+
+Important Scripts
+Script	Description
+reset_arm.py	Home the robot
+move_arm.py	Move the robot
+record_episodes.py	Record demonstrations
+replay_episode.py	Replay demonstrations
+camera_manager.py	Camera interface
+robot_factory.py	Create robot objects
+arm_controller.py	Robot motion control
+config.py	Global configuration
+teleop_utils.py	Coordinate transforms and utilities
+Data Organization
+
+Document where demonstrations are saved.
+
+Example:
+
+datasets/
+
+    task_name/
+
+        episode_0000/
+
+        episode_0001/
+
+        episode_0002/
+
+Include the naming convention and directory structure for images, robot states, actions, and metadata.
+
+source ros and interbotix
+roslaunch
+
+new terminal, conda activate gym_av
+python _
