@@ -1,233 +1,241 @@
-# Object-Centric Robot Imitation Learning
+# ALOHA Real Arm Setup and Operation
 
-A robotics research platform for real-world manipulation using VR teleoperation, object-centric perception, transformer-based imitation learning, and optimization-based robot control.
+This repository contains the software used to operate the Aloha bimanipulation robotics platform for teleoperation, robot control, data collection, replay, and dataset uploading. This repository provides everything needed to set up the software stack on a fresh Ubuntu installation and operate the robot for data collection. 
 
----
+This repository builds upon the original ALOHA software stack developed by Tony Zhao et al. If you are setting up a machine from scratch, first install ROS and complete the required Interbotix/ALOHA system configuration. Then follow the GIAVA-specific installation and setup instructions below.
 
-## Overview
+## Prerequisites
 
-This repository contains the software infrastructure, training pipelines, and experimental research code used to study robotic manipulation from demonstration.
+Before installing this repository, complete the following tutorials:
 
-The project began as an exploration of whether explicit object-centric representations could improve the performance and robustness of transformer-based imitation learning policies. Over time, it evolved into a broader platform supporting data collection, perception, policy learning, robot control, and inverse kinematics research on real robotic hardware.
+- ROS Noetic Installation:
+  https://wiki.ros.org/noetic/Installation/Ubuntu
 
-Current research directions include:
+- Original ALOHA repository:
+  https://github.com/tonyzhaozh/aloha
 
-* Object-centric visual conditioning for imitation learning
-* Segmentation-assisted robot perception
-* Transformer-based visuomotor policies
-* Demonstration learning from VR teleoperation
-* Real-time robotic manipulation
-* Optimization-based inverse kinematics
-* Learned and model-based control integration
+- Interbotix ROS setup:
+  https://docs.trossenrobotics.com/interbotix_xsarms_docs/
 
----
+Complete the following once on a fresh machine.
 
-## System Architecture
+✓ Install ROS Noetic
 
-The platform consists of four primary components:
+✓ Install Interbotix
 
-### 1. VR Teleoperation
+✓ Create ~/interbotix_ws
 
-Human demonstrations are collected through immersive teleoperation using a VR headset and handheld controllers.
+✓ Configure udev rules
 
-The teleoperation stack supports:
+✓ Configure robot USB ports
 
-* Real-time robot control
-* Episode recording
-* Demonstration replay
-* Data synchronization
-* Multi-camera capture
+✓ Configure camera USB ports
 
-Demonstrations are automatically logged and converted into datasets suitable for imitation learning.
+✓ Verify all devices appear under /dev
 
-### 2. Perception
+✓ Build the workspace
 
-The robot observes the environment through multiple RGB and RGB-D cameras, including both wrist-mounted and external viewpoints.
+Remember to include all 3 in the Robot Configuration: /dev/ttyDXL_puppet_left, /dev/ttyDXL_puppet_right, /dev/ttyDXL_puppet_middle
 
-The perception pipeline supports:
+## Software Setup
+1 Install ROS
 
-* RGB observations
-* RGB-D observations
-* Object segmentation
-* Object localization
-* Geometric feature extraction
-* Dataset annotation and validation
+2 Follow instructions from Tony to setup everything
 
-Object-centric representations are generated using segmentation masks and geometric scene descriptors derived from detected objects.
+2 Install Miniconda
 
-### 3. Imitation Learning
+3 Clone repository
 
-Policies are trained using Action Chunking with Transformers (ACT).
+4 Initialize submodules
 
-Rather than predicting a single control command at each timestep, ACT predicts short sequences of future actions, enabling more stable and temporally coherent behavior.
+5 Create environment
 
-The training stack includes:
+6 Install Python packages
 
-* Dataset preprocessing
-* ACT training
-* Hyperparameter sweeps
-* Rollout evaluation
-* Experiment tracking
-* Policy benchmarking
+7 Configure USB devices
 
-Supported visual representations include:
+8 Build workspace
 
-* Raw RGB observations
-* Segmentation masks
-* Masked RGB inputs
-* Object centroids
-* Object-target vectors
-* Hybrid object-centric encodings
+9 Verify installation
 
-### 4. Robot Control
+### System Requirements
 
-The repository contains interfaces and utilities for controlling physical robot hardware, including:
+Operating System: Ubuntu 20.04 LTS
 
-* Joint-space control
-* Trajectory execution
-* State estimation
-* Gripper control
-* Real-time policy deployment
+Required Software:
+ROS Noetic
+Python 3.10
+Conda (Miniconda or Anaconda)
+Git
 
----
+Installation
+1. Install ROS Noetic
 
-## Object-Centric Visual Conditioning
+Install ROS Noetic by following the official installation guide.
 
-A major focus of this repository is the study of object-centric representations for robotic imitation learning.
+After installation, verify:
 
-Traditional behavioral cloning systems must simultaneously learn perception, object identification, and control directly from pixels. This work investigates whether explicitly representing task-relevant objects can simplify learning and improve robustness.
+roscore
+2. Clone the Repository real-v2-spr26 branch
+git clone [<repository_url>](https://github.com/Soltanilara/giava/tree/real-v2-spr26/interbotix_ws/src)
 
-Representations explored include:
+cd giava
 
-* Segmentation masks
-* Object centroids
-* Direction vectors
-* Geometric scene descriptors
-* Hybrid visual-geometric representations
+git submodule update --init --recursive
 
-Experiments on real-world manipulation tasks suggest that object-centric conditioning improves object localization, reduces unnecessary corrective behavior, and can outperform purely pixel-based representations despite requiring significantly less information.
+This repository uses several Git submodules that are required for robot operation.
 
----
+Current submodules include:
 
-## Segmentation Pipeline
+Interbotix
+Pyroki
+LeRobot
+Gym AV
+ALOHA
+3. Create the Conda Environment
+conda env create -f environment.yml
 
-To generate object-centric observations, we developed a semi-automated segmentation pipeline.
+conda activate gym_av
 
-The annotation workflow combines:
+If creating the environment manually:
 
-* Foundation-model segmentation
-* Classical computer vision techniques
-* Scene-specific heuristics
-* Automated quality control
-* YOLO fine-tuning
+conda create -n gym_av python=3.10
 
-The resulting segmentation models run in real time and provide masks that can be used both during training and deployment.
+conda activate gym_av
+4. Install Python Dependencies
+pip install -r requirements.txt
 
-This allows task-relevant scene structure to be made explicit to the policy while maintaining practical deployment constraints.
+Additional packages requiring manual installation:
 
----
+LeRobot
+pip install git+https://github.com/huggingface/lerobot.git@483be9aac217c2d8ef16982490f22b2ad091ab46
+aiortc
 
-## Experimental Inverse Kinematics Research
+The VR teleoperation stack requires a patched fork of aiortc.
 
-The repository also contains ongoing work on optimization-based inverse kinematics and trajectory generation.
+pip install git+https://github.com/ian-chuang/aiortc.git@91cdb627b2510dba80786f9236277f103617c87a
 
-Current investigations include:
+Do not install the default PyPI version.
 
-* Trajectory-constrained IK
-* Collision-aware optimization
-* Manipulability objectives
-* Bimanual IK formulations
-* JAX-based optimization pipelines
-* Integration of learned policies with IK-based controllers
+5. Build the ROS Workspace
+cd interbotix_ws
 
-This work is currently experimental and under active development.
+catkin_make
 
----
+source devel/setup.bash
+Robot Configuration
+USB Device Naming
 
-## Hardware Platform
+The robot arms use persistent symbolic device names created through udev rules.
 
-Current experiments are conducted on:
+Expected devices:
 
-* Interbotix robotic manipulators
-* Parallel-jaw grippers
-* Intel RealSense RGB-D cameras
-* Wrist-mounted cameras
-* External overhead cameras
-* VR headsets and handheld controllers
+/dev/ttyDXL_puppet_left
+/dev/ttyDXL_puppet_right
+/dev/ttyDXL_puppet_middle
 
----
+These symbolic links ensure each robot always appears under the same device name regardless of USB enumeration order.
 
-## Repository Structure
+(Include instructions here for installing the udev rules.)
 
-```text
+Verify Connected Devices
+ls /dev/ttyDXL*
+
+Verify that all expected devices are present before launching the system.
+
+Repository Structure
 interbotix_ws/
-├── src/
-│   ├── av_aloha/
-│   │   ├── data_collection_scripts/
-│   │   ├── teleoperation/
-│   │   ├── perception/
-│   │   ├── training/
-│   │   ├── evaluation/
-│   │   └── robot_control/
-│   ├── lerobot/
-│   └── interbotix_ros_*
-│
-├── datasets/
-├── checkpoints/
-├── experiments/
-└── outputs/
-```
+    src/
+        av_aloha/
+        gym_av_aloha/
+        interbotix_ros_*
+        pyroki/
+        lerobot/
 
----
+datasets/
 
-## Research Contributions
+outputs/
 
-This repository has been used to investigate:
+checkpoints/
+Running the System
 
-* Object-centric visual conditioning for ACT policies
-* Segmentation-assisted imitation learning
-* Real-world robot manipulation from demonstration
-* Geometric scene representations for control
-* Teleoperation-driven data collection pipelines
+Activate the environment
 
-Recent experiments suggest that low-dimensional object-centric representations based on centroids and geometric relationships can rival or outperform richer visual inputs on manipulation tasks while requiring substantially less computation.
+conda activate gym_av
 
----
+Source ROS
 
-## Future Work
+source /opt/ros/noetic/setup.bash
 
-Ongoing research directions include:
+Source the workspace
 
-* Multi-object manipulation
-* Task-conditioned policies
-* Improved grasp planning
-* Foundation-model-assisted perception
-* Learned world models
-* Integration of optimization-based IK with learned policies
-* Generalization across objects, scenes, and tasks
+source ~/interbotix_ws/devel/setup.bash
 
----
-## Associated Research
+Launch the robot
 
-This repository accompanies ongoing research in robot imitation learning, object-centric perception, and real-world manipulation.
+roslaunch ...
+Common Workflows
+Reset Robot
+python reset_arm.py
 
-If you use this repository in academic work, please cite the associated publications when available.
+Moves the robot to its home configuration.
 
----
-config.py
-    Defines system constants.
+Move Robot
+python move_arm.py
 
-robot_factory.py
-    Creates robot objects.
+Executes a specified joint or Cartesian motion.
 
-arm_controller.py
-    Commands arm motion.
+Teleoperation
+python teleop.py
 
-gripper.py
-    Commands gripper motion.
+Launches the VR teleoperation interface.
 
-camera_manager.py
-    Manages camera streams.
+Collect Demonstrations
+python record_episodes.py
 
-teleop_utils.py
-    Math and transformations.
+Records synchronized robot observations and actions.
+
+Replay Demonstrations
+python replay_episode.py
+
+Replays a recorded demonstration on the robot.
+
+Upload Dataset
+python upload_dataset.py
+
+Converts and uploads demonstrations to the LeRobot dataset format.
+
+Important Scripts
+Script	Description
+reset_arm.py	Home the robot
+move_arm.py	Move the robot
+record_episodes.py	Record demonstrations
+replay_episode.py	Replay demonstrations
+camera_manager.py	Camera interface
+robot_factory.py	Create robot objects
+arm_controller.py	Robot motion control
+config.py	Global configuration
+teleop_utils.py	Coordinate transforms and utilities
+Data Organization
+
+Document where demonstrations are saved.
+
+Example:
+
+datasets/
+
+    task_name/
+
+        episode_0000/
+
+        episode_0001/
+
+        episode_0002/
+
+Include the naming convention and directory structure for images, robot states, actions, and metadata.
+
+source ros and interbotix
+roslaunch
+
+new terminal, conda activate gym_av
+python _
