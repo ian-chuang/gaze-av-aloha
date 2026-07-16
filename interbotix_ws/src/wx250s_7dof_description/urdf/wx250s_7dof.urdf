@@ -247,14 +247,13 @@
       <inertia ixx="5e-5" ixy="0" ixz="0" iyy="5e-5" iyz="0" izz="5e-5"/>
     </inertial>
   </link>
-  <!-- <joint name="camera_yaw" type="revolute">
+  <joint name="camera_yaw" type="revolute">
     <axis xyz="0 0 1"/>
-    <limit effort="1" lower="${-pi}" upper="${pi}" velocity="${pi}"/>
-    <origin xyz="0 0 0" rpy="0 0 0"/>
-    <parent link="$(arg robot_name)/camera_roll_link"/>
-    <child link="$(arg robot_name)/camera_yaw_link"/>
+    <limit effort="1" lower="-3.141592653589793" upper="3.141592653589793" velocity="3.141592653589793"/>
+    <origin rpy="0 0 0" xyz="0 0 0"/>
+    <parent link="wx250s/camera_roll_link"/>
+    <child link="wx250s/camera_yaw_link"/>
   </joint>
-
   <transmission name="trans_camera_yaw">
     <type>transmission_interface/SimpleTransmission</type>
     <joint name="camera_yaw">
@@ -264,25 +263,22 @@
       <mechanicalReduction>1</mechanicalReduction>
     </actuator>
   </transmission>
-
-  <link name="$(arg robot_name)/camera_yaw_link">
+  <link name="wx250s/camera_yaw_link">
     <visual>
       <geometry>
-        <mesh filename="package://wx250s_7dof_description/meshes/wx250s_7dof_camera_yaw.stl"
-              scale="0.001 0.001 0.001"/>
+        <mesh filename="package://wx250s_7dof_description/meshes/wx250s_7dof_camera_yaw.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="package://wx250s_7dof_description/meshes/wx250s_7dof_camera_yaw.stl"
-              scale="0.001 0.001 0.001"/>
+        <mesh filename="package://wx250s_7dof_description/meshes/wx250s_7dof_camera_yaw.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
     <inertial>
       <origin xyz="0 0 0"/>
       <mass value="0.03"/>
-      <inertia ixx="3e-5" iyy="3e-5" izz="3e-5" ixy="0" ixz="0" iyz="0"/>
+      <inertia ixx="3e-5" ixy="0" ixz="0" iyy="3e-5" iyz="0" izz="3e-5"/>
     </inertial>
-  </link> -->
+  </link>
 </robot>
 

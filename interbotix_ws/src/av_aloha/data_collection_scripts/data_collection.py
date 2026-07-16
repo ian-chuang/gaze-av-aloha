@@ -235,8 +235,9 @@ def main():
     q = np.zeros(robot.joints.num_actuated_joints, dtype=float)
 
     for arm_name in arm_names:
+        n = ARM_CONFIG[arm_name]["num_joints"]
         q[arm_data[arm_name]["joint_indices"]] = np.asarray(
-            robots[arm_name].dxl.joint_states.position[:6],
+            robots[arm_name].dxl.joint_states.position[:n],
             dtype=float,
         )
 
@@ -405,9 +406,15 @@ def main():
         for arm in arm_names:
             joint_state_msg = robots[arm].dxl.joint_states
 
-            joint_positions[arm] = np.asarray(joint_state_msg.position[:6], dtype=np.float32)
+            # joint_positions[arm] = np.asarray(joint_state_msg.position[:6], dtype=np.float32)
+            n = ARM_CONFIG[arm]["num_joints"]
 
-            if len(joint_state_msg.position) > 6:
+            joint_positions[arm] = np.asarray(
+                joint_state_msg.position[:n],
+                dtype=np.float32,
+            )
+
+            if ARM_CONFIG[arm]["has_gripper"]:
                 gripper_states[arm] = np.asarray([joint_state_msg.position[6]], dtype=np.float32)
 
         if "left" in arm_names:

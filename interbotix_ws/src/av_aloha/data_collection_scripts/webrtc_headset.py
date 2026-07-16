@@ -28,7 +28,7 @@ def force_codec(pc, sender, forced_codec):
     )
 
 class BufferVideoStreamTrack(VideoStreamTrack):
-    def __init__(self, buffer_size=1, image_format="rgb24", max_fps=60):
+    def __init__(self, buffer_size=1, image_format="gray", max_fps=30):
         super().__init__()
         self.queue = queue.Queue(maxsize=buffer_size)
         self.image_format = image_format

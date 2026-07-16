@@ -5,7 +5,7 @@ data types are uint8
 
 import numpy as np
 import time
-from webrtc_headset import WebRTCHeadset
+from interbotix_ws.src.av_aloha.data_collection_scripts.webrtc_headset import WebRTCHeadset
 
 def main():
     # Start WebRTC

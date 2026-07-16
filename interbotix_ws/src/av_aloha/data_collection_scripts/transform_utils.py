@@ -299,3 +299,15 @@ def adjoint(T):
     ret[3:, :3] = pR
 
     return ret
+
+def quat_xyzw_to_wxyz(q_xyzw):
+    return np.array([q_xyzw[3], q_xyzw[0], q_xyzw[1], q_xyzw[2]], dtype=float)
+
+def matrix_to_pose7(T):
+    pos = T[:3, 3].astype(np.float32)
+    quat_xyzw = R.from_matrix(T[:3, :3]).as_quat().astype(np.float32)
+    quat_wxyz = np.array(
+        [quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]],
+        dtype=np.float32,
+    )
+    return np.concatenate([pos, quat_wxyz], axis=0)

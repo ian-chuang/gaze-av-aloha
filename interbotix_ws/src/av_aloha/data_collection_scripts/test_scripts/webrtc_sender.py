@@ -1,7 +1,7 @@
 import sys
 sys.path.append('..')
 
-from webrtc_headset import WebRTCHeadset
+from interbotix_ws.src.av_aloha.data_collection_scripts.webrtc_headset import WebRTCHeadset
 from headset_utils import HeadsetFeedback
 import os
 import cv2

@@ -1,3 +1,4 @@
+#from lerobot.lerobot.common.robots import config
 import rospy
 import time
 import numpy as np
@@ -16,8 +17,11 @@ import pyroki as pk
 from yourdfpy import URDF
 import jaxlie
 
-from webrtc_headset import WebRTCHeadset
+from interbotix_ws.src.av_aloha.data_collection_scripts.webrtc_headset import WebRTCHeadset
 from transform_utils import pose2mat
+
+import pyrealsense2 as rs
+import numpy as np
 
 import sys
 sys.path.append(
@@ -30,7 +34,7 @@ import depthai as dai
 import time
 import cv2
 import numpy as np
-from webrtc_headset import WebRTCHeadset
+from interbotix_ws.src.av_aloha.data_collection_scripts.webrtc_headset import WebRTCHeadset
 from headset_control import HeadsetFullControl as HeadsetControl
 from headset_utils import HeadsetFeedback
 from transform_utils import (
@@ -46,19 +50,15 @@ URDF_PATH = "/home/devi/giava/giava.urdf"
 
 LEFT_EE_LINK = "leftgripper_base"
 RIGHT_EE_LINK = "rightgripper_base"
-MIDDLE_EE_LINK = "middlepan_link"
 
 CONTROL_DT = 0.05
 
 MOVING_TIME = 0.07
 ACCEL_TIME = 0.02
 
-POSITION_SCALE = 1.0
+POSITION_SCALE = 1.8
 
 ALPHA = 0.2
-
-HEAD_COMP_THRESH = 0.03
-HEAD_ROT_THRESH = np.deg2rad(10)
 
 # ============================================================
 # HELPERS
@@ -72,34 +72,6 @@ def quat_xyzw_to_wxyz(q):
         q[1],
         q[2],
     ])
-
-RIGHT_ARM_NOMINAL = np.array([
-    -0.38644996,
-    -1.12195969,
-    1.15191531,
-    1.26696038,
-    0.38959768,
-    -1.54413652,
-])
-
-LEFT_ARM_NOMINAL = np.array([
-    0.03241233,
-    -1.17097342,
-    0.98509574,
-    0.19366860,
-    0.99780756,
-    -0.36708522,
-])
-
-MIDDLE_ARM_NOMINAL = np.array([
-    0.05,
-    -1.5,
-    0.05,
-    -0.08,
-    2.0,
-    1.4,
-    0.0,
-])
 
 # ============================================================
 # MAIN
@@ -126,11 +98,11 @@ def main():
     feedback = HeadsetFeedback()
     headset_control.reset()
 
-    # ---- Setup pipeline ----
-    pipeline = dai.Pipeline()
+    # ---- Setup OAK pipeline ----
+    oak_pipeline = dai.Pipeline()
 
-    cam_left = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_B)
-    cam_right = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_C)
+    cam_left = oak_pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_B)
+    cam_right = oak_pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_C)
 
     left_out = cam_left.requestOutput(
         (1280, 800),
@@ -147,9 +119,44 @@ def main():
     q_left = left_out.createOutputQueue()
     q_right = right_out.createOutputQueue()
 
-    pipeline.start()
+    oak_pipeline.start()
 
     time.sleep(0.5)
+
+    # Realsense cameras
+
+    CAMERA_SERIALS = {
+        "left_wrist":  "230322272239",
+        "right_wrist": "230322270105",
+        "top_scene":   "230322270396",
+        "low_scene":   "230322271312",
+    }
+
+    pipelines = {}
+
+    for name, serial in CAMERA_SERIALS.items():
+
+        pipeline = rs.pipeline()
+
+        config = rs.config()
+
+        config.enable_device(serial)
+
+        # config.enable_stream(
+        #     rs.stream.depth,
+        #     640,
+        #     480,
+        #     rs.format.z16,
+        #     30,
+        # )
+
+        config.enable_stream(rs.stream.color, 848, 480, rs.format.rgb8, 60)
+
+        pipeline.start(config)
+
+        pipelines[name] = pipeline
+
+        print(f"Started: {name}")
 
     # ========================================================
     # ROBOT MODEL
@@ -162,12 +169,6 @@ def main():
     robot = pk.Robot.from_urdf(
         urdf
     )
-
-    for name in robot.joints.actuated_names:
-
-        if "middle" in name:
-
-            print(name)
 
     # ========================================================
     # JOINT GROUPS
@@ -243,10 +244,6 @@ def main():
         RIGHT_EE_LINK
     )
 
-    middle_ee_index = robot.links.names.index(
-        MIDDLE_EE_LINK
-    )
-
     # GRIPPER
     left_gripper_command = JointSingleCommand(
         name="gripper"
@@ -316,9 +313,9 @@ def main():
         True,
     )
 
-    # left_q = [0.0, -1.7, 1.6, 0.0, 0.65, 0.0, 0.0]
+    left_q = [0.0, -1.8, 1.6, 0.0, 0.6, 0.0, 0.0]
 
-    # right_q = [0.0, -1.7, 1.6, 0.0, 0.65, 0.0, 0.0]
+    right_q = [0.0, -1.8, 1.6, 0.0, 0.6, 0.0, 0.0]
 
     middle_q = [0.05, -1.5, 0.05, -0.08, 2.0, 1.4, 0.0]
 
@@ -328,19 +325,19 @@ def main():
     #     blocking=False,
     # )
 
-    # left_bot.arm.set_joint_positions(
-    #     left_q[:6],
-    #     moving_time=2.0,
-    #     accel_time=0.5,
-    #     blocking=True,
-    # )
+    left_bot.arm.set_joint_positions(
+        left_q[:6],
+        moving_time=2.0,
+        accel_time=0.5,
+        blocking=True,
+    )
 
-    # right_bot.arm.set_joint_positions(
-    #     right_q[:6],
-    #     moving_time=2.0,
-    #     accel_time=0.5,
-    #     blocking=True,
-    # )
+    right_bot.arm.set_joint_positions(
+        right_q[:6],
+        moving_time=2.0,
+        accel_time=0.5,
+        blocking=True,
+    )
 
     middle_bot.arm.set_joint_positions(
         middle_q[:6],
@@ -362,7 +359,7 @@ def main():
     #     )
     # )
 
-    # rospy.sleep(1.0)
+    rospy.sleep(1.0)
 
     # ========================================================
     # FULL ROBOT STATE
@@ -384,13 +381,6 @@ def main():
         middle_q
     )
 
-    # q_nominal = q.copy()
-
-    # q_nominal[left_arm_indices] = LEFT_ARM_NOMINAL
-
-    # q_nominal[right_arm_indices] = RIGHT_ARM_NOMINAL
-
-    # q_nominal[middle_arm_indices] = MIDDLE_ARM_NOMINAL
 
     # ========================================================
     # FK
@@ -404,10 +394,6 @@ def main():
 
     T_right = jaxlie.SE3(
         fk[right_ee_index]
-    ).as_matrix()
-
-    T_middle = jaxlie.SE3(
-        fk[middle_ee_index]
     ).as_matrix()
 
     # ========================================================
@@ -428,14 +414,6 @@ def main():
 
     right_filtered_target_position = (
         right_start_robot_position.copy()
-    )
-
-    middle_start_robot_position = (
-        T_middle[:3,3].copy()
-    )
-
-    middle_filtered_target_position = (
-        middle_start_robot_position.copy()
     )
 
     # ========================================================
@@ -468,7 +446,7 @@ def main():
 
     full_joint_velocity_limits = np.ones(
         robot.joints.num_actuated_joints
-    ) * 2.0
+    ) * 3.0
 
     # ========================================================
     # REMAP
@@ -482,12 +460,6 @@ def main():
 
     R_remap_right = np.array([
         [0, 1, 0],
-        [-1, 0, 0],
-        [0, 0, 1],
-    ])
-
-    R_remap_middle = np.array([
-        [0, -1, 0],
         [-1, 0, 0],
         [0, 0, 1],
     ])
@@ -506,11 +478,6 @@ def main():
 
     left_start_robot_rot = None
     right_start_robot_rot = None
-
-    head_start_position = None
-    head_start_rot = None
-    #middle_start_robot_position = None
-    middle_start_robot_rot = None
 
     # ========================================================
     # LOOP
@@ -542,21 +509,6 @@ def main():
         right_controller = pose2mat(
             headset_data.r_pos,
             headset_data.r_quat,
-        )
-
-        head_pose = pose2mat(
-            headset_data.h_pos,
-            headset_data.h_quat,
-        )
-
-        head_inv = np.linalg.inv(head_pose)
-
-        left_controller_local = (
-            head_inv @ left_controller
-        )
-
-        right_controller_local = (
-            head_inv @ right_controller
         )
 
         button_pressed = (
@@ -595,11 +547,11 @@ def main():
             teleop_active = True
 
             left_start_controller_position = (
-                left_controller_local[:3,3].copy()
+                left_controller[:3,3].copy()
             )
 
             right_start_controller_position = (
-                right_controller_local[:3,3].copy()
+                right_controller[:3,3].copy()
             )
 
             left_start_robot_position = (
@@ -610,19 +562,11 @@ def main():
                 T_right[:3,3].copy()
             )
 
-            head_start_position = (
-                headset_data.h_pos.copy()
-            )
-
-            left_start_controller_rot = left_controller_local[:3,:3].copy()
-            right_start_controller_rot = right_controller_local[:3,:3].copy()
+            left_start_controller_rot = left_controller[:3,:3].copy()
+            right_start_controller_rot = right_controller[:3,:3].copy()
 
             left_start_robot_rot = T_left[:3,:3].copy()
             right_start_robot_rot = T_right[:3,:3].copy()
-
-            middle_start_robot_position = T_middle[:3,3].copy()
-            head_start_rot = head_pose[:3,:3].copy()
-            middle_start_robot_rot = T_middle[:3,:3].copy()
 
             print("\\nTeleop ENABLED")
 
@@ -651,22 +595,31 @@ def main():
 
             headset.send_images(left_img, right_img)
 
-            head_delta = (
+            # REALSENSE IMAGES
 
-                headset_data.h_pos
+            for name, pipeline in pipelines.items():
 
-                - head_start_position
-            )
+                frames = pipeline.wait_for_frames()
 
-            # # CORRECTION FOR HEADSET MOVEMENT
+                # depth_frame = frames.get_depth_frame()
+                color_frame = frames.get_color_frame()
 
-            # if np.linalg.norm(head_delta) > HEAD_COMP_THRESH:
+                if not color_frame:
+                    continue
 
-            #     compensated_head_delta = head_delta
+                # depth_image = np.asanyarray(
+                #     depth_frame.get_data()
+                # )
 
-            # else:
+                color_image = np.asanyarray(
+                    color_frame.get_data()
+                )
 
-            #     compensated_head_delta = np.zeros(3)
+                print(
+                    f"{name}: "
+                    # f"{depth_image.shape} "
+                    f"{color_image.shape}"
+                )
 
             # ------------------------------------------------
             # LEFT DELTA
@@ -674,14 +627,10 @@ def main():
 
             left_delta_controller = (
 
-                left_controller_local[:3,3]
+                left_controller[:3,3]
 
                 - left_start_controller_position
-
-                # - compensated_head_delta
             )
-
-            
 
             left_delta_robot = (
                 R_remap_left
@@ -715,11 +664,9 @@ def main():
 
             right_delta_controller = (
 
-                right_controller_local[:3,3]
+                right_controller[:3,3]
 
                 - right_start_controller_position
-
-                # - compensated_head_delta
             )
 
             right_delta_robot = (
@@ -748,99 +695,6 @@ def main():
                 right_filtered_target_position
             )
 
-            # ------------------------------------------------
-            # MIDDLE DELTA (HEADSET POSITION)
-            # ------------------------------------------------
-
-            head_delta = (
-
-                headset_data.h_pos
-
-                - head_start_position
-            )
-
-            middle_delta_robot = (
-                R_remap_middle
-                @ head_delta
-            )
-
-            HEAD_POSITION_SCALE = 0.4
-
-            middle_raw_target_position = (
-
-                middle_start_robot_position
-
-                + HEAD_POSITION_SCALE
-                * middle_delta_robot
-            )
-
-            ALPHA_MIDDLE = 0.05
-
-            middle_filtered_target_position = (
-
-                ALPHA_MIDDLE
-                * middle_raw_target_position
-
-                + (1 - ALPHA_MIDDLE)
-                * middle_filtered_target_position
-            )
-
-            middle_target_position = (
-                middle_filtered_target_position
-            )
-
-            head_current_rot = head_pose[:3,:3]
-
-            head_delta_rot = (
-                head_current_rot
-                @ head_start_rot.T
-            )
-
-            head_euler = R.from_matrix(
-                head_delta_rot
-            ).as_euler("xyz")
-
-            head_rot_mag = np.linalg.norm([
-                head_euler[1],   # pitch
-                head_euler[2],   # yaw
-            ])
-
-            if head_rot_mag > HEAD_ROT_THRESH:
-
-                head_comp_rot = head_delta_rot.T
-
-                left_delta_controller = (
-                    head_comp_rot
-                    @ left_delta_controller
-                )
-
-                right_delta_controller = (
-                    head_comp_rot
-                    @ right_delta_controller
-                )
-
-            head_euler[0] = 0.0
-
-            head_euler[1] *= 0.4
-
-            head_euler[2] *= 0.8
-
-            middle_delta_rot = R.from_euler(
-                "xyz",
-                head_euler
-            ).as_matrix()
-
-            middle_target_rot = (
-                middle_delta_rot
-                @ middle_start_robot_rot
-            )
-
-            middle_target_wxyz = quat_xyzw_to_wxyz(
-                R.from_matrix(
-                    middle_target_rot
-                ).as_quat()
-            )
-
             # =================================================
             # GRIPPERS
             # =================================================
@@ -863,39 +717,39 @@ def main():
                 cmd.cmd = 0.1
                 left_bot.gripper.core.pub_single.publish(cmd)
 
-            # # =================================================
-            # # ROTATION
-            # # =================================================
+            # =================================================
+            # ROTATION
+            # =================================================
 
-            # left_current_rot = left_controller_local[:3,:3]
-            # right_current_rot = right_controller_local[:3,:3]
+            left_current_rot = left_controller[:3,:3]
+            right_current_rot = right_controller[:3,:3]
 
-            # left_delta_rot = (
-            #     left_current_rot
-            #     @ left_start_controller_rot.T
+            left_delta_rot = (
+                left_current_rot
+                @ left_start_controller_rot.T
+            )
+
+            # left_euler = R.from_matrix(
+            #     left_delta_rot
+            # ).as_euler("xyz")
+
+            # # invert pitch
+            # #left_euler[1] *= -1
+
+            # left_delta_rot = R.from_euler(
+            #     "xyz",
+            #     left_euler
+            # ).as_matrix()
+
+            right_delta_rot = (
+                right_current_rot
+                @ right_start_controller_rot.T
+            )
+
+            # left_target_rot = (
+            #     left_delta_rot
+            #     @ left_start_robot_rot
             # )
-
-            # # left_euler = R.from_matrix(
-            # #     left_delta_rot
-            # # ).as_euler("xyz")
-
-            # # # # invert pitch
-            # # # left_euler[1] *= -1
-
-            # # left_delta_rot = R.from_euler(
-            # #     "xyz",
-            # #     left_euler
-            # # ).as_matrix()
-
-            # right_delta_rot = (
-            #     right_current_rot
-            #     @ right_start_controller_rot.T
-            # )
-
-            # # left_target_rot = (
-            # #     left_delta_rot
-            # #     @ left_start_robot_rot
-            # # )
 
             # left_delta_rot_robot = (
             #     R_remap_left
@@ -903,23 +757,23 @@ def main():
             #     @ R_remap_left.T
             # )
 
-            # left_target_rot = (
-            #     left_delta_rot_robot
-            #     @ left_start_robot_rot
-            # )
+            left_target_rot = (
+                left_delta_rot
+                @ left_start_robot_rot
+            )
 
-            # right_target_rot = (
-            #     right_delta_rot
-            #     @ right_start_robot_rot
-            # )
+            right_target_rot = (
+                right_delta_rot
+                @ right_start_robot_rot
+            )
 
-            # left_target_wxyz = quat_xyzw_to_wxyz(
-            #     R.from_matrix(left_target_rot).as_quat()
-            # )
+            left_target_wxyz = quat_xyzw_to_wxyz(
+                R.from_matrix(left_target_rot).as_quat()
+            )
 
-            # right_target_wxyz = quat_xyzw_to_wxyz(
-            #     R.from_matrix(right_target_rot).as_quat()
-            # )
+            right_target_wxyz = quat_xyzw_to_wxyz(
+                R.from_matrix(right_target_rot).as_quat()
+            )
 
             # print(vars(headset_data))
 
@@ -934,19 +788,16 @@ def main():
             target_link_names=[
                 LEFT_EE_LINK,
                 RIGHT_EE_LINK,
-                MIDDLE_EE_LINK,
             ],
 
             target_positions=[
                 left_target_position,
                 right_target_position,
-                middle_target_position,
             ],
 
             target_wxyzs=[
                 left_target_wxyz,
                 right_target_wxyz,
-                middle_target_wxyz,         
             ],
 
             prev_q=q,
@@ -1008,21 +859,6 @@ def main():
                     blocking=False,
                 )
 
-                middle_q = q[
-                    middle_arm_indices
-                ]
-
-                middle_bot.arm.set_joint_positions(
-
-                    middle_q[:6].tolist(),
-
-                    moving_time=MOVING_TIME,
-
-                    accel_time=ACCEL_TIME,
-
-                    blocking=False,
-                )
-
                 # --------------------------------------------
                 # FK UPDATE
                 # --------------------------------------------
@@ -1036,19 +872,6 @@ def main():
                 T_right = jaxlie.SE3(
                     fk[right_ee_index]
                 ).as_matrix()
-
-                print(
-                    "left:",
-                    np.round(
-                        left_target_position,
-                        3
-                    ),
-                    "right:",
-                    np.round(
-                        right_target_position,
-                        3
-                    ),
-                )
 
             else:
 

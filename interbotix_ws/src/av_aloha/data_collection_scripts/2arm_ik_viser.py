@@ -32,10 +32,7 @@ LEFT_EE_LINK  = "leftgripper_base"
 
 def wxyz_from_matrix(R_mat):
 
-    quat_xyzw = (
-        R.from_matrix(R_mat)
-        .as_quat()
-    )
+    quat_xyzw = (R.from_matrix(R_mat).as_quat())
 
     return np.array([
         quat_xyzw[3],

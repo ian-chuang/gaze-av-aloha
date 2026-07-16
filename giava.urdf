@@ -8,8 +8,6 @@
     <inertial>
       <origin xyz="-0.053477 -0.000563 0.020596" rpy="0.000000 0.000000 0.000000" />
       <mass value="0.969034" />
-      <inertia ixx="0.001700001" iyy="0.006024004" izz="0.007161995" ixy="-0.000047130"
-        ixz="0.000084149" iyz="0.000003851" />
     </inertial>
     <visual>
       <origin xyz="0.000000 0.000000 0.000000" rpy="0.000000 0.000000 1.570796" />
@@ -695,7 +693,7 @@
       </geometry>
     </collision>
   </link>
-  <joint name="middlebase_link" type="revolute">
+  <joint name="middlebase" type="revolute">
     <origin xyz="0.0 0.0 0.069" rpy="0.0 -0.0 -1.5707963267948963" />
     <limit effort="10" lower="-3.141582653589793" upper="3.141582653589793" velocity="3.141592653589793"/>
     <parent link="middlebase_link" />
@@ -728,7 +726,7 @@
       </geometry>
     </collision>
   </link>
-  <joint name="middleshoulder_link" type="revolute">
+  <joint name="middleshoulder" type="revolute">
     <origin xyz="0.0 0.013999999999999999 0.04125" rpy="-0.0 -1.5707963267948966 0" />
     <limit effort="20" lower="-1.8849555921538759" upper="1.9896753472735358" velocity="3.141592653589793"/>
     <parent link="middleshoulder_link" />
@@ -761,7 +759,7 @@
       </geometry>
     </collision>
   </link>
-  <joint name="middleupper_arm_link" type="revolute">
+  <joint name="middleupper_arm" type="revolute">
     <origin xyz="0.25 0.0 -0.05"
       rpy="2.1791458186645653e-52 -1.4349296274686127e-42 2.8698592549372254e-42" />
     <limit effort="15" lower="-2.1467549799530254" upper="1.6057029118347832" velocity="3.141592653589793"/>
@@ -795,7 +793,7 @@
       </geometry>
     </collision>
   </link>
-  <joint name="middleupper_forearm_link" type="revolute">
+  <joint name="middleupper_forearm" type="revolute">
     <origin xyz="0.0 -0.013499999999999998 -0.1718" rpy="1.5707963267948966 1.5707963267948966 0" />
     <limit effort="2" lower="-3.141582653589793" upper="3.141582653589793" velocity="3.141592653589793"/>
     <parent link="middleupper_forearm_link" />
@@ -828,7 +826,7 @@
       </geometry>
     </collision>
   </link>
-  <joint name="middlelower_forearm_link" type="revolute">
+  <joint name="middlelower_forearm" type="revolute">
     <origin xyz="0.0782 0.0 0.019100000000000002" rpy="1.5707963267949763 -0.0 1.5707963267948966" />
     <limit effort="5" lower="-1.7453292519943295" upper="2.1467549799530254" velocity="3.141592653589793"/>
     <parent link="middlelower_forearm_link" />
@@ -861,7 +859,7 @@
       </geometry>
     </collision>
   </link>
-  <joint name="middlewrist_link" type="revolute">
+  <joint name="middlewrist" type="revolute">
     <origin xyz="-1.7053025658242404e-15 -0.01899999999999482 0.06500000000000149"
       rpy="-1.570796326794897 -1.5707963267948128 0" />
     <limit effort="1" lower="-3.141592653589793" upper="3.141592653589793" velocity="3.141592653589793"/>
@@ -895,7 +893,7 @@
       </geometry>
     </collision>
   </link>
-  <joint name="middlepan_link" type="revolute">
+  <joint name="middlepan" type="revolute">
     <origin xyz="0.04125 0.03725000000000001 1.1379786002407855e-17"
       rpy="-1.5707963267948963 2.5199808612277694e-29 -1.4272358353620772e-42" />
     <limit effort="1" lower="-3.141592653589793" upper="3.141592653589793" velocity="3.141592653589793"/>

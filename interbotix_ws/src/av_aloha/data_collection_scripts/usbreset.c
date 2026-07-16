@@ -1,4 +1,20 @@
-/* usbreset -- send a USB port reset to a USB device */
+/* usbreset -- send a USB port reset to a USB device
+
+    1) Find the device: lsusb
+
+    Example: Bus 001 Device 004: ID 8086:0b07 Intel RealSense
+
+    2) Compose the device filename: /dev/bus/usb/BBB/DDD
+
+    where BBB = zero-padded bus number and DDD = zero-padded device number
+
+    Example: /dev/bus/usb/001/004
+
+    3) Compile: gcc -o usbreset usbreset.c
+
+    4) Run as root: sudo ./usbreset /dev/bus/usb/001/004
+
+*/
 
 #include <stdio.h>
 #include <unistd.h>
@@ -7,7 +23,6 @@
 #include <sys/ioctl.h>
 
 #include <linux/usbdevice_fs.h>
-
 
 int main(int argc, char **argv)
 {
