@@ -52,7 +52,6 @@ class InterbotixRobotXS(object):
         if rospy.has_param(full_rd_name):
             self.rd = URDF.from_parameter_server(key=full_rd_name)
 
-    ### @brief Loads the 'motor_configs' and 'mode_configs' YAML files and populates various class dictionaries
     def robot_get_motor_configs(self):
 
         # get filepaths to the YAML files from the ROS parameter server

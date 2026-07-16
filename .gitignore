@@ -1,3 +1,13 @@
+*.json
+*.jsonl
+*.npz
+*.csv
+dataset/
+*.parquet
+*.whl
+pyroki
+lerobot
+
 outputs/
 wandb/
 *.mp4
