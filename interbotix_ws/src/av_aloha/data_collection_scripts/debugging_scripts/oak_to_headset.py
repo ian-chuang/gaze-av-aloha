@@ -22,6 +22,7 @@ pipeline = dai.Pipeline()
 cam_left = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_B)
 cam_right = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_C)
 
+# Request data from the camera with a certain file type and fps
 left_out = cam_left.requestOutput(
     (640, 480),
     type=dai.ImgFrame.Type.BGR888i,
@@ -34,6 +35,7 @@ right_out = cam_right.requestOutput(
     fps=25,
 )
 
+# Create a queue for left and right to store camera data
 q_left = left_out.createOutputQueue()
 q_right = right_out.createOutputQueue()
 
@@ -43,11 +45,13 @@ time.sleep(0.5)
 
 # ---- Main loop ----
 while pipeline.isRunning():
+    # get an image from left and right queues and send to headset
     left_img = q_left.get().getCvFrame()
     right_img = q_right.get().getCvFrame()
 
     headset.send_images(left_img, right_img)
 
+    # receive data from headset (important later when we overlay controller pose information)
     headset_data = headset.receive_data()
 
     if headset_data is None:
