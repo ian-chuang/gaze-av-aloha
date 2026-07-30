@@ -119,6 +119,8 @@ class WebRTCHeadset:
 
         self.thread = None
         self.event_loop = None
+        self.data_channel_open = False
+        self.debug_messages = True
 
     async def channel_send_loop(self):
         last_data = None
@@ -180,11 +182,14 @@ class WebRTCHeadset:
                 pass
 
     def on_message(self, message):
+        # if self.debug_messages:
+            # print(f"WebRTC raw message: {str(message)[:300]}")
+
         try:
             headset_data = HeadsetData()
             data = json.loads(message)
-        except json.JSONDecodeError:
-            print("WebRTC: JSON decode error")
+        except json.JSONDecodeError as e:
+            print(f"WebRTC: JSON decode error: {e}")
             return
 
         try:
@@ -226,8 +231,8 @@ class WebRTCHeadset:
             headset_data.h_pos, headset_data.h_quat = convert_left_to_right_coordinates(headset_data.h_pos, headset_data.h_quat)
             headset_data.l_pos, headset_data.l_quat = convert_left_to_right_coordinates(headset_data.l_pos, headset_data.l_quat)
             headset_data.r_pos, headset_data.r_quat = convert_left_to_right_coordinates(headset_data.r_pos, headset_data.r_quat)
-        except KeyError:
-            print("[RobotWebRTC] Key error") 
+        except KeyError as e:
+            print(f"[RobotWebRTC] Key error: missing {e}, keys={list(data.keys())}")
             return
 
         try:
@@ -244,7 +249,8 @@ class WebRTCHeadset:
         self.channel = self.pc.createDataChannel("control")
         @self.channel.on("open")
         def on_open():
-            print("Data channel is open.")
+            self.data_channel_open = True
+            # print("Data channel is open.")
         self.channel.on("message", self.on_message)       
 
         # create video track
@@ -277,7 +283,7 @@ class WebRTCHeadset:
                 if self.pc.remoteDescription is None and doc.to_dict()['type'] == 'answer':
                     data = doc.to_dict()
         doc_watch = call_doc.on_snapshot(answer_callback)
-        print('WebRTC: Waiting for answer...')
+        # print('WebRTC: Waiting for answer...')
         while data is None:
             await asyncio.sleep(1/30)
         print('WebRTC: Answer received.')
@@ -296,12 +302,20 @@ class WebRTCHeadset:
         # add event listener for connection close
         @self.pc.on("iceconnectionstatechange")
         async def on_iceconnectionstatechange():
-            if self.pc.iceConnectionState == "closed":
+            # print(f"WebRTC: ICE state = {self.pc.iceConnectionState}")
+            if self.pc.iceConnectionState in ["closed", "failed", "disconnected"]:
+                self.data_channel_open = False
                 print("WebRTC: Connection closed, restarting...")
                 await self.restart_connection()
+        # @self.pc.on("iceconnectionstatechange")
+        # async def on_iceconnectionstatechange():
+        #     if self.pc.iceConnectionState == "closed":
+        #         print("WebRTC: Connection closed, restarting...")
+        #         await self.restart_connection()
 
     async def restart_connection(self):
         # close current peer connection
+        self.data_channel_open = False
         await self.pc.close()
 
         # create new peer connection
@@ -336,17 +350,24 @@ if __name__ == "__main__":
     try:
         headset = WebRTCHeadset()
         headset.run_in_thread()
-        
+
+        while not headset.data_channel_open:
+            # print("Waiting for data channel...")
+            time.sleep(0.1)
+
+        print("Headset connected.")
+
         while True:
             data = headset.receive_data()
-            if data is not None:
-                print(f"Received data: {data.h_pos}, {data.h_quat}")
+            # if data is not None:
+                # print(f"Received data: {data.h_pos}, {data.h_quat}")
 
             feedback = HeadsetFeedback()
             feedback.info = f"Hello from python: {time.time()}"
             headset.send_feedback(feedback)
 
             headset.send_images(np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8), np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8))
+            time.sleep(0.02)
 
     except KeyboardInterrupt:
         print("Shutting down...")

@@ -8,7 +8,7 @@
   <arg name="use_rviz"                          default="true"/>
   <arg name="motor_configs"                     default="$(find wx250s_7dof_description)/config/wx250s_7dof.yaml"/>
   <arg name="mode_configs"                      default="$(find wx250s_7dof_description)/config/modes.yaml"/>
-  <arg name="load_configs"                      default="true"/>
+  <arg name="load_configs"                      default="false"/>
   <arg name="use_sim"                           default="false"/>
   <arg name="port" default="/dev/ttyUSB2"/>
   <arg name="baudrate" default="1000000"/>

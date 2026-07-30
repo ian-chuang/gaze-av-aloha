@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <robot name="wx250s" xmlns:xacro="http://ros.org/wiki/xacro">
 
-  <xacro:arg name="robot_name" default = "wx250s"/>
+  <xacro:arg name="robot_name" default="wx250s"/>
   <xacro:arg name="base_link_frame" default="base_link"/>
   <xacro:arg name="show_ar_tag" default="false"/>
   <xacro:arg name="show_gripper_bar" default="true"/>
@@ -33,14 +33,14 @@
     <visual>
       <origin rpy="0 0 ${pi/2}" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="package://interbotix_xsarm_descriptions/meshes/wx250s_meshes/wx250s_1_base.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="package://wx250s_7dof_description/meshes/430-Base-v3.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="interbotix_black"/>
     </visual>
     <collision>
       <origin rpy="0 0 ${pi/2}" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="package://interbotix_xsarm_descriptions/meshes/wx250s_meshes/wx250s_1_base.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="package://wx250s_7dof_description/meshes/430-Base-v3.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
     <inertial>
@@ -52,7 +52,7 @@
 
   <joint name="waist" type="revolute">
     <axis xyz="0 0 1"/>
-    <limit effort="10" lower="${-pi + pi_offset}" upper="${pi - pi_offset}" velocity="${pi}"/>
+    <limit effort="10" lower="-6.35" upper="0.00" velocity="${pi}"/>
     <origin rpy="0 0 0" xyz="0 0 0.072"/>
     <parent link="$(arg robot_name)/$(arg base_link_frame)"/>
     <child link="$(arg robot_name)/shoulder_link"/>
@@ -73,14 +73,14 @@
     <visual>
       <origin rpy="0 0 ${pi/2}" xyz="0 0 -0.003"/>
       <geometry>
-        <mesh filename="package://interbotix_xsarm_descriptions/meshes/wx250s_meshes/wx250s_2_shoulder.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="package://wx250s_7dof_description/meshes/430-Dual-Shoulder-v2.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="interbotix_black"/>
     </visual>
     <collision>
       <origin rpy="0 0 ${pi/2}" xyz="0 0 -0.003"/>
       <geometry>
-        <mesh filename="package://interbotix_xsarm_descriptions/meshes/wx250s_meshes/wx250s_2_shoulder.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="package://wx250s_7dof_description/meshes/430-Dual-Shoulder-v2.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
     <inertial>
@@ -92,7 +92,7 @@
 
   <joint name="shoulder" type="revolute">
     <axis xyz="0 1 0"/>
-    <limit effort="20" lower="${radians(-108)}" upper="${radians(114)}" velocity="${pi}"/>
+    <limit effort="20" lower="-1.92" upper="1.70" velocity="${pi}"/>
     <origin rpy="0 0 0" xyz="0 0 0.03865"/>
     <parent link="$(arg robot_name)/shoulder_link"/>
     <child link="$(arg robot_name)/upper_arm_link"/>
@@ -113,14 +113,14 @@
     <visual>
       <origin rpy="0 0 ${pi/2}" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="package://interbotix_xsarm_descriptions/meshes/wx250s_meshes/wx250s_3_upper_arm.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="package://wx250s_7dof_description/meshes/UA---6---WX-250-v2.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="interbotix_black"/>
     </visual>
     <collision>
       <origin rpy="0 0 ${pi/2}" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="package://interbotix_xsarm_descriptions/meshes/wx250s_meshes/wx250s_3_upper_arm.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="package://wx250s_7dof_description/meshes/UA---6---WX-250-v2.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
     <inertial>
@@ -132,7 +132,7 @@
 
   <joint name="elbow" type="revolute">
     <axis xyz="0 1 0"/>
-    <limit effort="15" lower="${radians(-123)}" upper="${radians(92)}" velocity="${pi}"/>
+    <limit effort="15" lower="-2.13" upper="1.60" velocity="${pi}"/>
     <origin rpy="0 0 0" xyz="0.04975 0 0.25"/>
     <parent link="$(arg robot_name)/upper_arm_link"/>
     <child link="$(arg robot_name)/upper_forearm_link"/>
@@ -153,14 +153,14 @@
     <visual>
       <origin rpy="0 0 0" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="package://interbotix_xsarm_descriptions/meshes/wx250s_meshes/wx250s_4_upper_forearm.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="package://wx250s_7dof_description/meshes/SIMPLIFIED---WXA-250-6DOF-Upper-Forearm-v3.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="interbotix_black"/>
     </visual>
     <collision>
       <origin rpy="0 0 0" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="package://interbotix_xsarm_descriptions/meshes/wx250s_meshes/wx250s_4_upper_forearm.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="package://wx250s_7dof_description/meshes/SIMPLIFIED---WXA-250-6DOF-Upper-Forearm-v3.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
     <inertial>
@@ -172,7 +172,7 @@
 
   <joint name="forearm_roll" type="revolute">
     <axis xyz="1 0 0"/>
-    <limit effort="2" lower="${-pi + pi_offset}" upper="${pi - pi_offset}" velocity="${pi}"/>
+    <limit effort="2" lower="-1.58" upper="1.51" velocity="${pi}"/>
     <origin rpy="0 0 0" xyz="0.175 0 0"/>
     <parent link="$(arg robot_name)/upper_forearm_link"/>
     <child link="$(arg robot_name)/lower_forearm_link"/>
@@ -193,14 +193,14 @@
     <visual>
       <origin rpy="${pi} 0 0" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="package://interbotix_xsarm_descriptions/meshes/wx250s_meshes/wx250s_5_lower_forearm.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="package://wx250s_7dof_description/meshes/SIMPLIFIED---WXA-250-6DOF-Lower-Forearm-v4.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="interbotix_black"/>
     </visual>
     <collision>
       <origin rpy="${pi} 0 0" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="package://interbotix_xsarm_descriptions/meshes/wx250s_meshes/wx250s_5_lower_forearm.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="package://wx250s_7dof_description/meshes/SIMPLIFIED---WXA-250-6DOF-Lower-Forearm-v4.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
     <inertial>
@@ -210,9 +210,9 @@
     </inertial>
   </link>
 
- <joint name="wrist_angle" type="revolute">
+  <joint name="wrist_angle" type="revolute">
     <axis xyz="0 1 0"/>
-    <limit effort="5" lower="${radians(-100)}" upper="${radians(123)}" velocity="${pi}"/>
+    <limit effort="5" lower="-1.54" upper="2.12" velocity="${pi}"/>
     <origin rpy="0 0 0" xyz="0.075 0 0"/>
     <parent link="$(arg robot_name)/lower_forearm_link"/>
     <child link="$(arg robot_name)/wrist_link"/>
@@ -233,14 +233,14 @@
     <visual>
       <origin rpy="0 0 ${pi/2}" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="package://interbotix_xsarm_descriptions/meshes/wx250s_meshes/wx250s_6_wrist.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="package://wx250s_7dof_description/meshes/430---Wrist-v3.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="interbotix_black"/>
     </visual>
     <collision>
       <origin rpy="0 0 ${pi/2}" xyz="0 0 0"/>
       <geometry>
-        <mesh filename="package://interbotix_xsarm_descriptions/meshes/wx250s_meshes/wx250s_6_wrist.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="package://wx250s_7dof_description/meshes/430---Wrist-v3.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
     <inertial>
@@ -251,8 +251,8 @@
   </link>
 
   <joint name="camera_roll" type="revolute">
-    <axis xyz="1 0 0"/>   <!-- roll -->
-    <limit effort="1" lower="${-pi}" upper="${pi}" velocity="${pi}"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" lower="-2.78" upper="2.99" velocity="${pi}"/>
     <origin xyz="0.065 0 0" rpy="0 0 0"/>
     <parent link="$(arg robot_name)/wrist_link"/>
     <child link="$(arg robot_name)/camera_roll_link"/>
@@ -272,14 +272,12 @@
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <mesh filename="package://wx250s_7dof_description/meshes/wx250s_7dof_camera_roll.stl"
-              scale="0.001 0.001 0.001"/>
+        <mesh filename="package://wx250s_7dof_description/meshes/430---Wrist-v3.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="package://wx250s_7dof_description/meshes/wx250s_7dof_camera_roll.stl"
-              scale="0.001 0.001 0.001"/>
+        <mesh filename="package://wx250s_7dof_description/meshes/430---Wrist-v3.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
     <inertial>
@@ -289,9 +287,9 @@
     </inertial>
   </link>
 
-  <!-- <joint name="camera_yaw" type="revolute">
+  <joint name="camera_yaw" type="revolute">
     <axis xyz="0 0 1"/>
-    <limit effort="1" lower="${-pi}" upper="${pi}" velocity="${pi}"/>
+    <limit effort="1" lower="-3.10" upper="3.07" velocity="${pi}"/>
     <origin xyz="0 0 0" rpy="0 0 0"/>
     <parent link="$(arg robot_name)/camera_roll_link"/>
     <child link="$(arg robot_name)/camera_yaw_link"/>
@@ -310,14 +308,12 @@
   <link name="$(arg robot_name)/camera_yaw_link">
     <visual>
       <geometry>
-        <mesh filename="package://wx250s_7dof_description/meshes/wx250s_7dof_camera_yaw.stl"
-              scale="0.001 0.001 0.001"/>
+        <mesh filename="package://wx250s_7dof_description/meshes/middlecamera.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </visual>
     <collision>
       <geometry>
-        <mesh filename="package://wx250s_7dof_description/meshes/wx250s_7dof_camera_yaw.stl"
-              scale="0.001 0.001 0.001"/>
+        <mesh filename="package://wx250s_7dof_description/meshes/middlecamera.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
     <inertial>
@@ -325,7 +321,7 @@
       <mass value="0.03"/>
       <inertia ixx="3e-5" iyy="3e-5" izz="3e-5" ixy="0" ixz="0" iyz="0"/>
     </inertial>
-  </link> -->
+  </link>
 
   <xacro:if value="${urdf_loc != ''}">
     <xacro:include filename="${urdf_loc}"/>

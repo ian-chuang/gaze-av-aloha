@@ -942,14 +942,14 @@
     <visual>
       <origin xyz="-0.017 -0.055 0.02" rpy="0.0 0.0 1.5708"/>
       <geometry>
-        <mesh filename="interbotix_ws/src/wx250s_7dof_description/meshes/camera_body.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="interbotix_ws/src/wx250s_7dof_description/urdf/meshes/camera_body.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="black"/>
     </visual>
     <collision>
       <origin xyz="-0.017 -0.055 0.02" rpy="0.0 0.0 1.5708"/>
       <geometry>
-        <mesh filename="interbotix_ws/src/wx250s_7dof_description/meshes/camera_body.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="interbotix_ws/src/wx250s_7dof_description/urdf/meshes/camera_body.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
   </link>
@@ -968,14 +968,14 @@
     <visual>
       <origin xyz="-0.017 -0.055 0.02" rpy="0.0 0.0 1.5708"/>
       <geometry>
-        <mesh filename="interbotix_ws/src/wx250s_7dof_description/meshes/camera_cover.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="interbotix_ws/src/wx250s_7dof_description/urdf/meshes/camera_cover.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="black"/>
     </visual>
     <collision>
       <origin xyz="-0.017 -0.055 0.02" rpy="0.0 0.0 1.5708"/>
       <geometry>
-        <mesh filename="interbotix_ws/src/wx250s_7dof_description/meshes/camera_cover.stl" scale="0.001 0.001 0.001"/>
+        <mesh filename="interbotix_ws/src/wx250s_7dof_description/urdf/meshes/camera_cover.stl" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
   </link>

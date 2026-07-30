@@ -51,7 +51,6 @@ from data_col_config import (
     compute_gripper_arm_target,
     start_teleop_session,
     stop_teleop_session,
-    solve_single_arm_ik,
     clamp_joint_step,
 )
 
@@ -166,7 +165,7 @@ def main():
     #     except ValueError:
     #         print("Please enter an integer task number.")
 
-    task_name = TASKS[5] # TASKS[task_idx]. Debugging bimanual data collection. Hardcoded for now.
+    task_name = TASKS[6] # TASKS[task_idx]. Debugging active vision data collection. Hardcoded for now.
     print(f"\nSelected task: {task_name}")
 
     # # Print modes and get selection
@@ -184,7 +183,8 @@ def main():
     #     except ValueError:
     #         print("Please enter one of the listed modes.")
 
-    mode = "bimanual" # hardcoded for now
+    mode = "av" # hardcoded for now
+    print(f"Active Vision mode")
 
     # # Print modes and get selection
     # print("\nWhich scene cameras to activate?\nEnter l for low and t for top (e.g. 'lt' for both, 'l' for low only, 't' for top only):")
@@ -291,6 +291,39 @@ def main():
     teleop_state = TeleopSessionState()
 
     full_joint_velocity_limits = np.ones(robot.joints.num_actuated_joints) * cfg.full_joint_velocity_limits_value
+
+    solve_three_arm_ik, warmup_three_arm_ik, _ = make_three_arm_ik_solver(
+        robot=robot,
+        left_target_link_name=ARM_CONFIG["left"]["ee_link"],
+        right_target_link_name=ARM_CONFIG["right"]["ee_link"],
+        middle_target_link_name=ARM_CONFIG["middle"]["ee_link"],
+    )
+
+    ########################################################################################
+    # EDIT HERE
+    ########################################################################################
+
+    # Tune these in three_arm_ik_playground.py, then copy the final values here.
+    three_arm_position_weights = np.asarray(
+        [cfg.pos_weight, cfg.pos_weight, cfg.pos_weight],
+        dtype=np.float32,
+    )
+    three_arm_orientation_weights = np.asarray(
+        [cfg.ori_weight, cfg.ori_weight, cfg.ori_weight],
+        dtype=np.float32,
+    )
+
+    print("Compiling coupled three-arm IK solver...")
+    warmup_three_arm_ik(
+        prev_q=cmd_kin.q_cmd,
+        joint_velocity_limits=full_joint_velocity_limits,
+        dt=cfg.arm_cmd_dt,
+        position_weights=three_arm_position_weights,
+        orientation_weights=three_arm_orientation_weights,
+        active_mask=np.ones(3, dtype=np.float32),
+        dq_weight=cfg.dq_weight,
+    )
+    print("Coupled three-arm IK solver ready.")
 
     episode_idx = int(sys.argv[1]) if len(sys.argv) > 1 else 0
     gripper_actions = {arm: 0.1 for arm in ARM_MODES[mode]}
@@ -439,7 +472,6 @@ def main():
 
             print("\nTeleop ENABLED")
             episode_stats.teleop_enable_count += 1
-            episode_stats.teleop_enable_count += 1
         elif (not button_pressed) and teleop_state.active:
             stop_teleop_session(teleop_state)
             print("\nTeleop DISABLED")
@@ -507,121 +539,174 @@ def main():
             targets[arm] = (target_pos, target_wxyz)
 
         if teleop_state.active:
-            # start_teleop_session(teleop_state, mode, controller_poses, cmd_kin)
-            ik_attempted = False
-            q_new = None
             t_solve_start = now()
 
-            for arm in arm_names:
+            # Run one coupled solve when at least one active arm is due.
+            solve_due = any(
+                teleop_state.arms[arm].active
+                and (
+                    t_solve_start - cmd_state.last_arm_cmd_time[arm]
+                ) >= cfg.arm_cmd_dt
+                for arm in arm_names
+            )
 
-                if not teleop_state.arms[arm].active:
-                    continue
+            if solve_due:
+                solver_targets = {}
 
-                if (t_solve_start - cmd_state.last_arm_cmd_time[arm]) < cfg.arm_cmd_dt:
-                    continue
+                for arm in ("left", "right", "middle"):
+                    if teleop_state.arms[arm].active and arm in targets:
+                        solver_targets[arm] = targets[arm]
+                    else:
+                        # cmd_kin.T_cmd stores [qw, qx, qy, qz, x, y, z].
+                        current_ee = np.asarray(
+                            cmd_kin.T_cmd[arm],
+                            dtype=np.float32,
+                        )
+                        solver_targets[arm] = (
+                            current_ee[4:].copy(),
+                            current_ee[:4].copy(),
+                        )
 
-                target_pos, target_wxyz = targets[arm]
-
-                episode_stats.arms[arm].ik_attempts += 1
-
-                q_new = solve_single_arm_ik(
-                    robot=robot,
-                    target_link_name=ARM_CONFIG[arm]["ee_link"],
-                    target_position=target_pos,
-                    target_wxyz=target_wxyz,
-                    prev_q=cmd_kin.q_cmd,
-                    dt=cfg.arm_cmd_dt,
-                    joint_velocity_limits=full_joint_velocity_limits,
-                    pos_weight=cfg.pos_weight,
-                    ori_weight=cfg.ori_weight,
-                    dq_weight=cfg.dq_weight,
+                active_mask = np.asarray(
+                    [
+                        float(teleop_state.arms["left"].active),
+                        float(teleop_state.arms["right"].active),
+                        float(teleop_state.arms["middle"].active),
+                    ],
+                    dtype=np.float32,
                 )
 
-                if q_new is None:
-                    episode_stats.arms[arm].ik_failures += 1
-                    continue
+                for arm in arm_names:
+                    if teleop_state.arms[arm].active:
+                        episode_stats.arms[arm].ik_attempts += 1
 
-                episode_stats.arms[arm].ik_successes += 1
+                try:
+                    q_new = solve_three_arm_ik(
+                        left_target_position=solver_targets["left"][0],
+                        right_target_position=solver_targets["right"][0],
+                        middle_target_position=solver_targets["middle"][0],
+                        left_target_wxyz=solver_targets["left"][1],
+                        right_target_wxyz=solver_targets["right"][1],
+                        middle_target_wxyz=solver_targets["middle"][1],
+                        prev_q=cmd_kin.q_cmd,
+                        dt=cfg.arm_cmd_dt,
+                        joint_velocity_limits=full_joint_velocity_limits,
+                        position_weights=three_arm_position_weights,
+                        orientation_weights=three_arm_orientation_weights,
+                        active_mask=active_mask,
+                        dq_weight=cfg.dq_weight,
+                        block_until_ready=True,
+                    )
+                except Exception as exc:
+                    print(f"Three-arm IK failed: {exc}")
+                    q_new = None
 
-                fk_sol, ee_sol = compute_fk_and_ee(robot, q_new, arm_data)
-                pos_err = np.linalg.norm(ee_sol[arm][4:] - target_pos)
-                episode_stats.arms[arm].ik_position_errors.append(pos_err)
-                
-                quat = np.asarray(ee_sol[arm][:4], dtype=np.float64).copy()
+                if q_new is None or not np.all(np.isfinite(q_new)):
+                    for arm in arm_names:
+                        if teleop_state.arms[arm].active:
+                            episode_stats.arms[arm].ik_failures += 1
+                else:
+                    fk_sol, ee_sol = compute_fk_and_ee(
+                        robot,
+                        q_new,
+                        arm_data,
+                    )
 
-                """ print("quat")
-                print(type(quat), quat.dtype, quat.flags.writeable)
+                    # Derive every arm command from this same coupled solution
+                    # before sending any command to hardware.
+                    pending_commands = {}
 
-                print("target")
-                print(type(target_wxyz))
-                print(target_wxyz.dtype if hasattr(target_wxyz, "dtype") else "no dtype")
-                print(target_wxyz.flags.writeable if hasattr(target_wxyz, "flags") else "no flags") """
+                    for arm in arm_names:
+                        if not teleop_state.arms[arm].active:
+                            continue
 
-                R_sol = quat2mat(quat)
-                # print("R_sol OK")
+                        episode_stats.arms[arm].ik_successes += 1
 
-                R_target = quat2mat(target_wxyz)
-                # print("R_target OK")
+                        target_pos, target_wxyz = solver_targets[arm]
+                        pos_err = np.linalg.norm(
+                            ee_sol[arm][4:] - target_pos
+                        )
+                        episode_stats.arms[
+                            arm
+                        ].ik_position_errors.append(pos_err)
 
-                # quat = np.asarray(ee_sol[arm][:4], dtype=np.float64).copy()
-                # R_sol = quat2mat(quat)
-                # R_target = quat2mat(target_wxyz)
+                        quat = np.asarray(
+                            ee_sol[arm][:4],
+                            dtype=np.float64,
+                        ).copy()
+                        R_sol = quat2mat(quat)
+                        R_target = quat2mat(target_wxyz)
+                        R_err = R_sol.T @ R_target
+                        trace = np.clip(np.trace(R_err), -1.0, 3.0)
+                        angle_rad = np.arccos(
+                            np.clip(
+                                (trace - 1.0) / 2.0,
+                                -1.0,
+                                1.0,
+                            )
+                        )
+                        episode_stats.arms[
+                            arm
+                        ].ik_orientation_errors.append(angle_rad)
 
-                """print(quat.dtype)
-                print(quat.flags)
+                        joint_idx = arm_data[arm]["joint_indices"]
+                        target_q = np.asarray(
+                            q_new[joint_idx],
+                            dtype=float,
+                        )
+                        prev_cmd = cmd_state.last_cmds.get(
+                            arm,
+                            cmd_kin.q_cmd[joint_idx],
+                        )
 
-                print(type(target_wxyz))
-                print(target_wxyz.dtype)
-                print(target_wxyz.flags)"""
+                        q_arm_cmd = clamp_joint_step(
+                            prev_cmd,
+                            target_q,
+                            cfg.max_joint_step,
+                        )
 
-                R_err = R_sol.T @ R_target
-                trace = np.trace(R_err)
-                trace = np.clip(trace, -1.0, 3.0)
-                angle_rad = np.arccos(np.clip((trace - 1.0) / 2.0, -1.0, 1.0))
-                episode_stats.arms[arm].ik_orientation_errors.append(angle_rad)
+                        episode_stats.arms[
+                            arm
+                        ].joint_step_norms.append(
+                            np.linalg.norm(q_arm_cmd - prev_cmd)
+                        )
+                        pending_commands[arm] = (
+                            joint_idx,
+                            q_arm_cmd,
+                        )
 
-                joint_idx = arm_data[arm]["joint_indices"]
+                    command_time = now()
 
-                # if arm == "middle":
-                #     print("q_new", q_new[joint_idx])
+                    for arm, (
+                        joint_idx,
+                        q_arm_cmd,
+                    ) in pending_commands.items():
+                        t_cmd_start = now()
+                        robots[arm].arm.set_joint_positions(
+                            q_arm_cmd.tolist(),
+                            moving_time=cfg.moving_time,
+                            accel_time=cfg.accel_time,
+                            blocking=False,
+                        )
+                        episode_stats.cmd.append(
+                            now() - t_cmd_start
+                        )
 
-                target_q = np.asarray(q_new[joint_idx], dtype=float)
+                        cmd_kin.q_cmd[joint_idx] = q_arm_cmd
+                        cmd_state.last_cmds[arm] = q_arm_cmd.copy()
+                        cmd_state.last_arm_cmd_time[arm] = command_time
 
-                prev_cmd = (cmd_state.last_cmds[arm] if arm in cmd_state.last_cmds else cmd_kin.q_cmd[joint_idx])
+                    fk_cmd, ee_cmd = compute_fk_and_ee(
+                        robot,
+                        cmd_kin.q_cmd,
+                        arm_data,
+                    )
+                    for arm in arm_names:
+                        cmd_kin.T_cmd[arm] = ee_cmd[arm]
 
-                q_arm_cmd = clamp_joint_step(prev_cmd, target_q, cfg.max_joint_step)
-
-                cmd_step = np.linalg.norm(q_arm_cmd - prev_cmd)
-
-                episode_stats.arms[arm].joint_step_norms.append(cmd_step)
-
-
-
-                t_cmd_start = now()
-
-                robots[arm].arm.set_joint_positions(
-                    q_arm_cmd.tolist(),
-                    moving_time=cfg.moving_time,
-                    accel_time=cfg.accel_time,
-                    blocking=False,
+                episode_stats.ik_solve.append(
+                    now() - t_solve_start
                 )
-
-                # if arm == "middle":
-                #     print("q_arm_cmd", q_arm_cmd)
-
-                episode_stats.cmd.append(now() - t_cmd_start)
-
-                cmd_kin.q_cmd[joint_idx] = q_arm_cmd
-
-                cmd_state.last_cmds[arm] = q_arm_cmd.copy()
-                cmd_state.last_arm_cmd_time[arm] = now()
-
-            fk_cmd, ee_cmd = compute_fk_and_ee(robot, cmd_kin.q_cmd, arm_data)
-
-            for arm in arm_names:
-                cmd_kin.T_cmd[arm] = ee_cmd[arm]
-
-            episode_stats.ik_solve.append(now() - t_solve_start)
 
         if collecting_episode:
             obs_ts = now()

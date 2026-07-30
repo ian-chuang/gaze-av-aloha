@@ -22,7 +22,8 @@ TASKS = {
     2: "block_square",
     3: "grasp_cube",
     4: "transfer_flower",
-    5: "bimanual_data_collection",
+    5: "bimanual",
+    6: "active_vision"
 }
 
 # Defines which arms are active in each mode, and the corresponding action layout.
@@ -32,7 +33,7 @@ ARM_MODES = {
     "right": ["right"],
     "middle": ["middle"],
     "bimanual": ["left", "right"],
-    "all": ["left", "right", "middle"],
+    "av": ["left", "right", "middle"],
 }
 
 ACTION_LAYOUTS = {

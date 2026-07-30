@@ -58,6 +58,88 @@ def get_joint_positions(bot):
     return np.array(bot.arm.core.joint_states.position[:len(bot.arm.group_info.joint_names)], 
                     dtype=float)
 
+def sync_robot_state(robots,
+    robot,
+    arm_data,
+    arm_names,
+    cmd_kin,
+    cmd_state,
+):
+    """
+    Synchronize software command state with the robots' measured joint states.
+
+    Call this after any motion that occurs outside the normal teleoperation
+    command loop, such as resetting the arms or moving to a named pose.
+    """
+    measured_q_full = cmd_kin.q_cmd.copy()
+
+    for arm in arm_names:
+        joint_idx = arm_data[arm]["joint_indices"]
+        num_joints = ARM_CONFIG[arm]["num_joints"]
+
+        measured_q_arm = np.asarray(
+            robots[arm].dxl.joint_states.position[:num_joints],
+            dtype=float,
+        ).copy()
+
+        if measured_q_arm.shape[0] != len(joint_idx):
+            raise RuntimeError(
+                f"{arm}: measured {measured_q_arm.shape[0]} joints, "
+                f"but robot model expects {len(joint_idx)}."
+            )
+
+        measured_q_full[joint_idx] = measured_q_arm
+        cmd_state.last_cmds[arm] = measured_q_arm.copy()
+
+        # Permit the next command immediately.
+        cmd_state.last_arm_cmd_time[arm] = 0.0
+
+    cmd_kin.q_cmd[:] = measured_q_full
+
+    # Recompute end-effector poses from the synchronized joint configuration.
+    _, measured_ee = compute_fk_and_ee(
+        robot,
+        cmd_kin.q_cmd,
+        arm_data,
+    )
+
+    for arm in arm_names:
+        cmd_kin.T_cmd[arm] = measured_ee[arm].copy()
+
+def command_state_is_stale(
+    robots,
+    arm_data,
+    arm_names,
+    cmd_state,
+    tolerance=0.08,
+):
+    """
+    Return True when measured joints differ substantially from the command
+    state stored by the teleoperation loop.
+    """
+    for arm in arm_names:
+        num_joints = ARM_CONFIG[arm]["num_joints"]
+
+        measured_q = np.asarray(
+            robots[arm].dxl.joint_states.position[:num_joints],
+            dtype=float,
+        )
+
+        expected_q = np.asarray(
+            cmd_state.last_cmds[arm],
+            dtype=float,
+        )
+
+        max_error = float(np.max(np.abs(measured_q - expected_q)))
+
+        if max_error > tolerance:
+            print(
+                f"\n[{arm}] Command state is stale: "
+                f"maximum joint difference = {max_error:.3f} rad."
+            )
+            return True
+
+    return False
 
 # Motion
 

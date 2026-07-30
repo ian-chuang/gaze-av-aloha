@@ -3,8 +3,11 @@ import torch
 from pathlib import Path
 import time
 import json
+import queue
+import shutil
+import threading
 
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.common.datasets.lerobot_dataset import LeRobotDataset, append_save_debug_line
 
 from arm_config import ARM_CONFIG
 from data_col_config import (
@@ -16,6 +19,112 @@ ARM_DATASET_JOINTS = {
     arm: cfg["joint_names"]
     for arm, cfg in ARM_CONFIG.items()
 }
+
+
+# CHANGED: background saver keeps a single writer for dataset metadata while allowing
+# the foreground collector to start the next episode immediately.
+class BackgroundEpisodeSaver:
+    def __init__(self, dataset: LeRobotDataset):
+        self.dataset = dataset
+        self.next_episode_index = dataset.episode_buffer["episode_index"]
+        self._save_queue = queue.Queue()
+        self._save_error = None
+        self._worker = threading.Thread(target=self._worker_loop, daemon=True)
+        self._worker.start()
+
+    def _worker_loop(self):
+        while True:
+            episode_data = self._save_queue.get()
+            if episode_data is None:
+                self._save_queue.task_done()
+                break
+
+            episode_index = int(episode_data["episode_index"])
+            try:
+                self.dataset.save_episode(episode_data=episode_data)
+                # CHANGED: write background save completion to the save log instead of the terminal.
+                append_save_debug_line(
+                    self.dataset.root,
+                    f"EPISODE SAVED: episode_{episode_index:04d}",
+                )
+            except Exception as exc:
+                self._save_error = exc
+                # CHANGED: write background save failures to the save log instead of the terminal.
+                append_save_debug_line(
+                    self.dataset.root,
+                    f"Background episode save failed for episode_{episode_index:04d}: {exc}",
+                )
+            finally:
+                self._save_queue.task_done()
+                # CHANGED: print a single terminal message when the background save queue becomes empty.
+                if self._save_queue.unfinished_tasks == 0:
+                    print("\nBACKGROUND SAVES COMPLETE")
+
+    def _raise_if_save_failed(self):
+        if self._save_error is not None:
+            raise RuntimeError("Background episode save failed.") from self._save_error
+
+    def _rotate_image_writer(self):
+        if self.dataset.image_writer is None:
+            return
+
+        # CHANGED: flush only the completed episode's queued PNG writes before
+        # handing the old buffer to the background saver.
+        num_processes = self.dataset.image_writer.num_processes
+        num_threads = self.dataset.image_writer.num_threads
+        self.dataset.stop_image_writer()
+        self.dataset.start_image_writer(num_processes, num_threads)
+
+    def save_episode_async(self) -> int:
+        self._raise_if_save_failed()
+
+        if self.dataset.episode_buffer["size"] == 0:
+            raise ValueError("No frames available to save.")
+
+        self._rotate_image_writer()
+
+        episode_data = self.dataset.episode_buffer
+        episode_index = episode_data["episode_index"]
+
+        # CHANGED: reserve the next episode index immediately so new image paths
+        # do not collide while the previous episode saves in the background.
+        self.next_episode_index = episode_index + 1
+        self.dataset.episode_buffer = self.dataset.create_episode_buffer(self.next_episode_index)
+
+        self._save_queue.put(episode_data)
+        # CHANGED: write queue events to the save log instead of the terminal.
+        append_save_debug_line(
+            self.dataset.root,
+            f"Queued episode_{episode_index:04d} for background save.",
+        )
+        return episode_index
+
+    def discard_current_episode(self) -> None:
+        self._raise_if_save_failed()
+
+        episode_index = self.dataset.episode_buffer["episode_index"]
+
+        if self.dataset.image_writer is not None:
+            for cam_key in self.dataset.meta.camera_keys:
+                img_dir = self.dataset._get_image_file_path(
+                    episode_index=episode_index,
+                    image_key=cam_key,
+                    frame_index=0,
+                ).parent
+                if img_dir.is_dir():
+                    shutil.rmtree(img_dir)
+
+        # CHANGED: preserve the reserved episode index when discarding the active buffer.
+        self.dataset.episode_buffer = self.dataset.create_episode_buffer(episode_index)
+
+    def wait_until_idle(self) -> None:
+        self._save_queue.join()
+        self._raise_if_save_failed()
+
+    def close(self) -> None:
+        self.wait_until_idle()
+        self._save_queue.put(None)
+        self._worker.join()
 
 def build_state_names(active_arms):
     names = []

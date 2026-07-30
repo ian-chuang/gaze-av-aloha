@@ -41,7 +41,7 @@
     <arg name="port" value="/dev/ttyUSB1"/>
   </include>
 
-    <include if="$(arg launch_driver)" file="$(find wx250s_7dof_description)/launch/xsarm_control.launch">
+  <include if="$(arg launch_driver)" file="$(find wx250s_7dof_description)/launch/xsarm_control.launch">
     <arg name="robot_model"                       value="$(arg robot_model_puppet_middle)"/>
     <arg name="robot_name"                        value="$(arg robot_name_puppet_middle)"/>
     <arg name="base_link_frame"                   value="$(arg base_link_puppet)"/>
@@ -50,6 +50,7 @@
     <arg name="mode_configs"                      value="$(arg puppet_modes_middle)"/>
     <arg name="use_sim"                           value="false"/>
     <arg name="port" value="/dev/ttyUSB2"/>
+    <arg name="load_configs" value="false"/>
   </include>
 
   <!-- Launch simulation -->
@@ -104,6 +105,7 @@
     pkg="tf2_ros"
     type="static_transform_publisher"
     args="0 0 0 0 0 0 /world /$(arg robot_name_puppet_middle)/base_link"/>
+    
 <!-- USING PYTHON LIBRARY TO USE THE CAMERAS INSTEAD OF ROS
   <include file="$(find realsense2_camera)/launch/rs_camera.launch">
       <arg name="camera" value="cam_left_wrist"/>
