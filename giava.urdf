@@ -274,7 +274,7 @@
     <child link="rightgripper_base" />
     <origin xyz="0.035000 0.000000 0.000000" rpy="-1.570000 0.000796 -1.570796" />
   </joint>
-  <link name="rightright_finger_link">
+  <link name="rightleft_finger_link">
     <inertial>
       <origin xyz="0.014348 -0.028479 0.012290" rpy="0.000000 0.000000 0.000000" />
       <mass value="0.086294" />
@@ -284,7 +284,7 @@
     <visual>
       <origin xyz="0.014164 0.021173 0.060000" rpy="1.570796 1.570796 0.000000" />
       <geometry>
-        <mesh filename="aloha_assets/vx300s_8_custom_finger_right.stl" />
+        <mesh filename="aloha_assets/vx300s_8_custom_finger_left.stl" />
       </geometry>
       <material name="black">
         <color rgba="0.15 0.15 0.15 1" />
@@ -293,19 +293,19 @@
     <collision>
       <origin xyz="0.014164 0.021173 0.060000" rpy="1.570796 1.570796 0.000000" />
       <geometry>
-        <mesh filename="aloha_assets/vx300s_8_custom_finger_right.stl" />
+        <mesh filename="aloha_assets/vx300s_8_custom_finger_left.stl" />
       </geometry>
     </collision>
   </link>
-  <joint name="rightright_finger" type="prismatic">
+  <joint name="rightleft_finger" type="prismatic">
     <parent link="rightgripper_base" />
-    <child link="rightright_finger_link" />
+    <child link="rightleft_finger_link" />
     <origin xyz="0.019100 -0.014164 0.021173" rpy="-1.570796 0.000000 1.570796" />
     <axis xyz="0.000000 0.000000 -1.000000" />
     <dynamics damping="40.000000" />
-    <limit lower="0.000000" upper="0.041000" velocity="3.141592653589793"/>
+    <limit lower="0.000000" upper="0.041000" />
   </joint>
-  <link name="rightleft_finger_link">
+  <link name="rightright_finger_link">
     <inertial>
       <origin xyz="0.014371 0.028479 0.012142" rpy="0.000000 0.000000 0.000000" />
       <mass value="0.086293" />
@@ -315,7 +315,7 @@
     <visual>
       <origin xyz="0.014164 -0.021173 0.059707" rpy="-1.570796 -1.570796 0.000000" />
       <geometry>
-        <mesh filename="aloha_assets/vx300s_8_custom_finger_left.stl" />
+        <mesh filename="aloha_assets/vx300s_8_custom_finger_right.stl" />
       </geometry>
       <material name="black">
         <color rgba="0.15 0.15 0.15 1" />
@@ -324,17 +324,17 @@
     <collision>
       <origin xyz="0.014164 -0.021173 0.059707" rpy="-1.570796 -1.570796 0.000000" />
       <geometry>
-        <mesh filename="aloha_assets/vx300s_8_custom_finger_left.stl" />
+        <mesh filename="aloha_assets/vx300s_8_custom_finger_right.stl" />
       </geometry>
     </collision>
   </link>
-  <joint name="rightleft_finger" type="prismatic">
+  <joint name="rightright_finger" type="prismatic">
     <parent link="rightgripper_base" />
-    <child link="rightleft_finger_link" />
+    <child link="rightright_finger_link" />
     <origin xyz="-0.019100 -0.014164 0.021173" rpy="1.570796 0.000000 1.570796" />
     <axis xyz="0.000000 0.000000 -1.000000" />
     <dynamics damping="40.000000" />
-    <limit lower="0.000000" upper="0.041000" velocity="3.141592653589793"/>
+    <limit lower="0.000000" upper="0.041000" />
   </joint>
   <link name="leftbase_link">
     <inertial>
@@ -608,7 +608,7 @@
     <child link="leftgripper_base" />
     <origin xyz="0.035000 0.000000 0.000000" rpy="-1.570000 0.000796 -1.570796" />
   </joint>
-  <link name="leftright_finger_link">
+  <link name="leftleft_finger_link">
     <inertial>
       <origin xyz="0.014348 -0.028479 0.012290" rpy="0.000000 0.000000 0.000000" />
       <mass value="0.086294" />
@@ -618,7 +618,7 @@
     <visual>
       <origin xyz="0.014164 0.021173 0.060000" rpy="1.570796 1.570796 0.000000" />
       <geometry>
-        <mesh filename="aloha_assets/vx300s_8_custom_finger_right.stl" />
+        <mesh filename="aloha_assets/vx300s_8_custom_finger_left.stl" />
       </geometry>
       <material name="black">
         <color rgba="0.15 0.15 0.15 1" />
@@ -627,19 +627,19 @@
     <collision>
       <origin xyz="0.014164 0.021173 0.060000" rpy="1.570796 1.570796 0.000000" />
       <geometry>
-        <mesh filename="aloha_assets/vx300s_8_custom_finger_right.stl" />
+        <mesh filename="aloha_assets/vx300s_8_custom_finger_left.stl" />
       </geometry>
     </collision>
   </link>
-  <joint name="leftright_finger" type="prismatic">
+  <joint name="leftleft_finger" type="prismatic">
     <parent link="leftgripper_base" />
-    <child link="leftright_finger_link" />
+    <child link="leftleft_finger_link" />
     <origin xyz="0.019100 -0.014164 0.021173" rpy="-1.570796 0.000000 1.570796" />
     <axis xyz="0.000000 0.000000 -1.000000" />
     <dynamics damping="40.000000" />
-    <limit lower="0.000000" upper="0.041000" velocity="3.141592653589793"/>
+    <limit lower="0.000000" upper="0.041000" />
   </joint>
-  <link name="leftleft_finger_link">
+  <link name="leftright_finger_link">
     <inertial>
       <origin xyz="0.014371 0.028479 0.012142" rpy="0.000000 0.000000 0.000000" />
       <mass value="0.086293" />
@@ -649,7 +649,7 @@
     <visual>
       <origin xyz="0.014164 -0.021173 0.059707" rpy="-1.570796 -1.570796 0.000000" />
       <geometry>
-        <mesh filename="aloha_assets/vx300s_8_custom_finger_left.stl" />
+        <mesh filename="aloha_assets/vx300s_8_custom_finger_right.stl" />
       </geometry>
       <material name="black">
         <color rgba="0.15 0.15 0.15 1" />
@@ -658,17 +658,17 @@
     <collision>
       <origin xyz="0.014164 -0.021173 0.059707" rpy="-1.570796 -1.570796 0.000000" />
       <geometry>
-        <mesh filename="aloha_assets/vx300s_8_custom_finger_left.stl" />
+        <mesh filename="aloha_assets/vx300s_8_custom_finger_right.stl" />
       </geometry>
     </collision>
   </link>
-  <joint name="leftleft_finger" type="prismatic">
+  <joint name="leftright_finger" type="prismatic">
     <parent link="leftgripper_base" />
-    <child link="leftleft_finger_link" />
+    <child link="leftright_finger_link" />
     <origin xyz="-0.019100 -0.014164 0.021173" rpy="1.570796 0.000000 1.570796" />
     <axis xyz="0.000000 0.000000 -1.000000" />
     <dynamics damping="40.000000" />
-    <limit lower="0.000000" upper="0.041000" velocity="3.141592653589793"/>
+    <limit lower="0.000000" upper="0.041000" />
   </joint>
   <link name="middlebase_link">
     <inertial>
