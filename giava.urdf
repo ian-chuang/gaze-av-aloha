@@ -303,7 +303,7 @@
     <origin xyz="0.019100 -0.014164 0.021173" rpy="-1.570796 0.000000 1.570796" />
     <axis xyz="0.000000 0.000000 -1.000000" />
     <dynamics damping="40.000000" />
-    <limit lower="0.000000" upper="0.041000" />
+    <limit lower="0.000000" upper="0.041000" velocity="3.141592653589793"/>
   </joint>
   <link name="rightright_finger_link">
     <inertial>
@@ -334,7 +334,7 @@
     <origin xyz="-0.019100 -0.014164 0.021173" rpy="1.570796 0.000000 1.570796" />
     <axis xyz="0.000000 0.000000 -1.000000" />
     <dynamics damping="40.000000" />
-    <limit lower="0.000000" upper="0.041000" />
+    <limit lower="0.000000" upper="0.041000" velocity="3.141592653589793"/>
   </joint>
   <link name="leftbase_link">
     <inertial>
@@ -637,7 +637,7 @@
     <origin xyz="0.019100 -0.014164 0.021173" rpy="-1.570796 0.000000 1.570796" />
     <axis xyz="0.000000 0.000000 -1.000000" />
     <dynamics damping="40.000000" />
-    <limit lower="0.000000" upper="0.041000" />
+    <limit lower="0.000000" upper="0.041000" velocity="3.141592653589793"/>
   </joint>
   <link name="leftright_finger_link">
     <inertial>
@@ -668,7 +668,7 @@
     <origin xyz="-0.019100 -0.014164 0.021173" rpy="1.570796 0.000000 1.570796" />
     <axis xyz="0.000000 0.000000 -1.000000" />
     <dynamics damping="40.000000" />
-    <limit lower="0.000000" upper="0.041000" />
+    <limit lower="0.000000" upper="0.041000" velocity="3.141592653589793"/>
   </joint>
   <link name="middlebase_link">
     <inertial>
