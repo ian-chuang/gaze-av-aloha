@@ -1,0 +1,6 @@
+# Per-variant rollout histories are heavy and regenerable (run_study.py);
+# the committed results are the frozen model inputs + analysis outputs.
+results/*/
+!results/plots/
+!results/sweeps/
+__pycache__/
