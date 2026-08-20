@@ -7,21 +7,21 @@ runs against the identical model, home configuration, and target links.
 Facts about the model (giava.urdf, verified 2026-08-08):
 
 - 23 actuated joints:
-    right arm : rightwaist, rightshoulder, rightelbow, rightforearm_roll,
-                rightwrist_angle, rightwrist_rotate            (6 DoF)
-    right hand: rightright_finger, rightleft_finger            (2, prismatic)
-    left arm  : leftwaist ... leftwrist_rotate                 (6 DoF)
-    left hand : leftright_finger, leftleft_finger              (2, prismatic)
-    middle arm: middlebase, middleshoulder, middleupper_arm,
-                middleupper_forearm, middlelower_forearm,
-                middlewrist, middlepan                         (7 DoF, camera)
-- Arm bases: left at (+0.469, -0.019, 0.02), right at (-0.469, -0.019, 0.02),
+    right arm : right_waist, right_shoulder, right_elbow, right_forearm_roll,
+                right_wrist_angle, right_wrist_rotate            (6 DoF)
+    right hand: right_right_finger, right_left_finger            (2, prismatic)
+    left arm  : left_waist ... left_wrist_rotate                 (6 DoF)
+    left hand : left_right_finger, left_left_finger              (2, prismatic)
+    middle arm: middle_base, middle_shoulder, middle_upper_arm,
+                middle_upper_forearm, middle_lower_forearm,
+                middle_wrist, middle_pan                         (7 DoF, camera)
+- Arm bases: left at (+0.520, -0.019, 0.02), right at (-0.520, -0.019, 0.02),
   middle (camera) at (0, +0.40, 0.02).  The hand arms face each other across
   the x axis; the camera arm looks at the workspace from +y.
 - Home end-effector poses (URDF default configuration):
-    leftgripper_base   : (+0.118, -0.019, 0.581)
-    rightgripper_base  : (-0.118, -0.019, 0.581)
-    middlecamera_cover : ( 0.000, +0.007, 0.319)
+    left_gripper_base   : (+0.118, -0.019, 0.581)
+    right_gripper_base  : (-0.118, -0.019, 0.581)
+    middle_camera_cover : ( 0.000, +0.007, 0.319)
 - Gripper frame convention (both hands): local +z is the approach axis
   (wrist -> fingertips), fingers open/close along local ±x, local +y is the
   palm normal.  At home both approach axes point at the midline, ~11° above
@@ -50,9 +50,9 @@ URDF_PATH = _os.environ.get(
 
 ARM_NAMES: Tuple[str, str, str] = ("left", "right", "middle")
 TARGET_LINKS: Tuple[str, str, str] = (
-    "leftgripper_base",
-    "rightgripper_base",
-    "middlecamera_cover",
+    "left_gripper_base",
+    "right_gripper_base",
+    "middle_camera_cover",
 )
 
 _CACHE: dict = {}

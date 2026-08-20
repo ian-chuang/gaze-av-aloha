@@ -1,4 +1,5 @@
 import logging
+import os as _os
 from dataclasses import dataclass, field
 import numpy as np
 
@@ -26,6 +27,10 @@ class ArmStats:
     joint_step_norms: list[float] = field(default_factory=list)
 
     cmd_track_err: list[float] = field(default_factory=list)
+    # Asymmetry discriminators (see log_episode_info): commanded waist angle
+    # and target positions per tick.
+    waist_cmds: list[float] = field(default_factory=list)
+    target_positions: list = field(default_factory=list)
 
 @dataclass
 class SessionStats:
@@ -40,11 +45,44 @@ class SessionStats:
     loop: list[float] = field(default_factory=list)
     headset: list[float] = field(default_factory=list)
     ik_solve: list[float] = field(default_factory=list)
+    # Coupled-IK solve time per tick and how often it exceeded the control
+    # period (sphere collision is cheap on average but has a long tail).
+    ik_solve_ms: list[float] = field(default_factory=list)
+    ik_overrun_ticks: int = 0
+    # Ticks where the post-solve joint clamp was saturating (only counted when
+    # TeleopConfig.enable_joint_clamp is on).
+    clamp_saturated_ticks: int = 0
+    # Ticks where a command had to be pulled back into the driver's feasible
+    # set (position or per-tick velocity), and which joints were responsible.
+    driver_clamp_ticks: int = 0
+    ## Ticks on which the capsule gate refused the assembled command --
+    ## the arms held instead of moving toward an inter-arm contact.
+    capsule_gate_blocks: int = 0
+    ## Ticks where the gate SHORTENED the step rather than refusing it:
+    ## the arms slid up to the margin and stopped there. Common and
+    ## healthy near the boundary; blocks are the harsher outcome.
+    capsule_gate_scaled: int = 0
+    capsule_gate_min_alpha: float = 1.0
+    driver_clamp_joints: dict[str, int] = field(default_factory=dict)
+    # Residual misalignment of each timestep's camera frames, in seconds:
+    # max minus min of the timestamps actually chosen.  Only populated when
+    # GIAVA_SYNC_FRAMES is on (camera_manager.select_synchronized_frames).
+    # These cameras free-run, so this is the software alignment achieved --
+    # it is recorded rather than assumed.
+    sync_spreads: list[float] = field(default_factory=list)
     cmd: list[float] = field(default_factory=list)
     overruns: int = 0
+    ## Which collision configuration produced this session (collision_modes.py).
+    collision_mode: str = "unknown"
 
 def reset_episode_log(active_cameras, active_arms):
     stats = SessionStats()
+    ## Stamp the collision configuration on every episode, from the
+    ## environment collision_modes.select() populated at startup. Done here
+    ## rather than at the call sites so no future one can forget: an
+    ## episode's feel is uninterpretable without knowing which model
+    ## produced it.
+    stats.collision_mode = _os.environ.get("GIAVA_COLLISION", "unknown")
 
     for camera in active_cameras:
         stats.cameras[camera] = CameraStats()
@@ -73,6 +111,44 @@ def log_episode_info(episode_idx, episode_stats):
         f"cmd_ms={1000*_mean(episode_stats.cmd):.2f}",
     ]
 
+    # Coupled-IK timing detail: the mean hides the tail that actually causes
+    # missed ticks, so report p95/max and the overrun count explicitly.
+    if episode_stats.ik_solve_ms:
+        _ms = sorted(episode_stats.ik_solve_ms)
+        _p95 = _ms[min(len(_ms) - 1, int(0.95 * len(_ms)))]
+        msg.extend([
+            f"ik_solve_mean_ms={_mean(episode_stats.ik_solve_ms):.2f}",
+            f"ik_solve_p95_ms={_p95:.2f}",
+            f"ik_solve_max_ms={_ms[-1]:.2f}",
+            f"ik_overruns={episode_stats.ik_overrun_ticks}"
+            f"/{len(episode_stats.ik_solve_ms)}",
+        ])
+    if episode_stats.clamp_saturated_ticks:
+        msg.append(f"clamp_saturated={episode_stats.clamp_saturated_ticks}")
+    ## Lead with the collision configuration: an episode's feel is only
+    ## interpretable against the model that produced it.
+    _cm = getattr(episode_stats, "collision_mode", None)
+    if _cm and _cm != "unknown":
+        msg.append(f"collision={_cm}")
+    if episode_stats.capsule_gate_blocks:
+        msg.append(f"capsule_gate_blocks={episode_stats.capsule_gate_blocks}")
+    if episode_stats.capsule_gate_scaled:
+        msg.append(
+            f"capsule_gate_scaled={episode_stats.capsule_gate_scaled}"
+            f"(min step {episode_stats.capsule_gate_min_alpha * 100:.0f}%)")
+    if episode_stats.driver_clamp_ticks:
+        worst = sorted(episode_stats.driver_clamp_joints.items(),
+                       key=lambda kv: -kv[1])[:3]
+        msg.append(f"driver_clamped={episode_stats.driver_clamp_ticks}")
+        msg.append("driver_clamp_joints=" + ",".join(f"{k}:{v}" for k, v in worst))
+
+    if episode_stats.sync_spreads:
+        sp = sorted(episode_stats.sync_spreads)
+        msg.append(
+            f"cam_sync_spread_ms={1000*_mean(sp):.2f}"
+            f"/p95={1000*sp[min(len(sp)-1, int(0.95*len(sp)))]:.2f}"
+            f"/max={1000*sp[-1]:.2f}")
+
     for cam_name, cam_stats in episode_stats.cameras.items():
 
         msg.extend([
@@ -88,6 +164,16 @@ def log_episode_info(episode_idx, episode_stats):
             if arm_stats.ik_attempts > 0
             else 0.0
         )
+
+        # Asymmetry discriminators: wild waist range with a quiet target =
+        # pose-dependent conditioning (target near the waist axis); wild
+        # target = input noise (controller tracking / head-composition leak).
+        if arm_stats.waist_cmds:
+            _w = arm_stats.waist_cmds
+            msg.append(f"{arm_name}_waist_range_deg={np.degrees(max(_w) - min(_w)):.1f}")
+        if arm_stats.target_positions:
+            _t = np.asarray(arm_stats.target_positions)
+            msg.append(f"{arm_name}_target_p2p_mm={np.max(np.ptp(_t, axis=0)) * 1e3:.1f}")
 
         msg.extend([
             f"{arm_name}_ik_attempts={arm_stats.ik_attempts}",

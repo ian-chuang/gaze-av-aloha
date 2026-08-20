@@ -1,19 +1,21 @@
+import json
+import time
+from pathlib import Path
+
 import numpy as np
 import torch
-from pathlib import Path
-import time
-import json
-import queue
-import shutil
-import threading
 
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset, append_save_debug_line
+from lerobot.datasets import LeRobotDataset
 
-from arm_config import ARM_CONFIG
-from data_col_config import (
-    ARM_MODES,
-    DATASET_ROOT,
-)
+if __package__:
+    from .arm_config import ARM_CONFIG
+    from .data_col_config import ARM_MODES, DATASET_ROOT
+else:
+    from arm_config import ARM_CONFIG
+    from data_col_config import (
+        ARM_MODES,
+        DATASET_ROOT,
+    )
 
 ARM_DATASET_JOINTS = {
     arm: cfg["joint_names"]
@@ -21,110 +23,60 @@ ARM_DATASET_JOINTS = {
 }
 
 
-# CHANGED: background saver keeps a single writer for dataset metadata while allowing
-# the foreground collector to start the next episode immediately.
+def append_save_debug_line(root: Path, message: str) -> None:
+    log_dir = root / "save_logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    with open(log_dir / "save_episode.log", "a") as f:
+        f.write(f"{message}\n")
+
+
+# CHANGED (lerobot v0.6.0): this used to be a hand-rolled background saver that
+# moved the blocking save_episode() call onto a worker thread, because saving
+# meant writing every frame as a PNG and then encoding an MP4 at episode end.
+#
+# v0.6.0 does this better natively. With `streaming_encoding=True`, frames are fed
+# straight to per-camera encoder threads as they are recorded (PyAV releases the
+# GIL, so encoding genuinely overlaps the control loop), the PNG round-trip is
+# gone entirely, and save_episode() becomes near-instant. That removes the need
+# for our own thread, queue and image-writer rotation.
+#
+# This class is kept only as a thin adapter so the collection scripts keep their
+# existing calls. It no longer owns any concurrency of its own.
 class BackgroundEpisodeSaver:
     def __init__(self, dataset: LeRobotDataset):
         self.dataset = dataset
         self.next_episode_index = dataset.episode_buffer["episode_index"]
-        self._save_queue = queue.Queue()
-        self._save_error = None
-        self._worker = threading.Thread(target=self._worker_loop, daemon=True)
-        self._worker.start()
-
-    def _worker_loop(self):
-        while True:
-            episode_data = self._save_queue.get()
-            if episode_data is None:
-                self._save_queue.task_done()
-                break
-
-            episode_index = int(episode_data["episode_index"])
-            try:
-                self.dataset.save_episode(episode_data=episode_data)
-                # CHANGED: write background save completion to the save log instead of the terminal.
-                append_save_debug_line(
-                    self.dataset.root,
-                    f"EPISODE SAVED: episode_{episode_index:04d}",
-                )
-            except Exception as exc:
-                self._save_error = exc
-                # CHANGED: write background save failures to the save log instead of the terminal.
-                append_save_debug_line(
-                    self.dataset.root,
-                    f"Background episode save failed for episode_{episode_index:04d}: {exc}",
-                )
-            finally:
-                self._save_queue.task_done()
-                # CHANGED: print a single terminal message when the background save queue becomes empty.
-                if self._save_queue.unfinished_tasks == 0:
-                    print("\nBACKGROUND SAVES COMPLETE")
-
-    def _raise_if_save_failed(self):
-        if self._save_error is not None:
-            raise RuntimeError("Background episode save failed.") from self._save_error
-
-    def _rotate_image_writer(self):
-        if self.dataset.image_writer is None:
-            return
-
-        # CHANGED: flush only the completed episode's queued PNG writes before
-        # handing the old buffer to the background saver.
-        num_processes = self.dataset.image_writer.num_processes
-        num_threads = self.dataset.image_writer.num_threads
-        self.dataset.stop_image_writer()
-        self.dataset.start_image_writer(num_processes, num_threads)
 
     def save_episode_async(self) -> int:
-        self._raise_if_save_failed()
-
         if self.dataset.episode_buffer["size"] == 0:
             raise ValueError("No frames available to save.")
 
-        self._rotate_image_writer()
+        episode_index = int(self.dataset.episode_buffer["episode_index"])
 
-        episode_data = self.dataset.episode_buffer
-        episode_index = episode_data["episode_index"]
+        # Near-instant with streaming encoding: the video is already encoded,
+        # this only finalizes the episode and writes its metadata.
+        self.dataset.save_episode()
 
-        # CHANGED: reserve the next episode index immediately so new image paths
-        # do not collide while the previous episode saves in the background.
         self.next_episode_index = episode_index + 1
-        self.dataset.episode_buffer = self.dataset.create_episode_buffer(self.next_episode_index)
-
-        self._save_queue.put(episode_data)
-        # CHANGED: write queue events to the save log instead of the terminal.
         append_save_debug_line(
-            self.dataset.root,
-            f"Queued episode_{episode_index:04d} for background save.",
+            self.dataset.root, f"EPISODE SAVED: episode_{episode_index:04d}"
         )
         return episode_index
 
     def discard_current_episode(self) -> None:
-        self._raise_if_save_failed()
-
-        episode_index = self.dataset.episode_buffer["episode_index"]
-
-        if self.dataset.image_writer is not None:
-            for cam_key in self.dataset.meta.camera_keys:
-                img_dir = self.dataset._get_image_file_path(
-                    episode_index=episode_index,
-                    image_key=cam_key,
-                    frame_index=0,
-                ).parent
-                if img_dir.is_dir():
-                    shutil.rmtree(img_dir)
-
-        # CHANGED: preserve the reserved episode index when discarding the active buffer.
-        self.dataset.episode_buffer = self.dataset.create_episode_buffer(episode_index)
+        # Cancels the in-flight streaming encode and drops the buffer.
+        self.dataset.clear_episode_buffer()
 
     def wait_until_idle(self) -> None:
-        self._save_queue.join()
-        self._raise_if_save_failed()
+        # Saving is synchronous now, so there is never outstanding work.
+        return
 
     def close(self) -> None:
-        self.wait_until_idle()
-        self._save_queue.put(None)
-        self._worker.join()
+        # finalize() flushes buffered episode metadata and writes the parquet
+        # footers. Without it the dataset on disk cannot be loaded back.
+        self.dataset.finalize()
+        append_save_debug_line(self.dataset.root, "DATASET FINALIZED")
+
 
 def build_state_names(active_arms):
     names = []
@@ -158,8 +110,14 @@ def add_camera_features(features, active_cameras):
             "names": ["height", "width", "channel"],
         }
 
+        # float64, NOT float32.  These are absolute epoch timestamps (~1.79e9
+        # right now).  float32 has 24 bits of mantissa, so near that magnitude
+        # consecutive representable values are 128 SECONDS apart -- every
+        # camera timestamp was being quantised into 128 s buckets, destroying
+        # exactly the sub-millisecond information they exist to carry.
+        # float64 keeps ~0.2 us at this magnitude.
         features[f"observation.timestamps.{camera}"] = {
-            "dtype": "float32",
+            "dtype": "float64",
             "shape": (1,),
             "names": None,
         }
@@ -197,8 +155,10 @@ def build_dataset_features(mode, active_cameras):
     }
 
     for arm in active_arms:
+        # float64 for the same reason as the camera timestamps above: these
+        # are absolute epoch values, where float32 quantises to 128 s.
         features[f"observation.timestamps.{arm}"] = {
-            "dtype": "float32",
+            "dtype": "float64",
             "shape": (1,),
             "names": None,
         }
@@ -220,13 +180,21 @@ def create_dataset(task_name, mode, active_cameras, control_dt):
 
     features = build_dataset_features(mode, active_cameras)
 
+    # CHANGED (lerobot v0.6.0): stream frames to per-camera encoder threads while
+    # recording instead of writing PNGs and encoding at episode end. This makes
+    # save_episode() near-instant and removes the temp-image round-trip, so the
+    # image_writer_* settings are no longer needed.
+    #
+    # encoder_queue_maxsize is the per-camera frame backlog. If encoding cannot
+    # keep up the queue applies back-pressure and frames can be dropped, so this
+    # is deliberately generous relative to the default of 30.
     dataset = LeRobotDataset.create(
         repo_id=repo_id,
         root=str(dataset_root),
         fps=round(1.0 / control_dt),
         features=features,
-        image_writer_threads=4,
-        image_writer_processes=0,
+        streaming_encoding=True,
+        encoder_queue_maxsize=120,
     )
 
     save_dataset_metadata(
@@ -276,12 +244,12 @@ def build_frame(
 
             frame["observation.timestamps.oak_left"] = torch.tensor(
                 [timestamps["oak_left"]],
-                dtype=torch.float32,
+                dtype=torch.float64,
             )
 
             frame["observation.timestamps.oak_right"] = torch.tensor(
                 [timestamps["oak_right"]],
-                dtype=torch.float32,
+                dtype=torch.float64,
             )
 
             continue
@@ -292,7 +260,7 @@ def build_frame(
 
         frame[f"observation.timestamps.{camera}"] = torch.tensor(
             [timestamps[camera]],
-            dtype=torch.float32,
+            dtype=torch.float64,
         )
 
     # ------------------------------------------------------------------
@@ -368,7 +336,7 @@ def build_frame(
 
         frame[f"observation.timestamps.{arm}"] = torch.tensor(
             [timestamps[arm]],
-            dtype=torch.float32,
+            dtype=torch.float64,
         )
 
     return frame

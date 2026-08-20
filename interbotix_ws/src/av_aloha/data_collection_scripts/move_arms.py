@@ -19,7 +19,7 @@ def parse_args():
 
     parser.add_argument(
         "--mode",
-        choices=["left", "right", "middle", "bimanual", "all"],
+        choices=["left", "right", "middle", "bimanual", "all", "av"],
         default="right",
     )
 

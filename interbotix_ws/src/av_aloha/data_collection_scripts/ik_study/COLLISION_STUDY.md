@@ -87,18 +87,18 @@ near-rigid neighborhood, none inter-arm:
 
 ```
 leftbase↔leftupper_arm        [−186, −91]   rightbase↔rightupper_arm  [−185, −45]
-middlebase↔middleupper_arm    [−179, −81]   camera_body↔camera_cover  [−85, −85] (rigid: constant)
-leftwrist↔leftgripper_base    [−111, −81]   rightwrist↔rightgripper_base [−111, −81]
-leftlower_forearm↔leftgripper_base  [−133, −38]   right… same           [−133, −38]
-middlepan↔camera_cover        [−45, −40]    middlewrist↔camera_cover  [−40, −5]
-middlepan↔camera_body         [−9, −2]      middlelower_forearm↔middlepan [−54, +22]
+middle_base↔middle_upper_arm    [−179, −81]   camera_body↔camera_cover  [−85, −85] (rigid: constant)
+leftwrist↔left_gripper_base    [−111, −81]   rightwrist↔right_gripper_base [−111, −81]
+leftlower_forearm↔left_gripper_base  [−133, −38]   right… same           [−133, −38]
+middle_pan↔camera_cover        [−45, −40]    middle_wrist↔camera_cover  [−40, −5]
+middle_pan↔camera_body         [−9, −2]      middle_lower_forearm↔middle_pan [−54, +22]
 ```
 
 **Root cause** (why "permanently inside any margin" happens): the
 minimum-bounding-cylinder fit orients **plate-like links** with the cylinder
 axis along the thin dimension, then the capsule caps add a full radius on
 each flat side. Measured fits: the base plate (mesh 0.299×0.204×0.079 m)
-becomes r=0.154 → effective thickness 0.39 m; `middlecamera_cover` (a 5 mm
+becomes r=0.154 → effective thickness 0.39 m; `middle_camera_cover` (a 5 mm
 plate) becomes a ~14.4 cm-diameter blob; `upper_forearm` (0.204×0.101×0.039)
 gets r=0.108. Neighbouring links sit *inside* these inflated shells at every
 configuration. These are **artifacts of the geometric approximation**, not

@@ -1,0 +1,13 @@
+# Calibration RESULTS are experiment output: regenerable, machine specific,
+# and sometimes large (sync runs with --save-images). They stay local.
+#
+# The hand-maintained CONFIG files are the exception -- they are inputs, they
+# are edited by hand, and losing them loses real measurements. The repo-wide
+# .gitignore ignores *.json everywhere, so they must be re-included here by
+# name or `git add` will silently skip them.
+data/
+
+!charuco_board.json
+!ee_camera_transforms.json
+
+__pycache__/

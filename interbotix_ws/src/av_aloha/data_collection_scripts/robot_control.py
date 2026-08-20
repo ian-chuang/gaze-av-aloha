@@ -1,22 +1,52 @@
 """
 Robot creation, configuration, state queries, and motion helpers.
 """
-import rospy
-import pyroki as pk
+import warnings
+
+# ROS noetic ships python2-era docstrings ("\p", "\*") that python 3.12
+# flags as SyntaxWarning on every run (system dirs are root-owned, so the
+# bytecode is never cached).  Harmless — silence just that warning, before
+# the interbotix/actionlib/tf import chain below compiles them.
+warnings.filterwarnings("ignore", message=r"invalid escape sequence",
+                        category=SyntaxWarning)
+
 import numpy as np
+try:
+    import rospy
+except ImportError:
+    rospy = None
 
-from interbotix_xs_modules.arm import InterbotixManipulatorXS
-from yourdfpy import URDF
+try:
+    import pyroki as pk
+except ImportError:
+    pk = None
 
-from arm_config import ARM_CONFIG, DEFAULT_RESET_POSE, POSES, URDF_PATH
-from data_col_config import ARM_MODES
-from gripper import configure_gripper, command_gripper
+try:
+    from interbotix_xs_modules.arm import InterbotixManipulatorXS
+except ImportError:
+    InterbotixManipulatorXS = None
+
+try:
+    from yourdfpy import URDF
+except ImportError:
+    URDF = None
+
+if __package__:
+    from .arm_config import ARM_CONFIG, DEFAULT_RESET_POSE, POSES, URDF_PATH
+    from .data_col_config import ARM_MODES
+    from .gripper import configure_gripper, command_gripper
+else:
+    from arm_config import ARM_CONFIG, DEFAULT_RESET_POSE, POSES, URDF_PATH
+    from data_col_config import ARM_MODES
+    from gripper import configure_gripper, command_gripper
 
 REPLAY_MAX_JOINT_STEP_LR = np.array([0.06, 0.06, 0.08, 0.12, 0.12, 0.14], dtype=float)
 REPLAY_MAX_JOINT_STEP_M = np.array([0.06, 0.06, 0.08, 0.12, 0.12, 0.14, 0.16], dtype=float)
 
 # Robot creation
 def create_robot(arm_name, moving_time=0.14, accel_time=0.04):
+    if InterbotixManipulatorXS is None:
+        raise ImportError("interbotix_xs_modules is required to create robots.")
     cfg = ARM_CONFIG[arm_name]
 
     return InterbotixManipulatorXS(
@@ -35,10 +65,20 @@ def create_and_configure_robot(arm_name, moving_time=0.14, accel_time=0.04):
     bot = create_robot(arm_name, moving_time, accel_time)
 
     if arm_name == "middle":
-        bot.dxl.robot_set_operating_modes("group", "arm", "position")
-        rospy.sleep(0.5)
+        if rospy is None:
+            raise ImportError("rospy is required to configure the middle arm.")
+        # Torque on only -- do NOT set operating modes here.
+        #
+        # robot_set_operating_modes torques EVERY motor off to write the
+        # EEPROM mode registers, then torques back on (xs_sdk_obj.cpp,
+        # robot_set_joint_operating_mode: "torqued off").  Under gravity that
+        # is the visible ~1 cm sag the middle arm showed at every program
+        # start.  Modes are now set once at launch by puppet_modes_middle.yaml
+        # (same as left/right), so the per-run write was redundant EEPROM wear
+        # plus a mechanical glitch.  Torque-enable alone is idempotent: writing
+        # 1 to an already-torqued motor causes no blip.
         bot.dxl.robot_torque_enable("group", "arm", True)
-        rospy.sleep(0.5)
+        rospy.sleep(0.2)
 
     # print(f"Created robot for arm: {arm_name}")
     if ARM_CONFIG[arm_name]["has_gripper"]:
@@ -64,6 +104,7 @@ def sync_robot_state(robots,
     arm_names,
     cmd_kin,
     cmd_state,
+    to_urdf=None,
 ):
     """
     Synchronize software command state with the robots' measured joint states.
@@ -91,15 +132,50 @@ def sync_robot_state(robots,
         measured_q_full[joint_idx] = measured_q_arm
         cmd_state.last_cmds[arm] = measured_q_arm.copy()
 
+        # Reset the DRIVER's own command reference too.
+        #
+        # interbotix validates every command against `arm.joint_commands` --
+        # its last *accepted* command -- not against the measured position:
+        #     speed = |goal - joint_commands| / moving_time  >  velocity_limit
+        # When a command is rejected, `joint_commands` is never updated, so it
+        # stays frozen wherever it was.  Resyncing only our own bookkeeping
+        # therefore does nothing: the driver keeps measuring every new goal
+        # against a stale reference that may be radians away, rejects it, and
+        # the arm is stuck permanently.
+        #
+        # interbotix's own `capture_joint_positions()` does this, but it is dead
+        # code in this workspace: `import modern_robotics as mr` is commented
+        # out at the top of arm.py (as is `self.robot_des`), so its final
+        # `mr.FKinSpace(...)` line raises NameError.  We therefore set
+        # `joint_commands` directly -- that FK line only maintains `T_sb`,
+        # which nothing in this pipeline reads.
+        arm_iface = robots[arm].arm
+        try:
+            core = arm_iface.core
+            arm_iface.joint_commands = [
+                core.joint_states.position[core.js_index_map[name]]
+                for name in arm_iface.group_info.joint_names
+            ]
+        except Exception as exc:  # never let bookkeeping kill the session
+            print(f"[{arm}] could not reset driver joint_commands: {exc}")
+
         # Permit the next command immediately.
         cmd_state.last_arm_cmd_time[arm] = 0.0
 
     cmd_kin.q_cmd[:] = measured_q_full
 
     # Recompute end-effector poses from the synchronized joint configuration.
+    #
+    # q_cmd is in DRIVER coordinates, and the middle arm's waist is offset by pi
+    # between the driver and URDF frames.  Forward kinematics must therefore run
+    # on the converted vector -- the main control loop already does this via
+    # coupled_ik.driver_to_urdf().  Without it, T_cmd["middle"] lands pi away
+    # from where the camera arm actually is, so the first teleop command after a
+    # reset or a stale-state resync is computed against a bogus start pose.
+    q_for_fk = cmd_kin.q_cmd if to_urdf is None else to_urdf(cmd_kin.q_cmd)
     _, measured_ee = compute_fk_and_ee(
         robot,
-        cmd_kin.q_cmd,
+        q_for_fk,
         arm_data,
     )
 
@@ -176,6 +252,56 @@ def interpolate_to_pose(bot, arm, pose, moving_time=0.2, accel_time=0.1, blockin
 
     current_q = np.asarray(bot.dxl.joint_states.position[:len(pose)], dtype=float)
     target_q = np.asarray(pose, dtype=float)
+
+    # SAFETY GUARD (wrapped multiturn encoder): after a power cycle a
+    # multiturn joint (the middle waist, driver range [-6.35, 0]) can report
+    # its position wrapped into [-pi, pi] (e.g. physical -3.22 reads +3.06).
+    # Interpolating from the fictitious reading would command a full physical
+    # revolution and wind the cables.  If the reading is outside the driver's
+    # own limits, refuse to move this arm and tell the operator to re-home.
+    # A joint slightly past its soft limit (arm sagging in the cradle) is
+    # normal and safe to move FROM — interpolation just pulls it back in
+    # range.  Only a large excursion (comparable to a turn) means the
+    # encoder actually wrapped and moving would wind the cables.
+    WRAP_GUARD_MARGIN = 0.5  # rad
+    try:
+        lower = np.asarray(bot.arm.group_info.joint_lower_limits, dtype=float)
+        upper = np.asarray(bot.arm.group_info.joint_upper_limits, dtype=float)
+        excess = np.maximum(lower - current_q, current_q - upper)
+        slight = (excess > 1e-3) & (excess <= WRAP_GUARD_MARGIN)
+        wrapped = excess > WRAP_GUARD_MARGIN
+        names = list(bot.arm.group_info.joint_names)
+        for i in np.nonzero(slight)[0]:
+            print(f"[startup] {arm}: joint '{names[i]}' reads "
+                  f"{current_q[i]:+.3f}, {excess[i]:.3f} past driver limits "
+                  f"[{lower[i]:+.3f}, {upper[i]:+.3f}] — small excursion, "
+                  "moving back into range.")
+        if wrapped.any():
+            for i in np.nonzero(wrapped)[0]:
+                print(f"[SAFETY] {arm}: joint '{names[i]}' reads "
+                      f"{current_q[i]:+.3f}, {excess[i]:.3f} rad outside "
+                      f"driver limits [{lower[i]:+.3f}, {upper[i]:+.3f}] — "
+                      "encoder likely wrapped.")
+            print(f"[SAFETY] {arm}: SKIPPING startup move. Re-home / "
+                  "power-cycle the servo at an in-range orientation, then "
+                  "restart.")
+            return
+    except AttributeError:
+        pass  # group_info without limit fields: proceed as before
+
+    # FRAME-PROOF startup for the multiturn middle waist: the driver frame
+    # can boot 2pi-shifted, so move to the 2pi-equivalent of the target
+    # nearest to the current reading instead of sweeping a full turn.
+    if arm == "middle":
+        k = np.round((current_q[0] - target_q[0]) / (2 * np.pi))
+        if k != 0:
+            shifted = target_q[0] + 2 * np.pi * k
+            print(f"[frame] middle waist target {target_q[0]:+.3f} -> "
+                  f"{shifted:+.3f} (nearest 2pi-equivalent to current "
+                  f"{current_q[0]:+.3f})")
+            target_q = target_q.copy()
+            target_q[0] = shifted
+        delta = np.abs(target_q - current_q)
     # print("current:", np.round(current_q, 3))
     # print("target :", np.round(target_q, 3))
     # print("delta  :", np.round(target_q - current_q, 3))
@@ -211,12 +337,59 @@ def reset_arms(robots, pose_name=DEFAULT_RESET_POSE):
         reset_arm(bot, arm_name, pose_name)
 
 def stop_arm(bot):
-    bot.arm.set_joint_positions(
-        get_joint_positions(bot).tolist(),
-        moving_time=0.05,
-        accel_time=0.02,
-        blocking=False,
-    )
+    """Halt an arm in place. Torque stays on, so nothing drops.
+
+    moving_time is sized from the ACTUAL distance rather than fixed at
+    0.05 s.  interbotix validates every command (arm.py:check_joint_limits)
+    as
+
+        speed = |goal - self.joint_commands| / moving_time
+        if speed > joint_velocity_limits: return False
+
+    where joint_commands is the driver's last ACCEPTED command, not the
+    measured position -- so mid-motion that difference is the whole
+    remaining travel.  A fixed 0.05 s therefore asks for 4 rad/s to cancel
+    0.2 rad, gets refused against the 3.14 rad/s limit, and
+    set_joint_positions returns False rather than raising.  Nothing checked
+    that return value, so the stop silently did nothing in exactly the case
+    it was needed: a fast, large motion.
+
+    Sizing moving_time to the distance keeps every halt inside the limit.
+    The return value is checked, and the command escalated, so a refusal
+    can no longer pass unnoticed."""
+    n = len(bot.arm.group_info.joint_names)
+    measured = np.asarray(bot.arm.core.joint_states.position[:n], dtype=float)
+
+    ref = measured
+    getter = getattr(bot.arm, "get_joint_commands", None)
+    if getter is not None:
+        try:
+            ref = np.asarray(getter(), dtype=float)[:n]
+        except Exception:
+            pass
+
+    try:
+        vel = np.asarray(bot.arm.group_info.joint_velocity_limits,
+                         dtype=float)[:n]
+        vel = np.where(vel > 1e-6, vel, np.pi)
+    except Exception:
+        vel = np.full(n, np.pi)
+
+    # 0.7 of the limit leaves room for the driver's rounding to 3 decimals.
+    moving_time = max(
+        0.05,
+        float(np.max(np.abs(measured - ref) / np.maximum(0.7 * vel, 1e-6))))
+
+    for _ in range(4):
+        if bot.arm.set_joint_positions(
+                measured.tolist(), moving_time=moving_time,
+                accel_time=min(0.02, 0.5 * moving_time), blocking=False):
+            return True
+        moving_time *= 2.0
+
+    print("[SAFETY] stop_arm: the driver refused every halt command. "
+          "Kill the roslaunch or use the physical power switch.")
+    return False
 
 def stop_robots(robots):
     for bot in robots.values():
@@ -278,6 +451,8 @@ def safe_move_arm_joints(bot, target_q, total_time=3.0, step_time=0.25, accel_ra
         bot.arm.set_joint_positions(q_cmd.tolist(), moving_time=move_t, accel_time=accel_t, blocking=True)
 
 def build_robot_model(mode_idx):
+    if URDF is None or pk is None:
+        raise ImportError("yourdfpy and pyroki are required to build the robot model.")
     urdf = URDF.load(URDF_PATH)
     robot = pk.Robot.from_urdf(urdf)
 
@@ -293,12 +468,17 @@ def build_robot_model(mode_idx):
         # print("Expected joints:")
         # print(cfg["joint_names"])
 
+        joint_indices = [
+            robot.joints.actuated_names.index(name)
+            for name in cfg["joint_names"]
+        ]
+        # Per-arm position limits, used to keep commands inside what the driver
+        # will accept (it rejects the whole group command otherwise).
         arm_data[arm] = {
-            "joint_indices": [
-                robot.joints.actuated_names.index(name)
-                for name in cfg["joint_names"]
-            ],
+            "joint_indices": joint_indices,
             "ee_index": robot.links.names.index(cfg["ee_link"]),
+            "lower_limits": np.asarray(robot.joints.lower_limits, dtype=float)[joint_indices],
+            "upper_limits": np.asarray(robot.joints.upper_limits, dtype=float)[joint_indices],
         }
 
     return robot, arm_data
@@ -324,6 +504,37 @@ def build_robot_model(mode_idx):
 
 #     return robot, arm_data
 
+# Middle-waist frame shift, in radians, mirroring the servo's Homing_Offset
+# register (reported = actual + offset).  The pose tables in arm_config.py
+# store LEGACY driver values recorded with offset 0; when a Homing_Offset has
+# been written (set_waist_homing_offset.py), every commanded waist value must
+# shift by the same amount.  data_collection reads the register at startup and
+# calls set_middle_waist_shift(); 0.0 keeps historical behavior exactly.
+MIDDLE_WAIST_DRIVER_SHIFT = 0.0
+
+
+def set_middle_waist_shift(shift_rad):
+    global MIDDLE_WAIST_DRIVER_SHIFT
+    MIDDLE_WAIST_DRIVER_SHIFT = float(shift_rad)
+    if abs(MIDDLE_WAIST_DRIVER_SHIFT) > 1e-9:
+        print(f"[frame] middle waist Homing_Offset shift "
+              f"{MIDDLE_WAIST_DRIVER_SHIFT:+.3f} rad -- pose tables and "
+              "URDF offset adjusted to match")
+
+
+def read_middle_waist_shift(bot):
+    """Read the waist Homing_Offset from the servo, in radians (0.0 if unset)."""
+    try:
+        resp = bot.dxl.robot_get_motor_registers("single", "waist", "Homing_Offset")
+        ticks = int(resp.values[0]) if resp.values else 0
+        if ticks >= (1 << 31):
+            ticks -= 1 << 32
+        return ticks * 2.0 * np.pi / 4096.0
+    except Exception as exc:
+        print(f"[frame] could not read waist Homing_Offset ({exc}); assuming 0")
+        return 0.0
+
+
 # Return a named pose for an arm; raises ValueError if not defined.
 def get_pose(arm_name, pose_name):
     if pose_name not in POSES[arm_name]:
@@ -331,7 +542,11 @@ def get_pose(arm_name, pose_name):
             f"Pose '{pose_name}' not defined for arm '{arm_name}'"
         )
 
-    return POSES[arm_name][pose_name]
+    pose = POSES[arm_name][pose_name]
+    if arm_name == "middle" and abs(MIDDLE_WAIST_DRIVER_SHIFT) > 1e-9:
+        pose = np.asarray(pose, dtype=float).copy()
+        pose[0] += MIDDLE_WAIST_DRIVER_SHIFT  # waist is joint 0
+    return pose
 
 def compute_fk_and_ee(robot, q, arm_data):
     fk = robot.forward_kinematics(q)

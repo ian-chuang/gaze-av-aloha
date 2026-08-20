@@ -3,21 +3,33 @@ import argparse
 import time
 
 import numpy as np
-import rospy
 import torch
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.datasets import LeRobotDataset
+try:
+    import rospy
+except ImportError:
+    rospy = None
 
-from data_col_config import ARM_MODES, ACTION_LAYOUTS
-from arm_config import ARM_CONFIG
-
-from robot_control import (
-    create_and_configure_robot,
-    stop_robots,
-    replay_arm_command,
-    reset_arm,
-)
-
-from gripper import command_gripper
+if __package__:
+    from .data_col_config import ARM_MODES, ACTION_LAYOUTS
+    from .arm_config import ARM_CONFIG
+    from .robot_control import (
+        create_and_configure_robot,
+        stop_robots,
+        replay_arm_command,
+        reset_arm,
+    )
+    from .gripper import command_gripper
+else:
+    from data_col_config import ARM_MODES, ACTION_LAYOUTS
+    from arm_config import ARM_CONFIG
+    from robot_control import (
+        create_and_configure_robot,
+        stop_robots,
+        replay_arm_command,
+        reset_arm,
+    )
+    from gripper import command_gripper
 
 def to_numpy_1d(x):
     if isinstance(x, torch.Tensor):
@@ -72,6 +84,8 @@ def print_sample_summary(sample, mode):
             print(to_numpy_1d(sample[ts_key]))
 
 def main():
+    if rospy is None:
+        raise ImportError("rospy is required to replay episodes.")
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--mode",

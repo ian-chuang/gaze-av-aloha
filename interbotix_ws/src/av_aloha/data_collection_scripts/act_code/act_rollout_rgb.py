@@ -1,5 +1,17 @@
+import argparse
+import sys
+import warnings
 from pathlib import Path
 import time
+
+# silence ROS noetic's python2-era docstring SyntaxWarnings (py3.12)
+warnings.filterwarnings("ignore", message=r"invalid escape sequence",
+                        category=SyntaxWarning)
+
+for _ros in ("/opt/ros/noetic/lib/python3/dist-packages",
+             "/home/devi/giava/interbotix_ws/devel/lib/python3/dist-packages"):
+    if _ros not in sys.path:
+        sys.path.append(_ros)
 
 import cv2
 import numpy as np
@@ -11,10 +23,16 @@ from interbotix_xs_modules.arm import InterbotixManipulatorXS
 from interbotix_xs_msgs.msg import JointSingleCommand
 from interbotix_xs_msgs.srv import RegisterValues, RegisterValuesRequest
 
-from lerobot.common.datasets.lerobot_dataset import LeRobotDatasetMetadata
-from lerobot.common.datasets.utils import dataset_to_policy_features
-from lerobot.common.policies.act.configuration_act import ACTConfig
-from lerobot.common.policies.factory import make_policy
+from lerobot.datasets import LeRobotDatasetMetadata
+from lerobot.datasets.utils import dataset_to_policy_features
+from lerobot.policies.act.configuration_act import ACTConfig
+from lerobot.policies import make_policy
+from lerobot.policies.act.modeling_act import ACTPolicy
+from lerobot.processor import PolicyProcessorPipeline
+from lerobot.processor.converters import (
+    policy_action_to_transition,
+    transition_to_policy_action,
+)
 from lerobot.configs.types import FeatureType
 
 GRIPPER_CURRENT_LIMIT = 200
@@ -85,7 +103,15 @@ def make_observation(right_bot, pipelines, device):
         frame = get_color_frame(pipeline)
         if key == "observation.images.top_scene":
             frame = digital_zoom(frame)
-        frame = torch.from_numpy(frame).permute(2, 0, 1).float().unsqueeze(0).to(device)
+        # CHANGED: scale camera frames to [0, 1] to match training.
+        # LeRobotDataset yields images as float32 in [0, 1], so the normalization
+        # stats were computed on that range. This function previously produced
+        # float32 in [0, 255] via .float() on the raw uint8 frame, i.e. inputs
+        # 255x larger at rollout than at training time. See ACT_MODIFICATIONS.md.
+        frame = (
+            torch.from_numpy(frame).permute(2, 0, 1).float().div(255.0)
+            .unsqueeze(0).to(device)
+        )
         obs[key] = frame
 
     return obs
@@ -153,8 +179,32 @@ def load_policy(policy_dir, dataset_root, device):
         optimizer_lr_backbone=1e-5,
     )
 
-    policy = make_policy(cfg, ds_meta=dataset_metadata)
-    
+    # CHANGED (lerobot v0.6.0): load the policy and its normalization pipelines
+    # straight from a migrated checkpoint directory. Building a fresh policy and
+    # loading a raw .pt state dict no longer works: those state dicts still carry
+    # the old embedded `normalize_inputs.*` buffers, which the v0.6.0 model does
+    # not define, so a strict load fails.
+    #
+    # `policy_dir` must point at a directory produced by migrate_checkpoints.py
+    # (named "<original>_lerobot_v06"), which holds model.safetensors plus the
+    # policy_preprocessor / policy_postprocessor files.
+    policy = ACTPolicy.from_pretrained(policy_dir)
+
+    # The migrated pipelines serialize device_processor with the device used
+    # at migration time ("cpu"), which would silently move every observation
+    # OFF the GPU right before the cuda policy runs.  Retarget it here.
+    preprocessor = PolicyProcessorPipeline.from_pretrained(
+        policy_dir, config_filename="policy_preprocessor.json",
+        overrides={"device_processor": {"device": str(device)}},
+    )
+    # postprocessor keeps its saved device ("cpu"): send_action wants numpy.
+    # The action converters make it callable on the bare action tensor,
+    # matching upstream (lerobot factory / lerobot_eval).
+    postprocessor = PolicyProcessorPipeline.from_pretrained(
+        policy_dir, config_filename="policy_postprocessor.json",
+        to_transition=policy_action_to_transition,
+        to_output=transition_to_policy_action,
+    )
 
     print("image_features:", policy.config.image_features)
     print("state_feature:", policy.config.robot_state_feature)
@@ -165,26 +215,9 @@ def load_policy(policy_dir, dataset_root, device):
     print("input_features:", policy.config.input_features)
     print("output_features:", policy.config.output_features)
 
-    ckpt = torch.load(Path(policy_dir) / "checkpoint_2000.pt", map_location=device, weights_only=False)
-    state_dict = ckpt["policy_state_dict"] if "policy_state_dict" in ckpt else ckpt
-    # policy.load_state_dict(state_dict, strict=True)
-
-    missing, unexpected = policy.load_state_dict(
-        state_dict,
-        strict=True,
-    )
-
-    print("MISSING")
-    for k in missing:
-        print(k)
-
-    print("\nUNEXPECTED")
-    for k in unexpected:
-        print(k)
-
     policy.to(device)
     policy.eval()
-    return policy, dataset_metadata
+    return policy, preprocessor, postprocessor, dataset_metadata
 
 def reset_robot(right_bot):
     right_bot.arm.set_joint_positions(
@@ -205,19 +238,76 @@ def reset_robot(right_bot):
     rospy.sleep(1.0)
 
 
-def main():
-    dataset_root = Path("/home/devi/giava/interbotix_ws/src/av_aloha/data_collection_scripts/dataset/lerobot/transfer_flower/20260601_000935"
-        #"/home/devi/giava/interbotix_ws/src/av_aloha/data_collection_scripts/dataset/lerobot/grasp_cube/20260529_162433"
-        #"/home/devi/giava/interbotix_ws/src/av_aloha/data_collection_scripts/dataset/lerobot/block_square/20260528_131838"
+def resolve_policy_dir(path: Path) -> Path:
+    """Accept a migrated dir, a raw run dir, or a .pt file inside one, and
+    return the loadable (_lerobot_v06) directory — or exit with advice.
+
+    Only each run's FINAL model was migrated (model.safetensors next to
+    checkpoint.pt); intermediate checkpoint_<step>.pt snapshots have no
+    migrated twin and cannot be loaded by lerobot v0.6.0 directly."""
+    import json
+
+    if path.is_file():
+        print(f"[policy] {path.name} is a file — using its run directory. "
+              "NOTE: only the run's FINAL model is loadable; intermediate "
+              "step snapshots were not migrated.")
+        path = path.parent
+
+    def is_migrated(d: Path) -> bool:
+        # raw run dirs also have a config.json with "type"; only migrated
+        # dirs carry the processor pipelines from_pretrained needs
+        if not (d / "policy_preprocessor.json").is_file():
+            return False
+        try:
+            return json.load(open(d / "config.json")).get("type") is not None
+        except Exception:
+            return False
+
+    if is_migrated(path):
+        return path
+    twin = path.parent / f"{path.name}_lerobot_v06"
+    if twin.is_dir() and is_migrated(twin):
+        print(f"[policy] {path.name} is a raw checkpoint — "
+              f"using migrated twin {twin.name}")
+        return twin
+    sys.exit(
+        f"ERROR: {path} is not a loadable checkpoint directory and no "
+        f"migrated twin ({twin.name}) exists.\n"
+        "Run:  python ../migrate_checkpoints.py   (from "
+        "data_collection_scripts/) to create it, then pass the "
+        "*_lerobot_v06 directory."
     )
-    policy_dir = Path("outputs/act_transfer_flower")
-    rollout_seconds = 3
-    control_hz = 50
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Reset the right arm, then roll out an ACT checkpoint. "
+                    "policy-dir must be a migrated (_lerobot_v06) checkpoint "
+                    "directory — see migrate_checkpoints.py.")
+    parser.add_argument("--policy-dir", type=Path, required=True,
+                        help="migrated checkpoint dir (model.safetensors + "
+                             "policy_pre/postprocessor.json)")
+    parser.add_argument(
+        "--dataset-root", type=Path,
+        default=Path("/home/devi/giava/interbotix_ws/src/av_aloha/"
+                     "data_collection_scripts/dataset/lerobot/"
+                     "transfer_flower/20260601_000935"),
+        help="dataset the policy was trained on (metadata/fps)")
+    parser.add_argument("--seconds", type=float, default=3.0)
+    parser.add_argument("--hz", type=float, default=50.0)
+    args = parser.parse_args()
+
+    dataset_root = args.dataset_root
+    policy_dir = resolve_policy_dir(args.policy_dir)
+    rollout_seconds = args.seconds
+    control_hz = args.hz
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     rospy.init_node("act_rollout_test", anonymous=True)
 
-    policy, dataset_metadata = load_policy(policy_dir, dataset_root, device)
+    policy, preprocessor, postprocessor, dataset_metadata = load_policy(
+        policy_dir, dataset_root, device
+    )
 
     print("Policy expects image keys:", policy.config.image_features)
     print("Policy expects state keys:", policy.config.robot_state_feature)
@@ -265,11 +355,18 @@ def main():
                 #     if key in obs:
                 #         obs[key] = obs[key][:, [2, 1, 0], :, :]
 
-                output = policy.select_action(obs)
-                print("output information after output = policy.select_action(obs)")
-                print(type(output))
-                print(output.shape)
-                print(output)
+                # CHANGED (lerobot v0.6.0): normalization is external now, so the
+                # observation must go through the preprocessor before the policy
+                # sees it. Images must be float in [0, 1] first, matching training.
+                for cam_key in policy.config.image_features:
+                    if cam_key in obs and obs[cam_key].dtype == torch.uint8:
+                        obs[cam_key] = obs[cam_key].to(dtype=torch.float32) / 255.0
+
+                output = policy.select_action(preprocessor(obs))
+                # CRITICAL (lerobot v0.6.0): select_action returns actions in
+                # NORMALIZED space; the postprocessor's unnormalizer maps them
+                # back to joint radians.  Skipping it sends garbage commands.
+                output = postprocessor(output)
                 action_np = output.squeeze().cpu().numpy()
                 print("output information after action_np = output.squeeze().cpu().numpy()")
                 print(type(action_np))

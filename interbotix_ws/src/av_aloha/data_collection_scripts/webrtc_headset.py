@@ -1,31 +1,67 @@
-from google.cloud import firestore
 import json
 import asyncio
-from aiortc import (
-    RTCPeerConnection,
-    RTCSessionDescription,
-    VideoStreamTrack,
-    RTCConfiguration,
-    RTCIceServer,
-    RTCRtpSender
-)
-from aiortc import VideoStreamTrack
-from av import VideoFrame
+import importlib
 import numpy as np
 import queue
 import time
-from headset_utils import HeadsetData, HeadsetFeedback, convert_left_to_right_coordinates
 import os
 import threading
 import cv2
 
+try:
+    from google.cloud import firestore
+except ImportError:
+    firestore = None
+
+try:
+    from aiortc import (
+        RTCPeerConnection,
+        RTCSessionDescription,
+        VideoStreamTrack,
+        RTCConfiguration,
+        RTCIceServer,
+        RTCRtpSender,
+    )
+    from av import VideoFrame
+except ImportError:
+    RTCPeerConnection = None
+    RTCSessionDescription = None
+    VideoStreamTrack = object
+    RTCConfiguration = None
+    RTCIceServer = None
+    RTCRtpSender = None
+    VideoFrame = None
+
+if __package__:
+    from .headset_utils import HeadsetData, HeadsetFeedback, convert_left_to_right_coordinates
+else:
+    from headset_utils import HeadsetData, HeadsetFeedback, convert_left_to_right_coordinates
+
 def force_codec(pc, sender, forced_codec):
+    if RTCRtpSender is None:
+        raise ImportError("aiortc is required for WebRTC codec configuration.")
     kind = forced_codec.split("/")[0]
     codecs = RTCRtpSender.getCapabilities(kind).codecs
     transceiver = next(t for t in pc.getTransceivers() if t.sender == sender)
     transceiver.setCodecPreferences(
         [codec for codec in codecs if codec.mimeType == forced_codec]
     )
+
+## aiortc's VP8 encoder is hard-capped at 1.5 Mbps (aiortc/codecs/vpx.py:
+## MAX_BITRATE) -- shared across TWO 1280x800@25 streams that is ~0.06 bits per
+## pixel, which is exactly the smeared / "not fully formed" look on the
+## headset.  Raise the cap; local WiFi to the headset handles tens of Mbps.
+import os as _os
+_HEADSET_BITRATE = int(float(_os.environ.get("GIAVA_HEADSET_BITRATE", 8e6)))
+try:
+    from aiortc.codecs import vpx as _vpx
+    _vpx.DEFAULT_BITRATE = _HEADSET_BITRATE
+    _vpx.MAX_BITRATE = _HEADSET_BITRATE
+    print(f"[headset] VP8 bitrate cap {_HEADSET_BITRATE / 1e6:.1f} Mbps "
+          f"(GIAVA_HEADSET_BITRATE to change)")
+except Exception as _e:
+    print(f"[headset] could not raise VP8 bitrate cap: {_e}")
+
 
 class BufferVideoStreamTrack(VideoStreamTrack):
     def __init__(self, buffer_size=1, image_format="gray", max_fps=30):
@@ -50,6 +86,8 @@ class BufferVideoStreamTrack(VideoStreamTrack):
         
 
     async def recv(self):
+        if VideoFrame is None:
+            raise ImportError("av is required for WebRTC video streaming.")
         pts, time_base = await self.next_timestamp()
         frame = await self.get_frame()
         # convert to gray scale
@@ -83,11 +121,22 @@ class WebRTCHeadset:
         video_buffer_size=1,
         data_buffer_size=1,
         send_data_freq=10,
-    ):        
+    ):
+        firestore_module = firestore
+        if firestore_module is None:
+            try:
+                firestore_module = importlib.import_module("google.cloud.firestore")
+            except ImportError as exc:
+                raise ImportError("google-cloud-firestore is required for WebRTC headset signaling.") from exc
+
+        if firestore_module is None:
+            raise ImportError("google-cloud-firestore is required for WebRTC headset signaling.")
+        if RTCPeerConnection is None or RTCConfiguration is None or RTCIceServer is None:
+            raise ImportError("aiortc is required for WebRTC headset signaling.")
         # create firestore client
         with open(serviceAccountKeyFile) as f:
             serviceAccountKey = json.load(f)
-        self.db = firestore.Client.from_service_account_info(serviceAccountKey)
+        self.db = firestore_module.Client.from_service_account_info(serviceAccountKey)
 
         # load signaling settings
         with open(signalingSettingsFile) as f:
@@ -254,12 +303,12 @@ class WebRTCHeadset:
         self.channel.on("message", self.on_message)       
 
         # create video track
-        self.left_video_track = BufferVideoStreamTrack(buffer_size=self.video_buffer_size)
+        self.left_video_track = BufferVideoStreamTrack(buffer_size=self.video_buffer_size, image_format="bgr24")
         self.left_video_sender = self.pc.addTrack(self.left_video_track)
         force_codec(self.pc, self.left_video_sender, 'video/H264')
 
         # create video track
-        self.right_video_track = BufferVideoStreamTrack(buffer_size=self.video_buffer_size)
+        self.right_video_track = BufferVideoStreamTrack(buffer_size=self.video_buffer_size, image_format="bgr24")
         self.right_video_sender = self.pc.addTrack(self.right_video_track)
         force_codec(self.pc, self.right_video_sender, 'video/H264')
 

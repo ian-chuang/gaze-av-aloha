@@ -34,16 +34,16 @@ from pyroki.collision import RobotCollision
 
 STRUCTURAL_LINKS = {
     # links appearing in the 12 permanently-inside-margin pairs
-    "leftbase_link", "leftupper_arm_link", "rightbase_link",
-    "rightupper_arm_link", "middlebase_link", "middleupper_arm_link",
-    "leftwrist_link", "leftgripper_base", "rightwrist_link",
-    "rightgripper_base", "leftlower_forearm_link", "rightlower_forearm_link",
-    "middlecamera_body", "middlecamera_cover", "middlepan_link",
-    "middlewrist_link", "middlelower_forearm_link",
+    "left_base_link", "left_upper_arm_link", "right_base_link",
+    "right_upper_arm_link", "middle_base_link", "middle_upper_arm_link",
+    "left_wrist_link", "left_gripper_base", "right_wrist_link",
+    "right_gripper_base", "left_lower_forearm_link", "right_lower_forearm_link",
+    "middle_camera_body", "middle_camera_cover", "middle_pan_link",
+    "middle_wrist_link", "middle_lower_forearm_link",
 }
 FINGER_LINKS = {
-    "leftleft_finger_link", "leftright_finger_link",
-    "rightleft_finger_link", "rightright_finger_link",
+    "left_left_finger_link", "left_right_finger_link",
+    "right_left_finger_link", "right_right_finger_link",
 }
 
 

@@ -44,9 +44,9 @@ from transform_utils import (
 
 URDF_PATH = "/home/devi/giava/giava.urdf"
 
-LEFT_EE_LINK = "leftgripper_base"
-RIGHT_EE_LINK = "rightgripper_base"
-MIDDLE_EE_LINK = "middlepan_link"
+LEFT_EE_LINK = "left_gripper_base"
+RIGHT_EE_LINK = "right_gripper_base"
+MIDDLE_EE_LINK = "middle_pan_link"
 
 CONTROL_DT = 0.05
 
@@ -174,21 +174,21 @@ def main():
     # ========================================================
 
     LEFT_ARM_NAMES = [
-        "leftwaist",
-        "leftshoulder",
-        "leftelbow",
-        "leftforearm_roll",
-        "leftwrist_angle",
-        "leftwrist_rotate",
+        "left_waist",
+        "left_shoulder",
+        "left_elbow",
+        "left_forearm_roll",
+        "left_wrist_angle",
+        "left_wrist_rotate",
     ]
 
     RIGHT_ARM_NAMES = [
-        "rightwaist",
-        "rightshoulder",
-        "rightelbow",
-        "rightforearm_roll",
-        "rightwrist_angle",
-        "rightwrist_rotate",
+        "right_waist",
+        "right_shoulder",
+        "right_elbow",
+        "right_forearm_roll",
+        "right_wrist_angle",
+        "right_wrist_rotate",
     ]
 
     # MIDDLE_ARM_NAMES = [
@@ -201,13 +201,13 @@ def main():
     # ]
 
     MIDDLE_ARM_NAMES = [
-        "middlebase_link",
-        "middleshoulder_link",
-        "middleupper_arm_link",
-        "middleupper_forearm_link",
-        "middlelower_forearm_link",
-        "middlewrist_link",
-        "middlepan_link",
+        "middle_base_link",
+        "middle_shoulder_link",
+        "middle_upper_arm_link",
+        "middle_upper_forearm_link",
+        "middle_lower_forearm_link",
+        "middle_wrist_link",
+        "middle_pan_link",
     ]
 
     left_arm_indices = [

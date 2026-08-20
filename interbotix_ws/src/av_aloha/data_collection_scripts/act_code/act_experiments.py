@@ -8,11 +8,12 @@ import torch
 from torch.utils.data import DataLoader, Subset, ConcatDataset
 
 from lerobot.configs.types import FeatureType
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
-from lerobot.common.datasets.utils import dataset_to_policy_features
-from lerobot.common.policies.factory import make_policy
-from lerobot.common.policies.act.configuration_act import ACTConfig
-from lerobot.common.datasets.compute_stats import compute_episode_stats
+from lerobot.datasets import LeRobotDataset, LeRobotDatasetMetadata
+from lerobot.datasets.utils import dataset_to_policy_features
+from lerobot.policies import make_policy
+from lerobot.policies.factory import make_pre_post_processors
+from lerobot.policies.act.configuration_act import ACTConfig
+from lerobot.datasets.compute_stats import compute_episode_stats
 
 import cv2
 import numpy as np
@@ -670,6 +671,15 @@ def train_one_run(
     )
 
     policy = make_policy(cfg, ds_meta=dataset_metadata)
+
+    # CHANGED (lerobot v0.6.0): policies no longer carry normalization layers in
+    # their weights. Normalization lives in an external processor pipeline built
+    # from the dataset stats, and must be applied to every batch before
+    # policy.forward(). See ACT_MODIFICATIONS.md.
+    preprocessor, postprocessor = make_pre_post_processors(
+        policy_cfg=cfg,
+        dataset_stats=dataset_metadata.stats,
+    )
     policy.train()
     policy.to(device)
 
@@ -710,6 +720,15 @@ def train_one_run(
                 save_debug_views(run_dir, variant, batch_before, batch, declared_input_keys, sample_idx=0)
                 print(f"[DEBUG] Wrote debug files to {run_dir / 'debug_first_batch'}")
                 debug_saved = True
+
+            # CHANGED (lerobot v0.6.0): images arrive as uint8 and the normalizer
+            # expects float in [0, 1], then the preprocessor applies the mean/std
+            # normalization that used to live inside the policy.
+            for cam_key in cfg.image_features:
+                if cam_key in batch and batch[cam_key].dtype == torch.uint8:
+                    batch[cam_key] = batch[cam_key].to(dtype=torch.float32) / 255.0
+
+            batch = preprocessor(batch)
 
             loss, loss_dict = policy.forward(batch)
 
@@ -771,6 +790,12 @@ def train_one_run(
                 break
 
     policy.save_pretrained(run_dir)
+
+    # CHANGED (lerobot v0.6.0): normalization stats now live in the processor
+    # pipelines rather than the model weights, so they must be saved next to the
+    # policy. Without these the checkpoint cannot be run at rollout time.
+    preprocessor.save_pretrained(run_dir)
+    postprocessor.save_pretrained(run_dir)
 
     final_ckpt_path = run_dir / "checkpoint.pt"
     torch.save(

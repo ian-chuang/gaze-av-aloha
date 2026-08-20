@@ -25,7 +25,7 @@ class BimanualIKController:
 
         self.q = _solve_ik_with_multiple_targets(
             self.robot,
-            ["leftgripper_base", "rightgripper_base"],
+            ["left_gripper_base", "right_gripper_base"],
             target_wxyzs,
             target_positions,
             q_prev=self.q,

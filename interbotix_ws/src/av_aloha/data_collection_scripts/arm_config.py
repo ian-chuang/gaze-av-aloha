@@ -6,13 +6,18 @@ import numpy as np
 
 URDF_PATH = "/home/devi/giava/giava.urdf"
 
-RIGHT_EE_LINK = "rightgripper_base"
-LEFT_EE_LINK = "leftgripper_base"
-MIDDLE_EE_LINK = "middlepan_link"
+RIGHT_EE_LINK = "right_gripper_base"
+LEFT_EE_LINK = "left_gripper_base"
+# Must be DOWNSTREAM of the 'middle_pan' joint (chain: middle_pan_link ->
+# [pan] -> middle_camera -> middle_camera_cover): the IK pose cost can only
+# control the camera-yaw motor if the tracked link is after it.  With
+# middle_pan_link the pan joint was invisible to IK and the centering cost
+# dragged it ~180 deg.  middle_camera_cover is what ik_study benchmarked.
+MIDDLE_EE_LINK = "middle_camera_cover"
 
-LEFT_ARM_JOINT_NAMES = ["leftwaist", "leftshoulder", "leftelbow", "leftforearm_roll", "leftwrist_angle", "leftwrist_rotate"]
-RIGHT_ARM_JOINT_NAMES = ["rightwaist", "rightshoulder", "rightelbow", "rightforearm_roll", "rightwrist_angle", "rightwrist_rotate"]
-MIDDLE_ARM_JOINT_NAMES = ['middlebase', 'middleshoulder', 'middleupper_arm', 'middleupper_forearm', 'middlelower_forearm', 'middlewrist', 'middlepan']
+LEFT_ARM_JOINT_NAMES = ["left_waist", "left_shoulder", "left_elbow", "left_forearm_roll", "left_wrist_angle", "left_wrist_rotate"]
+RIGHT_ARM_JOINT_NAMES = ["right_waist", "right_shoulder", "right_elbow", "right_forearm_roll", "right_wrist_angle", "right_wrist_rotate"]
+MIDDLE_ARM_JOINT_NAMES = ['middle_base', 'middle_shoulder', 'middle_upper_arm', 'middle_upper_forearm', 'middle_lower_forearm', 'middle_wrist', 'middle_pan']
 # MIDDLE_ARM_JOINT_NAMES = ['waist', 'shoulder', 'elbow', 'forearm_roll', 'wrist_angle', 'camera_roll']
 
 # Configuration for each arm, including robot name, model, joint names, and end-effector link.
@@ -56,14 +61,16 @@ REST = np.array([0.0, -1.9, 1.635, 0.0, 0.7, 0.0], dtype=float)
 
 DEFAULT_RESET_POSE = "forward"
 
-M_HIGH = np.array([-3.1185829639434814, -0.13345633447170258, -0.7240389585494995, 0.0, 2.112116756439209, 1.6428934335708618, 2.3], dtype=float)
-M_LOW = np.array([-3.130854845046997, -1.3959225416183472, 1.087592363357544, -0.05675728991627693, 0.6856894493103027, 1.6444274187088013, 2.3], dtype=float)
-M_FORWARD = np.array([-3.0986413955688477, -1.310019612312317, 0.8805050253868103, -0.07516506314277649, 0.5307573676109314, 1.6428934335708618, 2.3], dtype=float)
-M_REST = np.array([-3.1323888301849365, -1.8944662809371948, 1.5938060283660889, -0.09357283264398575, 0.725572943687439, 1.5800002813339233, 2.3], dtype=float)
+M_HIGH = np.array([3.1185829639434814, -0.13345633447170258, -0.7240389585494995, 0.0, 2.112116756439209, 1.6428934335708618, 2.3], dtype=float)
+M_LOW = np.array([3.130854845046997, -1.3959225416183472, 1.087592363357544, -0.05675728991627693, 0.6856894493103027, 1.6444274187088013, 2.3], dtype=float)
+M_FORWARD = np.array([3.09, -1.31, 0.88, -0.07, 0.53, 1.64, 2.30], dtype=float)  # canonical forward (2026-08)
+M_REST = np.array([3.1323888301849365, -1.8944662809371948, 1.5938060283660889, -0.09357283264398575, 0.725572943687439, 1.5800002813339233, 2.3], dtype=float)
+#M_REST = np.array([3.097107410430908, -1.8392430543899536, 1.5968739986419678, -0.07209710031747818, 0.7025632262229919, 1.6168158054351807, 2.3331849575042725], dtype=float)
 
-M_FAR_SCENE = np.array([-3.15079665184021, -1.4695535898208618, -0.49087387323379517, -0.01840776950120926, 2.112116756439209, 1.7241944074630737, 2.3], dtype=float)
-M_LOOKING_LEFT = np.array([-4.178563594818115, 0.6366020441055298, 0.04908738657832146, 1.3054176568984985, 1.8545827865600586, -0.6427379846572876, 2.3], dtype=float)
-M_LOOKING_RIGHT = np.array([-2.113825559616089, 0.771592378616333, -0.31139811873435974, 1.7272623777389526, -1.7717478275299072, 0.5629709362983704, 2.3], dtype=float)
+
+M_FAR_SCENE = np.array([3.15079665184021, -1.4695535898208618, -0.49087387323379517, -0.01840776950120926, 2.112116756439209, 1.7241944074630737, 2.3], dtype=float)
+M_LOOKING_LEFT = np.array([4.178563594818115, 0.6366020441055298, 0.04908738657832146, 1.3054176568984985, 1.8545827865600586, -0.6427379846572876, 2.3], dtype=float)
+M_LOOKING_RIGHT = np.array([2.113825559616089, 0.771592378616333, -0.31139811873435974, 1.7272623777389526, -1.7717478275299072, 0.5629709362983704, 2.3], dtype=float)
 
 POSES = {
     "left": {"high": HIGH, "forward": FORWARD, "rest": REST, "low": LOW},

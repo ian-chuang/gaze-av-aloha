@@ -26,8 +26,8 @@ Why the naive setup misbehaves (and what this script does about it)
 ------------------------------------------------------------------
 1. `RobotCollision.from_urdf` fits ONE capsule per link around the whole
    collision mesh. On this robot that makes 11 link pairs overlap in *every*
-   reachable configuration (e.g. `leftbase_link` vs `leftupper_arm_link`,
-   `middlecamera_body` vs `middlecamera_cover`). Any nonzero self-collision
+   reachable configuration (e.g. `left_base_link` vs `left_upper_arm_link`,
+   `middle_camera_body` vs `middle_camera_cover`). Any nonzero self-collision
    weight then fights a battle it can never win and drags the arms off target.
    `auto_ignore_pairs()` samples the configuration space at startup and prunes
    pairs that are in collision essentially always -- those are modeling
@@ -108,9 +108,9 @@ class ArmSpec(NamedTuple):
 
 
 ARMS = (
-    ArmSpec("left", "leftgripper_base", "left", (80, 170, 255)),
-    ArmSpec("right", "rightgripper_base", "right", (255, 140, 90)),
-    ArmSpec("middle", "middlecamera_cover", "middle", (150, 255, 140)),
+    ArmSpec("left", "left_gripper_base", "left", (80, 170, 255)),
+    ArmSpec("right", "right_gripper_base", "right", (255, 140, 90)),
+    ArmSpec("middle", "middle_camera_cover", "middle", (150, 255, 140)),
 )
 NUM_ARMS = len(ARMS)
 

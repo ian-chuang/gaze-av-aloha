@@ -1,0 +1,45 @@
+{
+  "_README": [
+    "Operator-maintained CALIBRATED camera mount transforms (PHASE 3).",
+    "",
+    "This file is the ONLY place a measured/calibrated end-effector-to-camera",
+    "transform should live. Anything not listed here falls back to the NOMINAL",
+    "values derived from giava.urdf / the MuJoCo model in camera_mount.py,",
+    "which have never been validated against the physical rig.",
+    "",
+    "Nothing is filled in yet: GIAVA contains no hand-eye calibration.",
+    "",
+    "TO ADD A CALIBRATED TRANSFORM:",
+    "  Add an entry under 'cameras' keyed by the camera name used in",
+    "  camera_manager.CAMERA_SERIALS (left_wrist, right_wrist, top_scene,",
+    "  low_scene, oak_left, oak_right), following the schema below. Then",
+    "    python calibration/camera_mount.py --camera left_wrist",
+    "  will report it as CALIBRATED instead of nominal."
+  ],
+
+  "_SCHEMA": {
+    "rigid_to": "URDF link the camera is bolted to, e.g. 'left_gripper_base'. For a static room camera use 'base' (the world frame) and give T_world_camera.",
+    "matrix_4x4_row_major": "T_<rigid_to>_<camera>, row-major 4x4. Maps points from the CAMERA optical frame into the <rigid_to> frame; equivalently it IS the camera's pose expressed in <rigid_to>. Metres.",
+    "provenance": "'calibrated' for a real measurement. Free text describing the method is encouraged, e.g. 'calibrated:charuco_handeye_2026-08-20'.",
+    "validated": "true only once the number has been checked against a physical measurement.",
+    "optical_frame_convention": "Must be OpenCV: +x image-right, +y image-down, +z along the viewing axis. Convert before writing if your tool uses another.",
+    "rms_error": "optional, the residual the calibration reported",
+    "n_samples": "optional, how many robot poses / board views went in",
+    "note": "optional free text: date, operator, board used, anything a future reader needs"
+  },
+
+  "_EXAMPLE_DO_NOT_USE": {
+    "rigid_to": "left_gripper_base",
+    "matrix_4x4_row_major": [
+      [1.0, 0.0, 0.0, 0.0],
+      [0.0, 1.0, 0.0, 0.0],
+      [0.0, 0.0, 1.0, 0.0],
+      [0.0, 0.0, 0.0, 1.0]
+    ],
+    "provenance": "calibrated:example",
+    "validated": false,
+    "note": "Identity placeholder showing the shape only. Keys starting with '_' are ignored by the loader."
+  },
+
+  "cameras": {}
+}

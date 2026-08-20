@@ -4,7 +4,7 @@
     <color rgba="0.15 0.15 0.15 1" />
   </material>
   <link name="base" />
-  <link name="middlebase_link">
+  <link name="middle_base_link">
     <inertial>
       <origin xyz="2.995596892723788e-07 0.03198516362439758 0.026450259235056835" rpy="0.0 0.0 0.0" />
       <mass value="7.661178396474684" />
@@ -27,14 +27,14 @@
       </geometry>
     </collision>
   </link>
-  <joint name="middlebase" type="revolute">
+  <joint name="middle_base" type="revolute">
     <origin xyz="0.0 0.0 0.069" rpy="0.0 -0.0 -1.5707963267948963" />
     <limit effort="10" lower="-3.141582653589793" upper="3.141582653589793" velocity="3.141592653589793"/>
-    <parent link="middlebase_link" />
-    <child link="middleshoulder_link" />
+    <parent link="middle_base_link" />
+    <child link="middle_shoulder_link" />
     <axis xyz="0.0 0.0 1.0" />
   </joint>
-  <link name="middleshoulder_link">
+  <link name="middle_shoulder_link">
     <inertial>
       <origin xyz="2.638334412459432e-15 2.3631305677262664e-10 0.02247423507612199"
         rpy="0.0 -0.0 0.0" />
@@ -60,14 +60,14 @@
       </geometry>
     </collision>
   </link>
-  <joint name="middleshoulder" type="revolute">
+  <joint name="middle_shoulder" type="revolute">
     <origin xyz="0.0 0.013999999999999999 0.04125" rpy="-0.0 -1.5707963267948966 0" />
     <limit effort="20" lower="-1.8849555921538759" upper="1.9896753472735358" velocity="3.141592653589793"/>
-    <parent link="middleshoulder_link" />
-    <child link="middleupper_arm_link" />
+    <parent link="middle_shoulder_link" />
+    <child link="middle_upper_arm_link" />
     <axis xyz="0.0 -1.0 0.0" />
   </joint>
-  <link name="middleupper_arm_link">
+  <link name="middle_upper_arm_link">
     <inertial>
       <origin xyz="0.1787141203571192 -0.013999999796360843 -0.015197582064194772"
         rpy="0.0 -0.0 0.0" />
@@ -93,15 +93,15 @@
       </geometry>
     </collision>
   </link>
-  <joint name="middleupper_arm" type="revolute">
+  <joint name="middle_upper_arm" type="revolute">
     <origin xyz="0.25 0.0 -0.05"
       rpy="2.1791458186645653e-52 -1.4349296274686127e-42 2.8698592549372254e-42" />
     <limit effort="15" lower="-2.1467549799530254" upper="1.6057029118347832" velocity="3.141592653589793"/>
-    <parent link="middleupper_arm_link" />
-    <child link="middleupper_forearm_link" />
+    <parent link="middle_upper_arm_link" />
+    <child link="middle_upper_forearm_link" />
     <axis xyz="-2.8698592549372254e-42 -1.0 -2.1791458186645675e-52" />
   </joint>
-  <link name="middleupper_forearm_link">
+  <link name="middle_upper_forearm_link">
     <inertial>
       <origin xyz="-8.438882420946925e-06 -0.013730493948962372 -0.07838536036114484"
         rpy="-8.236092143148846e-84 -0.0 0.0" />
@@ -127,14 +127,14 @@
       </geometry>
     </collision>
   </link>
-  <joint name="middleupper_forearm" type="revolute">
+  <joint name="middle_upper_forearm" type="revolute">
     <origin xyz="0.0 -0.013499999999999998 -0.1718" rpy="1.5707963267948966 1.5707963267948966 0" />
     <limit effort="2" lower="-3.141582653589793" upper="3.141582653589793" velocity="3.141592653589793"/>
-    <parent link="middleupper_forearm_link" />
-    <child link="middlelower_forearm_link" />
+    <parent link="middle_upper_forearm_link" />
+    <child link="middle_lower_forearm_link" />
     <axis xyz="1.0 -1.4349296274686127e-42 2.1791458186645653e-52" />
   </joint>
-  <link name="middlelower_forearm_link">
+  <link name="middle_lower_forearm_link">
     <inertial>
       <origin xyz="0.0404982603993296 -8.874855694784856e-10 -0.005328579137066185"
         rpy="0.0 -0.0 0.0" />
@@ -160,14 +160,14 @@
       </geometry>
     </collision>
   </link>
-  <joint name="middlelower_forearm" type="revolute">
+  <joint name="middle_lower_forearm" type="revolute">
     <origin xyz="0.0782 0.0 0.019100000000000002" rpy="1.5707963267949763 -0.0 1.5707963267948966" />
     <limit effort="5" lower="-1.7453292519943295" upper="2.1467549799530254" velocity="3.141592653589793"/>
-    <parent link="middlelower_forearm_link" />
-    <child link="middlewrist_link" />
+    <parent link="middle_lower_forearm_link" />
+    <child link="middle_wrist_link" />
     <axis xyz="2.8698592549372254e-42 -1.0 7.97360475549766e-14" />
   </joint>
-  <link name="middlewrist_link">
+  <link name="middle_wrist_link">
     <inertial>
       <origin xyz="0.011530345426185277 -0.019000029282140393 0.04368798760668199"
         rpy="-8.236092143147533e-84 -0.0 0.0" />
@@ -193,15 +193,15 @@
       </geometry>
     </collision>
   </link>
-  <joint name="middlewrist" type="revolute">
+  <joint name="middle_wrist" type="revolute">
     <origin xyz="-1.7053025658242404e-15 -0.01899999999999482 0.06500000000000149"
       rpy="-1.570796326794897 -1.5707963267948128 0" />
     <limit effort="1" lower="-3.141592653589793" upper="3.141592653589793" velocity="3.141592653589793"/>
-    <parent link="middlewrist_link" />
-    <child link="middlepan_link" />
+    <parent link="middle_wrist_link" />
+    <child link="middle_pan_link" />
     <axis xyz="1.0 -1.4349446804892014e-42 1.6339707364920764e-13" />
   </joint>
-  <link name="middlepan_link">
+  <link name="middle_pan_link">
     <inertial>
       <origin xyz="0.025329919807700208 0.017821842117914315 -4.549908951095583e-06"
         rpy="0.0 -4.381005590603142e-58 0.0" />
@@ -227,15 +227,15 @@
       </geometry>
     </collision>
   </link>
-  <joint name="middlepan" type="revolute">
+  <joint name="middle_pan" type="revolute">
     <origin xyz="0.04125 0.03725000000000001 1.1379786002407855e-17"
       rpy="-1.5707963267948963 2.5199808612277694e-29 -1.4272358353620772e-42" />
     <limit effort="1" lower="-3.141592653589793" upper="3.141592653589793" velocity="3.141592653589793"/>
-    <parent link="middlepan_link" />
-    <child link="middlecamera" />
+    <parent link="middle_pan_link" />
+    <child link="middle_camera" />
     <axis xyz="0.0 -6.162975822039155e-33 1.0" />
   </joint>
-  <link name="middlecamera">
+  <link name="middle_camera">
     <inertial>
       <origin xyz="4.0500935938325715e-15 0.006497257878323726 0.0057880926283914395"
         rpy="0.0 -0.0 0.0" />
@@ -261,12 +261,12 @@
       </geometry>
     </collision>
   </link> 
-  <joint name="base_middlebase_link_fixed" type="fixed">
+  <joint name="base_middle_base_link_fixed" type="fixed">
     <parent link="base" />
-    <child link="middlebase_link" />
+    <child link="middle_base_link" />
     <origin xyz="-0.0 0.4 0.020000" rpy="0.000000 0.000000 0.000000" />
   </joint>
-  <link name="middlecamera_body">
+  <link name="middle_camera_body">
     <inertial>
       <origin xyz="-0.017 -0.055 0.02" rpy="0.0 0.0 1.5708"/>
       <mass value="0.04595740741006651" />
@@ -287,12 +287,12 @@
       </geometry>
     </collision>
   </link>
-  <joint name="middlecamera_body_fixed" type="fixed">
-    <parent link="middlecamera"/>
-    <child link="middlecamera_body"/>
+  <joint name="middle_camera_body_fixed" type="fixed">
+    <parent link="middle_camera"/>
+    <child link="middle_camera_body"/>
     <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0"/>
   </joint>
-  <link name="middlecamera_cover">
+  <link name="middle_camera_cover">
     <inertial>
       <origin xyz="-0.017 -0.055 0.02" rpy="0.0 0.0 1.5708"/>
       <mass value="0.04595740741006651" />
@@ -313,9 +313,9 @@
       </geometry>
     </collision>
   </link>
-  <joint name="middlecamera_cover_fixed" type="fixed">
-    <parent link="middlecamera"/>
-    <child link="middlecamera_cover"/>
+  <joint name="middle_camera_cover_fixed" type="fixed">
+    <parent link="middle_camera"/>
+    <child link="middle_camera_cover"/>
     <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0"/>
   </joint>
 </robot>

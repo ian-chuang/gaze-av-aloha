@@ -1,164 +1,164 @@
+"""Standalone OAK -> headset streaming test.
+
+Minimal end-to-end check of the exact camera + headset path data_collection
+uses: same WebRTCHeadset (local webrtc_headset.py, bgr24 color tracks), same
+OAK pipeline (OV9782 COLOR fix, RGB888p 640x480 @ 25 fps).
+
+Requires depthai==3.5.0 (environment.yml pin): depthai >= 3.6 ships RVC2
+firmware that heap-crashes this device on any stream configuration.
+
+(Previously imported gym_av_aloha.vr.headset, which fails on python 3.12 —
+mutable-default dataclasses — and is a different implementation from the one
+data_collection uses anyway.)
+
+    python oak_to_headset.py
+
+Prints the device list and USB hints before starting, then a once-per-second
+FPS line while streaming.  On X_LINK errors it reports and rebuilds the
+pipeline instead of exiting.  Ctrl+C to quit.
+"""
+
+from __future__ import annotations
+
+import sys
 import time
-import depthai as dai
-import numpy as np
-import cv2
+from pathlib import Path
 
-from gym_av_aloha.vr.headset import Headset
+_HERE = Path(__file__).resolve().parent
+if str(_HERE) not in sys.path:
+    sys.path.insert(0, str(_HERE))
 
-FPS = 25
-WIDTH, HEIGHT = 640, 480
+import cv2  # noqa: E402
+import depthai as dai  # noqa: E402
 
-# --- Headset ---
-headset = Headset()
-headset.run_in_thread()
+from webrtc_headset import WebRTCHeadset  # noqa: E402
+import camera_manager as cm  # noqa: E402
+from camera_manager import compose_eye_view, oak_stream_settings  # noqa: E402
 
-# --- DepthAI pipeline ---
-pipeline = dai.Pipeline()
-
-cam_left = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_B)
-# FIX OV9782/OV9282: force CAM_B to COLOR because this device reports OV9282
-# for an OV9782-class sensor, which leads to mono/grid artifacts.
-cam_left.setSensorType(dai.CameraSensorType.COLOR)
-left_out = cam_left.requestOutput(
-    size=(WIDTH, HEIGHT),
-    type=dai.ImgFrame.Type.RGB888p,
-    fps=FPS,
-)
-
-cam_right = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_C)
-# FIX OV9782/OV9282: force CAM_C to COLOR for the same misdetection reason.
-cam_right.setSensorType(dai.CameraSensorType.COLOR)
-right_out = cam_right.requestOutput(
-    size=(WIDTH, HEIGHT),
-    type=dai.ImgFrame.Type.RGB888p,
-    fps=FPS,
-)
-
-q_left = left_out.createOutputQueue()
-q_right = right_out.createOutputQueue()
-
-pipeline.start()
-
-print("Streaming OAK cameras to headset...")
-
-# --- Main loop ---
-while True:
-    start = time.time()
-
-    left_msg = q_left.get()
-    right_msg = q_right.get()
-
-    if left_msg is None or right_msg is None:
-        continue
-
-    left_frame = left_msg.getCvFrame()
-    right_frame = right_msg.getCvFrame()
-    left_frame = cv2.cvtColor(left_msg.getCvFrame(), cv2.COLOR_BGR2RGB)
-    right_frame = cv2.cvtColor(right_msg.getCvFrame(), cv2.COLOR_BGR2RGB)
-
-    if left_frame is None or right_frame is None:
-        continue
-
-    # ensure correct format
-    if left_frame.dtype != np.uint8:
-        left_frame = left_frame.astype(np.uint8)
-    if right_frame.dtype != np.uint8:
-        right_frame = right_frame.astype(np.uint8)
-
-    # --- SEND TO HEADSET ---
-    headset.send_left_image(left_frame, 0)
-    headset.send_right_image(right_frame, 0)
-
-    # --- FPS control ---
-    dt = time.time() - start
-    time.sleep(max(0, 1.0 / FPS - dt))
+WIDTH, HEIGHT, FPS = oak_stream_settings()
 
 
+def tuning_thread() -> None:
+    """Live stereo-comfort tuning from stdin while streaming.
 
-# # Stream video from your OAK camera to the headset and overlay controller pose (relative to headset frame) as text.
+    a/z = image bigger/smaller, k/m = images closer together / farther
+    apart (each +Enter).  Or set directly: 's 0.55', 'i 0.12'.
+    Prints paste-ready lines for camera_manager.py after every change."""
+    import threading
 
-# import depthai as dai
-# import time
-# import cv2
-# import numpy as np
-# from webrtc_headset import WebRTCHeadset
-# from headset_control import HeadsetFullControl as HeadsetControl
-# from headset_utils import HeadsetFeedback
-# from transform_utils import (pose2mat)
+    def _loop() -> None:
+        while True:
+            try:
+                line = input().strip().lower()
+            except EOFError:
+                return
+            parts = line.split()
+            if not parts:
+                continue
+            cmd = parts[0]
+            if cmd == "a":
+                cm.EYE_VIEW_SCALE = min(1.0, cm.EYE_VIEW_SCALE + 0.05)
+            elif cmd == "z":
+                cm.EYE_VIEW_SCALE = max(0.1, cm.EYE_VIEW_SCALE - 0.05)
+            elif cmd == "k":
+                cm.EYE_VIEW_INWARD_FRAC = min(0.4, cm.EYE_VIEW_INWARD_FRAC + 0.02)
+            elif cmd == "m":
+                cm.EYE_VIEW_INWARD_FRAC = max(-0.4, cm.EYE_VIEW_INWARD_FRAC - 0.02)
+            elif cmd == "s" and len(parts) == 2:
+                cm.EYE_VIEW_SCALE = float(parts[1])
+            elif cmd == "i" and len(parts) == 2:
+                cm.EYE_VIEW_INWARD_FRAC = float(parts[1])
+            else:
+                print("\n  a/z size, k/m spacing, or 's 0.55' / 'i 0.12'")
+                continue
+            print(f"\nEYE_VIEW_SCALE = {cm.EYE_VIEW_SCALE:.2f}\n"
+                  f"EYE_VIEW_INWARD_FRAC = {cm.EYE_VIEW_INWARD_FRAC:.2f}\n"
+                  "(paste into camera_manager.py when it looks right)")
 
-# # ---- Setup headset ----
-# headset = WebRTCHeadset()
-# headset.run_in_thread()
+    threading.Thread(target=_loop, daemon=True).start()
 
-# while not headset.data_channel_open:
-#     print("Waiting for data channel...")
-#     time.sleep(0.1)
 
-# print("Headset connected.")
-# headset_control = HeadsetControl()
-# feedback = HeadsetFeedback()
-# headset_control.reset()
+def build_pipeline():
+    """The exact production pipeline (camera_manager), which also loads the
+    EEPROM calibration into cm.OAK_RECTIFY for undistort + rectify."""
+    res = cm.setup_oak_stereo()
+    if res is None:
+        raise RuntimeError("no OAK device found")
+    return res
 
-# # ---- Setup pipeline ----
-# pipeline = dai.Pipeline()
 
-# cam_left = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_B)
-# cam_right = pipeline.create(dai.node.Camera).build(dai.CameraBoardSocket.CAM_C)
+def main() -> None:
+    devices = dai.Device.getAllAvailableDevices()
+    if not devices:
+        print("NO OAK DEVICE FOUND.")
+        print("  check:  lsusb | grep 03e7")
+        print("  then :  lsusb -t   (its bus root hub must say 5000M for")
+        print("          full-res color; 480M = USB2 cable/port)")
+        sys.exit(1)
+    for d in devices:
+        print(f"OAK found: {d.deviceId}  state={d.state}")
+    print("If streaming crash-loops (X_LINK errors ~every 7 s): check "
+          "depthai version — must be 3.5.0 (>=3.6 firmware crashes on this "
+          "device: RTEMS heap corruption on any stream config).")
+    print(f"depthai version: {dai.__version__}")
 
-# left_out = cam_left.requestOutput(
-#     (640, 480),
-#     type=dai.ImgFrame.Type.GRAY8,
-#     fps=90,
-# )
+    headset = WebRTCHeadset()
+    headset.run_in_thread()
+    print("WebRTC headset signaling started — put the headset on / open the "
+          "app to connect.")
 
-# right_out = cam_right.requestOutput(
-#     (640, 480),
-#     type=dai.ImgFrame.Type.GRAY8,
-#     fps=90,
-# )
+    pipeline, q_left, q_right = build_pipeline()
+    print(f"Streaming {WIDTH}x{HEIGHT} color @ {FPS} fps ... Ctrl+C to stop")
+    print(f"Stereo comfort: scale={cm.EYE_VIEW_SCALE:.2f} "
+          f"inward={cm.EYE_VIEW_INWARD_FRAC:.2f} — tune live: a/z = "
+          "bigger/smaller, k/m = closer/farther (then Enter)")
+    tuning_thread()
 
-# q_left = left_out.createOutputQueue()
-# q_right = right_out.createOutputQueue()
+    frames = 0
+    t_last = time.time()
+    while True:
+        try:
+            if not pipeline.isRunning():
+                print("pipeline stopped — rebuilding in 3 s")
+                time.sleep(3.0)
+                pipeline, q_left, q_right = build_pipeline()
+                continue
 
-# pipeline.start()
+            left_bgr = q_left.get().getCvFrame()   # RGB888p -> BGR (OpenCV)
+            right_bgr = q_right.get().getCvFrame()
+            maps = cm.OAK_RECTIFY["maps"]
+            if maps is not None:
+                left_bgr = cv2.remap(left_bgr, *maps["left"], cv2.INTER_LINEAR)
+                right_bgr = cv2.remap(right_bgr, *maps["right"], cv2.INTER_LINEAR)
+            headset.send_images(
+                compose_eye_view(left_bgr, "left"),
+                compose_eye_view(right_bgr, "right"),
+            )
 
-# time.sleep(0.5)
+            frames += 1
+            now = time.time()
+            if now - t_last >= 1.0:
+                print(f"\r{frames / (now - t_last):5.1f} fps   "
+                      f"frame {left_bgr.shape}", end="", flush=True)
+                frames = 0
+                t_last = now
 
-# # ---- Main loop ----
-# while pipeline.isRunning():
-#     left_img = q_left.get().getCvFrame()
-#     right_img = q_right.get().getCvFrame()
-#     print("Sending images to headset...")
+        except KeyboardInterrupt:
+            print("\nstopping.")
+            break
+        except Exception as e:
+            print(f"\nstream error: {e} — rebuilding pipeline in 3 s")
+            time.sleep(3.0)
+            try:
+                pipeline.stop()
+            except Exception:
+                pass
+            try:
+                pipeline, q_left, q_right = build_pipeline()
+            except Exception as e2:
+                print(f"rebuild failed ({e2}); retrying in 5 s")
+                time.sleep(5.0)
 
-#     headset.send_images(left_img, right_img)
 
-#     # headset_data = headset.receive_data()
-
-#     # if headset_data is None:
-#     #     print("No headset data received, skipping this iteration.")
-#     #     time.sleep(0.02)
-#     #     continue
-
-#     """ # --- Extract positions ---
-#     h_pos = headset_data.h_pos
-#     l_pos = headset_data.l_pos
-#     r_pos = headset_data.r_pos
-
-#     # --- Compute naive relative ---
-#     l_rel = l_pos - h_pos
-#     r_rel = r_pos - h_pos
-
-#     # --- Build string ---
-#     feedback.info = (
-#         f"HEAD\n"
-#         f"x: {h_pos[0]:.3f} y: {h_pos[1]:.3f} z: {h_pos[2]:.3f}\n\n"
-#         f"LEFT\n"
-#         f"x: {l_pos[0]:.3f} y: {l_pos[1]:.3f} z: {l_pos[2]:.3f}\n\n"
-#         f"RIGHT\n"
-#         f"x: {r_pos[0]:.3f} y: {r_pos[1]:.3f} z: {r_pos[2]:.3f}\n\n"
-#         f"REL\n"
-#         f"L-H: ({l_rel[0]:.3f}, {l_rel[1]:.3f}, {l_rel[2]:.3f})\n"
-#         f"R-H: ({r_rel[0]:.3f}, {r_rel[1]:.3f}, {r_rel[2]:.3f})"
-#     )
-
-#     headset.send_feedback(feedback) """
+if __name__ == "__main__":
+    main()

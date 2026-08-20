@@ -127,9 +127,9 @@ def main():
     # ========================================================
 
     target_link_names = [
-        "leftgripper_base",
-        "rightgripper_base",
-        "middlecamera_cover",
+        "left_gripper_base",
+        "right_gripper_base",
+        "middle_camera_cover",
     ]
 
     # ========================================================

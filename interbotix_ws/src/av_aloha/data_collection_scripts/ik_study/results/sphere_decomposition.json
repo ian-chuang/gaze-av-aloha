@@ -1,5 +1,5 @@
 {
- "rightbase_link": {
+ "right_base_link": {
   "centers": [
    [
     -0.029239180537510068,
@@ -77,7 +77,7 @@
    0.020285341056257438
   ]
  },
- "rightshoulder_link": {
+ "right_shoulder_link": {
   "centers": [
    [
     0.015397200344349361,
@@ -107,7 +107,7 @@
    0.004121698162070399
   ]
  },
- "rightupper_arm_link": {
+ "right_upper_arm_link": {
   "centers": [
    [
     0.028775005307605416,
@@ -149,7 +149,7 @@
    0.019372795377218047
   ]
  },
- "rightupper_forearm_link": {
+ "right_upper_forearm_link": {
   "centers": [
    [
     0.13626840870706777,
@@ -203,7 +203,7 @@
    0.00917561741436642
   ]
  },
- "rightlower_forearm_link": {
+ "right_lower_forearm_link": {
   "centers": [
    [
     0.020599999904632568,
@@ -239,7 +239,7 @@
    0.012
   ]
  },
- "rightwrist_link": {
+ "right_wrist_link": {
   "centers": [
    [
     0.041206713058798104,
@@ -269,7 +269,7 @@
    0.006811669975357396
   ]
  },
- "rightgripper_base": {
+ "right_gripper_base": {
   "centers": [
    [
     -0.004287176287308061,
@@ -395,7 +395,7 @@
    0.012
   ]
  },
- "rightleft_finger_link": {
+ "right_left_finger_link": {
   "centers": [
    [
     0.014165407327563393,
@@ -425,7 +425,7 @@
    0.012
   ]
  },
- "rightright_finger_link": {
+ "right_right_finger_link": {
   "centers": [
    [
     0.03369050938848722,
@@ -455,7 +455,7 @@
    0.012
   ]
  },
- "leftbase_link": {
+ "left_base_link": {
   "centers": [
    [
     -0.029239180537510068,
@@ -533,7 +533,7 @@
    0.020285341056257438
   ]
  },
- "leftshoulder_link": {
+ "left_shoulder_link": {
   "centers": [
    [
     0.015397200344349361,
@@ -563,7 +563,7 @@
    0.004121698162070399
   ]
  },
- "leftupper_arm_link": {
+ "left_upper_arm_link": {
   "centers": [
    [
     0.028775005307605416,
@@ -605,7 +605,7 @@
    0.019372795377218047
   ]
  },
- "leftupper_forearm_link": {
+ "left_upper_forearm_link": {
   "centers": [
    [
     0.13626840870706777,
@@ -659,7 +659,7 @@
    0.00917561741436642
   ]
  },
- "leftlower_forearm_link": {
+ "left_lower_forearm_link": {
   "centers": [
    [
     0.020599999904632568,
@@ -695,7 +695,7 @@
    0.012
   ]
  },
- "leftwrist_link": {
+ "left_wrist_link": {
   "centers": [
    [
     0.041206713058798104,
@@ -725,7 +725,7 @@
    0.006811669975357396
   ]
  },
- "leftgripper_base": {
+ "left_gripper_base": {
   "centers": [
    [
     -0.004287176287308061,
@@ -851,7 +851,7 @@
    0.012
   ]
  },
- "leftleft_finger_link": {
+ "left_left_finger_link": {
   "centers": [
    [
     0.014165407327563393,
@@ -881,7 +881,7 @@
    0.012
   ]
  },
- "leftright_finger_link": {
+ "left_right_finger_link": {
   "centers": [
    [
     0.03369050938848722,
@@ -911,7 +911,7 @@
    0.012
   ]
  },
- "middlebase_link": {
+ "middle_base_link": {
   "centers": [
    [
     0.0,
@@ -989,7 +989,7 @@
    0.016440437959159268
   ]
  },
- "middleshoulder_link": {
+ "middle_shoulder_link": {
   "centers": [
    [
     -0.012301388603162,
@@ -1019,7 +1019,7 @@
    0.009272093503696524
   ]
  },
- "middleupper_arm_link": {
+ "middle_upper_arm_link": {
   "centers": [
    [
     0.07500104590755786,
@@ -1061,7 +1061,7 @@
    0.010044103445167008
   ]
  },
- "middleupper_forearm_link": {
+ "middle_upper_forearm_link": {
   "centers": [
    [
     0.009191093718992844,
@@ -1091,7 +1091,7 @@
    0.007764065481636448
   ]
  },
- "middlelower_forearm_link": {
+ "middle_lower_forearm_link": {
   "centers": [
    [
     0.027903568512297847,
@@ -1121,7 +1121,7 @@
    0.01897019820785961
   ]
  },
- "middlewrist_link": {
+ "middle_wrist_link": {
   "centers": [
    [
     0.011899994327004117,
@@ -1145,7 +1145,7 @@
    0.004410226511837704
   ]
  },
- "middlepan_link": {
+ "middle_pan_link": {
   "centers": [
    [
     0.04208658365371653,
@@ -1169,7 +1169,7 @@
    0.008996519209420626
   ]
  },
- "middlecamera": {
+ "middle_camera": {
   "centers": [
    [
     0.0018802300611796834,
@@ -1187,7 +1187,7 @@
    0.012
   ]
  },
- "middlecamera_body": {
+ "middle_camera_body": {
   "centers": [
    [
     -0.011519267300374832,
@@ -1217,7 +1217,7 @@
    0.011231151143279898
   ]
  },
- "middlecamera_cover": {
+ "middle_camera_cover": {
   "centers": [
    [
     0.01974959529520478,

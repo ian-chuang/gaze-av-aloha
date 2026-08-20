@@ -46,24 +46,24 @@ CASES = {
 
 PAIRS = [
     # structural suspects (intra-chain)
-    ("rightbase_link", "rightupper_arm_link"),
-    ("rightwrist_link", "rightgripper_base"),
-    ("rightlower_forearm_link", "rightgripper_base"),
+    ("right_base_link", "right_upper_arm_link"),
+    ("right_wrist_link", "right_gripper_base"),
+    ("right_lower_forearm_link", "right_gripper_base"),
     # folding pairs (self_fold)
-    ("rightbase_link", "rightlower_forearm_link"),
-    ("rightbase_link", "rightwrist_link"),
-    ("rightbase_link", "rightgripper_base"),
-    ("rightupper_arm_link", "rightlower_forearm_link"),
+    ("right_base_link", "right_lower_forearm_link"),
+    ("right_base_link", "right_wrist_link"),
+    ("right_base_link", "right_gripper_base"),
+    ("right_upper_arm_link", "right_lower_forearm_link"),
     # inter-hand pairs (bimanual)
-    ("rightgripper_base", "leftgripper_base"),
-    ("rightright_finger_link", "leftleft_finger_link"),
-    ("rightleft_finger_link", "leftright_finger_link"),
+    ("right_gripper_base", "left_gripper_base"),
+    ("right_right_finger_link", "left_left_finger_link"),
+    ("right_left_finger_link", "left_right_finger_link"),
     # hands vs camera
-    ("rightright_finger_link", "middlecamera_body"),
-    ("leftgripper_base", "middlecamera_body"),
-    ("leftleft_finger_link", "middlecamera_cover"),
+    ("right_right_finger_link", "middle_camera_body"),
+    ("left_gripper_base", "middle_camera_body"),
+    ("left_left_finger_link", "middle_camera_cover"),
     # parked-hands artifact pair
-    ("rightbase_link", "rightupper_forearm_link"),
+    ("right_base_link", "right_upper_forearm_link"),
 ]
 
 

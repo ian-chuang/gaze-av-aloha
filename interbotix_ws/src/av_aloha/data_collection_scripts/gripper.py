@@ -4,14 +4,21 @@ Code to configure and control Interbotix grippers, including:
  - Current-limit setup
  - Trigger-based gripper command
 """
+try:
+    import rospy
+except ImportError:
+    rospy = None
 
-import rospy
-
-from interbotix_xs_msgs.msg import JointSingleCommand
-from interbotix_xs_msgs.srv import (
-    RegisterValues,
-    RegisterValuesRequest,
-)
+try:
+    from interbotix_xs_msgs.msg import JointSingleCommand
+    from interbotix_xs_msgs.srv import (
+        RegisterValues,
+        RegisterValuesRequest,
+    )
+except ImportError:
+    JointSingleCommand = None
+    RegisterValues = None
+    RegisterValuesRequest = None
 
 GRIPPER_OPEN = 0.0
 GRIPPER_CLOSED = -1.5
@@ -19,11 +26,15 @@ GRIPPER_CURRENT_LIMIT = 100
 
 # Reboot gripper motor.
 def reboot_gripper(bot, sleep_time=1.0):
+    if rospy is None:
+        raise ImportError("rospy is required to reboot the gripper.")
     bot.dxl.robot_reboot_motors("single", "gripper", True)
     rospy.sleep(sleep_time)
 
 # Set a Dynamixel register for a single motor.
 def set_register(robot_name, motor_name, reg_name, value):
+    if rospy is None or RegisterValues is None or RegisterValuesRequest is None:
+        raise ImportError("rospy and interbotix_xs_msgs are required to set gripper registers.")
     # print("Inside function set_register")
     service_name = f"/{robot_name}/set_motor_registers"
     rospy.wait_for_service(service_name)
@@ -41,6 +52,8 @@ def set_register(robot_name, motor_name, reg_name, value):
 
 # Configure gripper current limit and operating mode.
 def configure_gripper(bot, robot_name):
+    if rospy is None:
+        raise ImportError("rospy is required to configure the gripper.")
     # print("Inside function configure_gripper")
     bot.dxl.robot_torque_enable("single", "gripper", False)
     # print("Torque disabled for gripper")
@@ -64,6 +77,8 @@ def update_gripper(bot, trigger_pressed, close_position=GRIPPER_CLOSED, open_pos
 
 # Directly send a gripper command.
 def command_gripper(bot, position):
+    if JointSingleCommand is None:
+        raise ImportError("interbotix_xs_msgs is required to command the gripper.")
     cmd = JointSingleCommand(name="gripper")
     cmd.cmd = position
     bot.gripper.core.pub_single.publish(cmd)
@@ -78,6 +93,8 @@ def close_gripper(bot):
 
 # Test gripper by sending open and close commands with a delay.
 def test_gripper(bot, wait_time=1.0):
+    if rospy is None:
+        raise ImportError("rospy is required to test the gripper.")
     open_gripper(bot)
     rospy.sleep(wait_time)
 
@@ -89,6 +106,8 @@ def test_gripper(bot, wait_time=1.0):
 
 # Read a register value from the gripper motor.
 def get_register(robot_name, motor_name, reg_name):
+    if rospy is None or RegisterValues is None or RegisterValuesRequest is None:
+        raise ImportError("rospy and interbotix_xs_msgs are required to read gripper registers.")
     service_name = f"/{robot_name}/get_motor_registers"
     rospy.wait_for_service(service_name)
     srv = rospy.ServiceProxy(service_name, RegisterValues)

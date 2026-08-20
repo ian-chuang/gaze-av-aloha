@@ -25,9 +25,9 @@ from transform_utils import (
 
 URDF_PATH = "/home/devi/giava/giava.urdf"
 
-RIGHT_EE_LINK = "rightgripper_base"
-LEFT_EE_LINK  = "leftgripper_base"
-CAMERA_EE_LINK = "middlecamera_body"
+RIGHT_EE_LINK = "right_gripper_base"
+LEFT_EE_LINK  = "left_gripper_base"
+CAMERA_EE_LINK = "middle_camera_body"
 
 # HELPERS
 
@@ -628,11 +628,11 @@ def main():
 
             right_gripper = 0.041
 
-        joint_dict["rightright_finger"] = (
+        joint_dict["right_right_finger"] = (
             right_gripper
         )
 
-        joint_dict["rightleft_finger"] = (
+        joint_dict["right_left_finger"] = (
             right_gripper
         )
 
@@ -646,11 +646,11 @@ def main():
 
             left_gripper = 0.041
 
-        joint_dict["leftright_finger"] = (
+        joint_dict["left_right_finger"] = (
             left_gripper
         )
 
-        joint_dict["leftleft_finger"] = (
+        joint_dict["left_left_finger"] = (
             left_gripper
         )
 

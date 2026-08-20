@@ -24,10 +24,12 @@ from interbotix_xs_modules.arm import InterbotixManipulatorXS
 from interbotix_xs_msgs.msg import JointSingleCommand
 from interbotix_xs_msgs.srv import RegisterValues, RegisterValuesRequest
 
-from lerobot.common.datasets.lerobot_dataset import LeRobotDatasetMetadata
-from lerobot.common.datasets.utils import dataset_to_policy_features
-from lerobot.common.policies.act.configuration_act import ACTConfig
-from lerobot.common.policies.factory import make_policy
+from lerobot.datasets import LeRobotDatasetMetadata
+from lerobot.datasets.utils import dataset_to_policy_features
+from lerobot.policies.act.configuration_act import ACTConfig
+from lerobot.policies import make_policy
+from lerobot.policies.act.modeling_act import ACTPolicy
+from lerobot.processor import PolicyProcessorPipeline
 from lerobot.configs.types import FeatureType
 
 
@@ -49,6 +51,27 @@ EXPERIMENTS = [
     "rgb_plus_blue_mask_plus_centroids",
     "masked_rgb_plus_centroids",
 ]
+
+
+def resolve_migrated_checkpoint_dir(policy_dir):
+    """Return the lerobot v0.6.0 checkpoint directory for `policy_dir`.
+
+    v0.6.0 loads a policy from a directory (clean model.safetensors plus the
+    policy_preprocessor / policy_postprocessor files), not from a raw .pt state
+    dict. migrate_checkpoints.py writes those next to the original as
+    "<original>_lerobot_v06"; if `policy_dir` is already such a directory it is
+    used as-is.
+    """
+    p = Path(policy_dir)
+    candidates = [p.parent / f"{p.name}_lerobot_v06", p]
+    for c in candidates:
+        if (c / "model.safetensors").exists() and (c / "policy_preprocessor.json").exists():
+            return c
+    raise FileNotFoundError(
+        f"No migrated checkpoint for {policy_dir}. Expected "
+        f"{p.parent / (p.name + '_lerobot_v06')} containing model.safetensors and "
+        "policy_preprocessor.json. Run migrate_checkpoints.py first."
+    )
 
 
 def csv_list(arg: str):
@@ -112,6 +135,7 @@ def make_image_tensor(frame, device):
         torch.from_numpy(frame)
         .permute(2, 0, 1)
         .float()
+        .div(255.0)
         .unsqueeze(0)
         .to(device)
     )
@@ -288,26 +312,31 @@ def build_policy(dataset_root, policy_dir, device, checkpoint_mode="latest", che
         optimizer_lr_backbone=1e-5,
     )
 
-    policy = make_policy(cfg, ds_meta=dataset_metadata)
-
     ckpt_path = find_checkpoint(
         policy_dir,
         checkpoint_mode=checkpoint_mode,
         checkpoint_step=checkpoint_step,
     )
-    ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
-    state_dict = ckpt["policy_state_dict"] if "policy_state_dict" in ckpt else ckpt
+    migrated_dir = resolve_migrated_checkpoint_dir(policy_dir)
 
-    missing, unexpected = policy.load_state_dict(state_dict, strict=True)
-    if missing or unexpected:
-        raise RuntimeError(
-            f"State dict mismatch for {policy_dir}\n"
-            f"Missing: {missing}\nUnexpected: {unexpected}"
-        )
+    # CHANGED (lerobot v0.6.0): load the policy together with its normalization
+    # pipelines from a migrated checkpoint directory. Building a fresh policy and
+    # loading a raw .pt state dict no longer works -- those state dicts carry the
+    # old embedded `normalize_inputs.*` buffers, which the v0.6.0 model does not
+    # define, so a strict load fails. `migrated_dir` is the directory produced
+    # by migrate_checkpoints.py (named "<original>_lerobot_v06").
+    policy = ACTPolicy.from_pretrained(migrated_dir)
+
+    preprocessor = PolicyProcessorPipeline.from_pretrained(
+        migrated_dir, config_filename="policy_preprocessor.json"
+    )
+    postprocessor = PolicyProcessorPipeline.from_pretrained(
+        migrated_dir, config_filename="policy_postprocessor.json"
+    )
 
     policy.to(device)
     policy.eval()
-    return policy, dataset_metadata, ckpt_path, variant, chunk_size, kl_weight
+    return policy, preprocessor, postprocessor, dataset_metadata, ckpt_path, variant, chunk_size, kl_weight
 
 
 def extract_scene_features_from_top_image(rgb_img, priors):
@@ -600,9 +629,14 @@ def append_result(csv_path: Path, row: dict):
         writer.writerow(row)
 
 
-def select_action_from_policy(policy, obs):
+def select_action_from_policy(policy, obs, preprocessor):
+    # CHANGED (lerobot v0.6.0): the preprocessor is passed in rather than closed
+    # over, and applied once here so both the select_action and the direct-call
+    # branch below see normalized observations.
     if hasattr(policy, "reset"):
         policy.reset()
+
+    obs = preprocessor(obs)
 
     if hasattr(policy, "select_action"):
         return policy.select_action(obs)
@@ -622,6 +656,7 @@ def select_action_from_policy(policy, obs):
 
 def run_single_rollout(
     policy,
+    preprocessor,
     dataset_metadata,
     right_bot,
     pipelines,
@@ -658,7 +693,7 @@ def run_single_rollout(
                 show_debug=show_debug,
             )
 
-            action = select_action_from_policy(policy, obs)
+            action = select_action_from_policy(policy, obs, preprocessor)
             send_action(right_bot, action)
 
             elapsed = time.time() - step_start
@@ -766,7 +801,7 @@ def main():
             # reset_robot(right_bot)
             input("Set up the scene, then press Enter to start rollout...")
 
-            policy, dataset_metadata, ckpt_path, variant, chunk_size, kl_weight = build_policy(
+            policy, preprocessor, postprocessor, dataset_metadata, ckpt_path, variant, chunk_size, kl_weight = build_policy(
                 dataset_root=args.dataset_root,
                 policy_dir=run_dir,
                 device=device,
@@ -776,6 +811,7 @@ def main():
 
             result = run_single_rollout(
                 policy=policy,
+                preprocessor=preprocessor,
                 dataset_metadata=dataset_metadata,
                 right_bot=right_bot,
                 pipelines=pipelines,
@@ -815,6 +851,7 @@ def main():
                 input("Reset the scene, then press Enter to retry...")
                 result = run_single_rollout(
                     policy=policy,
+                    preprocessor=preprocessor,
                     dataset_metadata=dataset_metadata,
                     right_bot=right_bot,
                     pipelines=pipelines,

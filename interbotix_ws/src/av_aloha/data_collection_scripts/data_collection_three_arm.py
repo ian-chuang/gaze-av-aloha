@@ -1,66 +1,138 @@
 import sys
 import time
 import threading
+from pathlib import Path
 
 import numpy as np
-import rospy
 import torch
-import jaxlie
+from scipy.spatial.transform import Rotation as R
 
-from webrtc_headset import WebRTCHeadset
+for ros_path in (
+    Path("/opt/ros/noetic/lib/python3/dist-packages"),
+    Path("/home/devi/giava/interbotix_ws/devel/lib/python3/dist-packages"),
+):
+    if ros_path.is_dir():
+        ros_path_str = str(ros_path)
+        if ros_path_str not in sys.path:
+            sys.path.append(ros_path_str)
 
-from arm_config import ARM_CONFIG
+try:
+    import jaxlie
+except ImportError:
+    jaxlie = None
+try:
+    import rospy
+except ImportError:
+    rospy = None
 
-from three_arm_ik import make_three_arm_ik_solver
+if __package__:
+    from .webrtc_headset import WebRTCHeadset
+    from .arm_config import ARM_CONFIG
+    try:
+        from .three_arm_ik import make_three_arm_ik_solver
+    except ImportError:
+        make_three_arm_ik_solver = None
+    from .camera_manager import (
+        CameraConfig,
+        CAMERA_SERIALS,
+        setup_cameras,
+        get_active_cameras,
+        digital_zoom,
+    )
+    from .robot_control import (
+        create_and_configure_robots,
+        build_robot_model,
+        move_to_named_pose,
+        reset_arms,
+        compute_fk_and_ee,
+        sync_robot_state,
+        command_state_is_stale
+    )
+    from .gripper import update_gripper
+    from .dataset import (
+        BackgroundEpisodeSaver,
+        create_dataset,
+        build_frame,
+    )
+    from .data_col_config import (
+        TASKS,
+        ARM_MODES,
+        ArmTeleopState,
+        TeleopConfig,
+        TeleopSessionState,
+        RobotCommandState,
+        CommandKinematicsState,
+        compute_camera_arm_target,
+        compute_gripper_arm_target,
+        start_teleop_session,
+        stop_teleop_session,
+        clamp_joint_step,
+    )
+    from .log import (
+        SessionStats,
+        reset_episode_log,
+        log_episode_info,
+    )
+else:
+    from webrtc_headset import WebRTCHeadset
 
-from camera_manager import (
-    CameraConfig,
-    CAMERA_SERIALS,
-    setup_cameras,
-    get_active_cameras,
-    digital_zoom,
-)
+    from arm_config import ARM_CONFIG
+    try:
+        from three_arm_ik import make_three_arm_ik_solver
+    except ImportError:
+        make_three_arm_ik_solver = None
+    from camera_manager import (
+        CameraConfig,
+        CAMERA_SERIALS,
+        setup_cameras,
+        get_active_cameras,
+        digital_zoom,
+    )
+    from robot_control import (
+        create_and_configure_robots,
+        build_robot_model,
+        move_to_named_pose,
+        reset_arms,
+        compute_fk_and_ee,
+        sync_robot_state,
+        command_state_is_stale
+    )
+    from gripper import update_gripper
+    from dataset import (
+        BackgroundEpisodeSaver,
+        create_dataset,
+        build_frame,
+    )
+    from data_col_config import (
+        TASKS,
+        ARM_MODES,
+        ArmTeleopState,
+        TeleopConfig,
+        TeleopSessionState,
+        RobotCommandState,
+        CommandKinematicsState,
+        compute_camera_arm_target,
+        compute_gripper_arm_target,
+        start_teleop_session,
+        stop_teleop_session,
+        clamp_joint_step,
+    )
+    from log import (
+        SessionStats,
+        reset_episode_log,
+        log_episode_info,
+    )
 
-from robot_control import (
-    create_and_configure_robots,
-    build_robot_model,
-    move_to_named_pose,
-    reset_arms,
-    compute_fk_and_ee,
-    sync_robot_state,
-    command_state_is_stale
-)
 
-from gripper import update_gripper
+def quat2mat(quaternion):
+    return R.from_quat(np.asarray(quaternion, dtype=float)).as_matrix()
 
-from dataset import (
-    BackgroundEpisodeSaver,
-    create_dataset,
-    build_frame,
-)
 
-from data_col_config import (
-    TASKS,
-    ARM_MODES,
-    ArmTeleopState,
-    TeleopConfig,
-    TeleopSessionState,
-    RobotCommandState,
-    CommandKinematicsState,
-    compute_camera_arm_target,
-    compute_gripper_arm_target,
-    start_teleop_session,
-    stop_teleop_session,
-    clamp_joint_step,
-)
-
-from transform_utils import pose2mat, quat2mat
-
-from log import (
-    SessionStats,
-    reset_episode_log,
-    log_episode_info,
-)
+def pose2mat(pos, quat):
+    homo_pose_mat = np.eye(4)
+    homo_pose_mat[:3, :3] = quat2mat(quat)
+    homo_pose_mat[:3, 3] = np.asarray(pos, dtype=float)
+    return homo_pose_mat
 
 latest_frames = {
     name: {"color": None, "depth": None} for name in CAMERA_SERIALS
@@ -141,6 +213,10 @@ def safe_shutdown(robots, pipelines, dataset, episode_saver, collecting_episode,
     return episode_idx, True
 
 def main():
+    if rospy is None:
+        raise ImportError("rospy is required for three-arm data collection.")
+    if make_three_arm_ik_solver is None:
+        raise ImportError("three_arm_ik and its JAX dependencies are required for three-arm data collection.")
 
     rospy.init_node("data_collection")
 
@@ -303,7 +379,7 @@ def main():
     # EDIT HERE
     ########################################################################################
 
-    # Tune these in three_arm_ik_playground.py, then copy the final values here.
+    # Tune these in ik_benchmark/viser_playground.py, then copy the final values here.
     three_arm_position_weights = np.asarray(
         [cfg.pos_weight, cfg.pos_weight, cfg.pos_weight],
         dtype=np.float32,
@@ -662,7 +738,8 @@ def main():
                         q_arm_cmd = clamp_joint_step(
                             prev_cmd,
                             target_q,
-                            cfg.max_joint_step,
+                            (cfg.max_joint_step_middle if arm == "middle"
+                             else cfg.max_joint_step),
                         )
 
                         episode_stats.arms[

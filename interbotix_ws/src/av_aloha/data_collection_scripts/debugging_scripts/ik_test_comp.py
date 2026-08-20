@@ -139,9 +139,9 @@ def main():
     # ========================================================
 
     target_link_names = [
-        "leftgripper_base",
-        "rightgripper_base",
-        "middlecamera_cover",
+        "left_gripper_base",
+        "right_gripper_base",
+        "middle_camera_cover",
     ]
 
     # ========================================================
@@ -526,17 +526,17 @@ def main():
 
         T_left_ee = robot.forward_kinematics(
             q,
-            "leftgripper_base",
+            "left_gripper_base",
         )
 
         T_right_ee = robot.forward_kinematics(
             q,
-            "rightgripper_base",
+            "right_gripper_base",
         )
 
         T_middle_ee = robot.forward_kinematics(
             q,
-            "middlecamera_cover",
+            "middle_camera_cover",
         )
 
         left_ee_frame.position = T_left_ee[:3, 3]

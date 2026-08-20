@@ -87,11 +87,11 @@ def main() -> None:
     upper = np.asarray(robot.joints.upper_limits)
 
     print(f"JAX backend: {jax.default_backend()}")
-    reach = max_reach(robot, "leftgripper_base", "leftshoulder_link")
+    reach = max_reach(robot, "left_gripper_base", "left_shoulder_link")
     print(f"max hand reach (shoulder→gripper_base, 20k samples): {reach:.3f} m")
     d_home = np.linalg.norm(home_pos[0] - np.array([0.469, -0.019, 0.099]))
     print(f"hand home reach fraction: {d_home:.3f} m = {100*d_home/reach:.0f}% of max")
-    reach_m = max_reach(robot, "middlecamera_cover", "middleshoulder_link")
+    reach_m = max_reach(robot, "middle_camera_cover", "middle_shoulder_link")
     d_home_m = np.linalg.norm(home_pos[2] - np.array([0.0, 0.400, 0.089]))
     print(f"max camera reach (shoulder→camera_cover): {reach_m:.3f} m; "
           f"home = {d_home_m:.3f} m = {100*d_home_m/reach_m:.0f}% of max\n")

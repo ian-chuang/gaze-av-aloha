@@ -21,7 +21,7 @@ from interbotix_xs_msgs.msg import JointSingleCommand
 from interbotix_xs_msgs.srv import RegisterValues, RegisterValuesRequest
 from scipy.spatial.transform import Rotation as R
 from yourdfpy import URDF
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.datasets import LeRobotDataset
 from webrtc_headset import WebRTCHeadset
 from transform_utils import pose2mat
 
@@ -37,7 +37,7 @@ def now():
 # Constants 
 
 URDF_PATH = "/home/devi/giava/right.urdf"
-RIGHT_EE_LINK = "rightgripper_base"
+RIGHT_EE_LINK = "right_gripper_base"
 
 DATASET_ROOT = "/home/devi/giava/interbotix_ws/src/av_aloha/data_collection_scripts/dataset/lerobot"
 
@@ -53,12 +53,12 @@ TASKS = {
 }
 
 RIGHT_ARM_NAMES = [
-    "rightwaist",
-    "rightshoulder",
-    "rightelbow",
-    "rightforearm_roll",
-    "rightwrist_angle",
-    "rightwrist_rotate",
+    "right_waist",
+    "right_shoulder",
+    "right_elbow",
+    "right_forearm_roll",
+    "right_wrist_angle",
+    "right_wrist_rotate",
 ]
 
 RIGHT_START_Q = np.array([0.0, -1.27, 0.99, 0.0, 0.35, 0.0], dtype=float)
@@ -545,6 +545,13 @@ def safe_shutdown(
                     print("\nShutdown canceled.")
                     return episode_idx, False
 
+    # CHANGED (lerobot v3 dataset format): flush buffered episode metadata and
+    # write parquet footers, otherwise the dataset on disk cannot be loaded back.
+    try:
+        dataset.finalize()
+    except Exception as e:
+        print(f"\nWarning: failed to finalize dataset: {e}")
+
     # Move robot to rest pose
     try:
         print("\nMoving arm to rest pose before shutdown...")
@@ -659,12 +666,12 @@ def main():
                 "dtype": "float32",
                 "shape": (7,),
                 "names": [
-                    "rightwaist",
-                    "rightshoulder",
-                    "rightelbow",
-                    "rightforearm_roll",
-                    "rightwrist_angle",
-                    "rightwrist_rotate",
+                    "right_waist",
+                    "right_shoulder",
+                    "right_elbow",
+                    "right_forearm_roll",
+                    "right_wrist_angle",
+                    "right_wrist_rotate",
                     "rightgripper",
                 ],
             },

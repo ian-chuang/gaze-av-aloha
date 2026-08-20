@@ -4,12 +4,17 @@ import torch
 from torch.utils.data import DataLoader, Subset, ConcatDataset
 # import matplotlib.pyplot as plt
 from lerobot.configs.types import FeatureType, PolicyFeature
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
-from lerobot.common.datasets.utils import dataset_to_policy_features
-from lerobot.common.policies.factory import make_policy
-from lerobot.common.policies.act.configuration_act import ACTConfig
-from interbotix_xs_msgs.msg import JointSingleCommand
+from lerobot.datasets import LeRobotDataset, LeRobotDatasetMetadata
+from lerobot.datasets.utils import dataset_to_policy_features
+from lerobot.policies import make_policy
+from lerobot.policies.factory import make_pre_post_processors
+from lerobot.policies.act.configuration_act import ACTConfig
 from pathlib import Path
+
+try:
+    from interbotix_xs_msgs.msg import JointSingleCommand
+except ImportError:
+    JointSingleCommand = None
 
 
 def make_delta_timestamps(delta_indices, fps):
@@ -38,6 +43,8 @@ def update_gripper(
     close_position=-1.5,
     open_position=0.0,
 ):
+    if JointSingleCommand is None:
+        raise ImportError("interbotix_xs_msgs is required for gripper control.")
     cmd = JointSingleCommand(name="gripper")
     cmd.cmd = close_position if trigger_pressed else open_position
     bot.gripper.core.pub_single.publish(cmd)
@@ -48,6 +55,8 @@ REPLAY_MAX_JOINT_STEP = np.array([0.05, 0.05, 0.06, 0.10, 0.10, 0.12], dtype=flo
 
 
 def send_action(right_bot, action):
+    if JointSingleCommand is None:
+        raise ImportError("interbotix_xs_msgs is required for replaying actions.")
     action = action.detach().float().cpu().numpy().reshape(-1)
     if action.shape[0] < 7:
         raise ValueError(f"Expected action dim >= 7, got {action.shape[0]}")
@@ -187,6 +196,15 @@ def main():
     print("Image features:", cfg.image_features)
 
     policy = make_policy(cfg, ds_meta=dataset_metadata)
+
+    # CHANGED (lerobot v0.6.0): policies no longer carry normalization layers in
+    # their weights. Normalization lives in an external processor pipeline built
+    # from the dataset stats, and must be applied to every batch before
+    # policy.forward(). See ACT_MODIFICATIONS.md.
+    preprocessor, postprocessor = make_pre_post_processors(
+        policy_cfg=cfg,
+        dataset_stats=dataset_metadata.stats,
+    )
     policy.train()
     policy.to(device)
 
@@ -300,6 +318,15 @@ def main():
             batch["observation.object_mask"] = masks
             batch["observation.object_centroid"] = centroids
 
+            # CHANGED (lerobot v0.6.0): images arrive as uint8 and the normalizer
+            # expects float in [0, 1], then the preprocessor applies the mean/std
+            # normalization that used to live inside the policy.
+            for cam_key in cfg.image_features:
+                if cam_key in batch and batch[cam_key].dtype == torch.uint8:
+                    batch[cam_key] = batch[cam_key].to(dtype=torch.float32) / 255.0
+
+            batch = preprocessor(batch)
+
             loss, _ = policy.forward(batch)
 
             optimizer.zero_grad()
@@ -328,6 +355,12 @@ def main():
                 break
 
     policy.save_pretrained(output_directory)
+
+    # CHANGED (lerobot v0.6.0): normalization stats now live in the processor
+    # pipelines rather than the model weights, so they must be saved next to the
+    # policy. Without these the checkpoint cannot be run at rollout time.
+    preprocessor.save_pretrained(output_directory)
+    postprocessor.save_pretrained(output_directory)
 
     ckpt_path = output_directory / "checkpoint.pt"
     torch.save(

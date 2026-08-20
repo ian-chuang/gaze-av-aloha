@@ -15,12 +15,12 @@ urdf = URDF.load(URDF_PATH)
 robot = pk.Robot.from_urdf(urdf)
 
 LEFT_ARM_NAMES = [
-    "leftwaist",
-    "leftshoulder",
-    "leftelbow",
-    "leftforearm_roll",
-    "leftwrist_angle",
-    "leftwrist_rotate",
+    "left_waist",
+    "left_shoulder",
+    "left_elbow",
+    "left_forearm_roll",
+    "left_wrist_angle",
+    "left_wrist_rotate",
 ]
 
 left_arm_indices = [

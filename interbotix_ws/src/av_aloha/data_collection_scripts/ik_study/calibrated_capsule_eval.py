@@ -55,8 +55,8 @@ HERE = Path(__file__).resolve().parent
 MARGIN = 0.020
 WEIGHT = 100.0
 FUNCTIONAL = (
-    ("leftleft_finger_link", "leftright_finger_link"),
-    ("rightleft_finger_link", "rightright_finger_link"),
+    ("left_left_finger_link", "left_right_finger_link"),
+    ("right_left_finger_link", "right_right_finger_link"),
 )
 
 

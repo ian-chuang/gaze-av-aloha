@@ -7,7 +7,7 @@ import pandas as pd
 import cv2
 
 from pathlib import Path
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.datasets import LeRobotDataset
 
 # ========= CONFIG =========
 

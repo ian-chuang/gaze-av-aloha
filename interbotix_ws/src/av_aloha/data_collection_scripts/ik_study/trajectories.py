@@ -70,6 +70,11 @@ MIDDLE: Tuple[int, ...] = (2,)
 ## robot_model.py).  reach_limit aims *away from the arm's own shoulder*:
 ## ±x "outward from the midline" would move *toward* the bases at x = ±0.469
 ## and stay comfortably reachable (verified by the oracle in rev 1).
+## FROZEN with the suite (hash 3815490046334af4). These were the shoulder
+## positions when the suite was defined; the URDF bases moved to +/-0.520 on
+## 2026-08-19 (measured), but editing these would change every trajectory
+## and invalidate every comparison ever run against the suite. They are
+## world-space anchor points of a frozen benchmark, not live geometry.
 SHOULDER_L = np.array([0.469, -0.019, 0.099])
 SHOULDER_R = np.array([-0.469, -0.019, 0.099])
 SHOULDER_M = np.array([0.0, 0.400, 0.089])

@@ -38,8 +38,8 @@ MARGIN = 0.025
 BUFFER = 0.025
 
 FUNCTIONAL_LINK_PAIRS = {
-    frozenset(("leftleft_finger_link", "leftright_finger_link")),
-    frozenset(("rightleft_finger_link", "rightright_finger_link")),
+    frozenset(("left_left_finger_link", "left_right_finger_link")),
+    frozenset(("right_left_finger_link", "right_right_finger_link")),
 }
 
 

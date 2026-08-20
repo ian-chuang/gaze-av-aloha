@@ -21,7 +21,7 @@ s.t.   lower_j ≤ q_j ≤ upper_j        (augmented-Lagrangian constraint)
 - `r_a(q) = log( T_a(q)⁻¹ · T_a* ) ∈ R⁶` — the SE(3) logarithm of the pose
   error between the FK pose `T_a(q)` of the arm's target link and the
   commanded pose `T_a*`.
-- Target links: `leftgripper_base`, `rightgripper_base`, `middlecamera_cover`.
+- Target links: `left_gripper_base`, `right_gripper_base`, `middle_camera_cover`.
 
 ## 2. Position residual
 

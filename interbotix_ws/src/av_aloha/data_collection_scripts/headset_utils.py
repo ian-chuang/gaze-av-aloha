@@ -1,11 +1,26 @@
 import numpy as np
-from numba import jit, float64
-from numba.types import UniTuple
 from scipy.spatial.transform import Rotation as R
-from transform_utils import (
-    pose2mat,
-    mat2pose,
-)
+
+try:
+    from numba import jit, float64
+    from numba.types import UniTuple
+except ImportError:
+    jit = None
+    float64 = None
+    UniTuple = None
+
+
+def pose2mat(pos, quat):
+    homo_pose_mat = np.eye(4)
+    homo_pose_mat[:3, :3] = R.from_quat(np.asarray(quat, dtype=float)).as_matrix()
+    homo_pose_mat[:3, 3] = np.asarray(pos, dtype=float)
+    return homo_pose_mat
+
+
+def mat2pose(homo_pose_mat):
+    pos = homo_pose_mat[:3, 3].astype(float)
+    quat = R.from_matrix(homo_pose_mat[:3, :3]).as_quat().astype(float)
+    return pos, quat
 
 TRANSFORM_TO_WORLD = np.ascontiguousarray(np.eye(4))
 TRANSFORM_TO_WORLD[:3, :3] = R.from_euler('xyz', [-90, 0, -90], degrees=True).as_matrix()
@@ -45,7 +60,6 @@ class HeadsetFeedback:
     middle_arm_position = np.zeros(3)
     middle_arm_rotation = np.zeros(4)
 
-@jit(UniTuple(float64[:], 2)(float64[:], float64[:]), nopython=True, fastmath=True, cache=True)
 def convert_left_to_right_coordinates(left_pos, left_quat):
 
     x = left_pos[0]
@@ -66,7 +80,6 @@ def convert_left_to_right_coordinates(left_pos, left_quat):
 
     return right_pos, right_quat
 
-@jit(UniTuple(float64[:], 2)(float64[:], float64[:]), nopython=True, fastmath=True, cache=True)
 def convert_right_to_left_coordinates(right_pos, right_quat):
 
     transform = pose2mat(right_pos, right_quat)
@@ -86,3 +99,27 @@ def convert_right_to_left_coordinates(right_pos, right_quat):
     qw = quat[3]
 
     return np.array([x, y, z]), np.array([qx, qy, qz, qw])
+
+
+# NOTE: numba jitting of these functions can never succeed — they call
+# scipy's Rotation inside (via pose2mat/mat2pose), which numba's nopython
+# mode cannot compile.  The eager signature made that an *import-time* crash
+# in any env with numba installed; envs without numba silently used the
+# pure-python path all along.  Keep the pure-python functions (they are
+# trivial 4x4 ops at teleop rate) and only attempt jitting defensively.
+if jit is not None and UniTuple is not None and float64 is not None:
+    try:
+        convert_left_to_right_coordinates = jit(
+            UniTuple(float64[:], 2)(float64[:], float64[:]),
+            nopython=True,
+            fastmath=True,
+            cache=True,
+        )(convert_left_to_right_coordinates)
+        convert_right_to_left_coordinates = jit(
+            UniTuple(float64[:], 2)(float64[:], float64[:]),
+            nopython=True,
+            fastmath=True,
+            cache=True,
+        )(convert_right_to_left_coordinates)
+    except Exception:
+        pass  # fall back to the pure-python implementations

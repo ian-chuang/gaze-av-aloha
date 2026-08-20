@@ -1,4 +1,4 @@
-from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+from lerobot.datasets import LeRobotDataset
 
 dataset = LeRobotDataset(
     repo_id="grasp_cube",

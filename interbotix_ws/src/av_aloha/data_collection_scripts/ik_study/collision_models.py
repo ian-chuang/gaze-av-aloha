@@ -141,16 +141,16 @@ SPHERE_BUDGET = {
     "left_finger_link": 6,
 }
 SPHERE_BUDGET_MIDDLE = {
-    "middlebase_link": 12,
-    "middleshoulder_link": 4,
-    "middleupper_arm_link": 6,
-    "middleupper_forearm_link": 4,  # slender cylinder
-    "middlelower_forearm_link": 4,
-    "middlewrist_link": 3,
-    "middlepan_link": 3,
-    "middlecamera": 2,
-    "middlecamera_body": 4,
-    "middlecamera_cover": 6,  # thin plate
+    "middle_base_link": 12,
+    "middle_shoulder_link": 4,
+    "middle_upper_arm_link": 6,
+    "middle_upper_forearm_link": 4,  # slender cylinder
+    "middle_lower_forearm_link": 4,
+    "middle_wrist_link": 3,
+    "middle_pan_link": 3,
+    "middle_camera": 2,
+    "middle_camera_body": 4,
+    "middle_camera_cover": 6,  # thin plate
 }
 
 
@@ -320,22 +320,22 @@ def pruned_tight_capsule_collision(urdf) -> RobotCollision:
     """Head-to-head capsule reference: corrected fits + the Part-1 link-level
     pruning (12 structural + 2 functional pairs removed)."""
     STRUCTURAL = (
-        ("leftbase_link", "leftupper_arm_link"),
-        ("rightbase_link", "rightupper_arm_link"),
-        ("middlebase_link", "middleupper_arm_link"),
-        ("middlecamera_body", "middlecamera_cover"),
-        ("leftwrist_link", "leftgripper_base"),
-        ("rightwrist_link", "rightgripper_base"),
-        ("leftlower_forearm_link", "leftgripper_base"),
-        ("rightlower_forearm_link", "rightgripper_base"),
-        ("middlepan_link", "middlecamera_cover"),
-        ("middlewrist_link", "middlecamera_cover"),
-        ("middlepan_link", "middlecamera_body"),
-        ("middlelower_forearm_link", "middlepan_link"),
+        ("left_base_link", "left_upper_arm_link"),
+        ("right_base_link", "right_upper_arm_link"),
+        ("middle_base_link", "middle_upper_arm_link"),
+        ("middle_camera_body", "middle_camera_cover"),
+        ("left_wrist_link", "left_gripper_base"),
+        ("right_wrist_link", "right_gripper_base"),
+        ("left_lower_forearm_link", "left_gripper_base"),
+        ("right_lower_forearm_link", "right_gripper_base"),
+        ("middle_pan_link", "middle_camera_cover"),
+        ("middle_wrist_link", "middle_camera_cover"),
+        ("middle_pan_link", "middle_camera_body"),
+        ("middle_lower_forearm_link", "middle_pan_link"),
     )
     FUNCTIONAL = (
-        ("leftleft_finger_link", "leftright_finger_link"),
-        ("rightleft_finger_link", "rightright_finger_link"),
+        ("left_left_finger_link", "left_right_finger_link"),
+        ("right_left_finger_link", "right_right_finger_link"),
     )
     return tight_capsule_collision(urdf, user_ignore_pairs=STRUCTURAL + FUNCTIONAL)
 

@@ -27,9 +27,9 @@ v_max = 2
 def main():
     urdf = URDF.load("/home/devi/giava/giava.urdf")
     target_link_names = [
-        "leftgripper_base",
-        "rightgripper_base",
-        "middlecamera_cover"
+        "left_gripper_base",
+        "right_gripper_base",
+        "middle_camera_cover"
     ]
 
     robot = pk.Robot.from_urdf(urdf)
@@ -37,13 +37,13 @@ def main():
     print(robot.joints.names)
 
     '''
-    ('base_leftbase_link_fixed', 'leftwaist', 'leftshoulder', 'leftelbow', 'leftforearm_roll', 'leftwrist_angle', 
-    'leftwrist_rotate', 'leftgripper_link_leftgripper_base_fixed', 'leftleft_finger', 'leftright_finger', 
-    'base_rightbase_link_fixed', 'rightwaist', 'rightshoulder', 'rightelbow', 'rightforearm_roll', 'rightwrist_angle', 
-    'rightwrist_rotate', 'rightgripper_link_rightgripper_base_fixed', 'rightleft_finger', 'rightright_finger', 
-    'middlebase_link', 'middleshoulder_link', 'middleupper_arm_link', 'middleupper_forearm_link', 
-    'middlelower_forearm_link', 'middlewrist_link', 'middlepan_link', 'base_middlebase_link_fixed', 
-    'middlecamera_body_fixed', 'middlecamera_cover_fixed')
+    ('base_left_base_link_fixed', 'left_waist', 'left_shoulder', 'left_elbow', 'left_forearm_roll', 'left_wrist_angle', 
+    'left_wrist_rotate', 'left_gripper_link_left_gripper_base_fixed', 'left_left_finger', 'left_right_finger', 
+    'base_right_base_link_fixed', 'right_waist', 'right_shoulder', 'right_elbow', 'right_forearm_roll', 'right_wrist_angle', 
+    'right_wrist_rotate', 'right_gripper_link_right_gripper_base_fixed', 'right_left_finger', 'right_right_finger', 
+    'middle_base_link', 'middle_shoulder_link', 'middle_upper_arm_link', 'middle_upper_forearm_link', 
+    'middle_lower_forearm_link', 'middle_wrist_link', 'middle_pan_link', 'base_middle_base_link_fixed', 
+    'middle_camera_body_fixed', 'middle_camera_cover_fixed')
     '''
 
     server = viser.ViserServer()

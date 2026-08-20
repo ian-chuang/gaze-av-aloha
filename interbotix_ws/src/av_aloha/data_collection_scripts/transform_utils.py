@@ -164,6 +164,38 @@ def xyzw_to_wxyz(quat):
 def wxyz_to_xyzw(quat):
     return np.array([quat[1], quat[2], quat[3], quat[0]])
 
+## Session-yaw calibration (2026-08, see TELEOP_MATH.md).  The headset app's
+## world frame -- after headset_utils' Unity->world ingestion conversion -- is
+## z-up but with an ARBITRARY per-session yaw (anchored where the headset faced
+## at app start; probe measured +43 deg one session).  These build the
+## world->robot bridge by MEASURING the operator's heading at anchor time.
+
+HEAD_LOCAL_FWD = np.array([1.0, 0.0, 0.0])  # head-local gaze axis (probe: +x, purity 0.90)
+
+
+def session_yaw_remap(head_pose, base_remap):
+    """Remap from the app world to the robot, calibrated to the operator's
+    facing direction at this moment.
+
+    forward = horizontal projection of the head's gaze (R_head @ HEAD_LOCAL_FWD),
+    up = world +z (shared between app world and robot world), left = z x fwd.
+    W maps app-world vectors to (fwd, left, up) components; base_remap maps
+    (fwd, left, up) to the robot frame.  Returns base_remap @ W, or None when
+    the gaze is too vertical to define a heading (caller keeps its previous or
+    static mapping)."""
+    f = np.asarray(head_pose)[:3, :3] @ HEAD_LOCAL_FWD
+    f = np.array([f[0], f[1], 0.0])
+    n = np.linalg.norm(f)
+    if n < 0.2:
+        return None
+    f /= n
+    u = np.array([0.0, 0.0, 1.0])
+    l = np.cross(u, f)
+    W = np.stack([f, l, u])
+    return np.asarray(base_remap, dtype=float) @ W
+
+
+
 @jit(float64[:,:](float64[:,:]), nopython=True, fastmath=True, cache=True)
 def align_rotation_to_z_axis(matrix):     
     # Get the current z-axis of the quaternion

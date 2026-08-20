@@ -17,10 +17,12 @@ from interbotix_xs_modules.arm import InterbotixManipulatorXS
 from interbotix_xs_msgs.msg import JointSingleCommand
 from interbotix_xs_msgs.srv import RegisterValues, RegisterValuesRequest
 
-from lerobot.common.datasets.lerobot_dataset import LeRobotDatasetMetadata
-from lerobot.common.datasets.utils import dataset_to_policy_features
-from lerobot.common.policies.act.configuration_act import ACTConfig
-from lerobot.common.policies.factory import make_policy
+from lerobot.datasets import LeRobotDatasetMetadata
+from lerobot.datasets.utils import dataset_to_policy_features
+from lerobot.policies.act.configuration_act import ACTConfig
+from lerobot.policies import make_policy
+from lerobot.policies.act.modeling_act import ACTPolicy
+from lerobot.processor import PolicyProcessorPipeline
 from lerobot.configs.types import FeatureType
 
 from ultralytics import YOLO
@@ -34,6 +36,27 @@ CAMERA_SERIALS = {
 
 RIGHT_RESET_Q = np.array([0.11, -0.48, 0.33, -0.03, 1.35, 0.05], dtype=float)
 MAX_JOINT_STEP = np.array([0.05, 0.05, 0.06, 0.10, 0.10, 0.12], dtype=float)
+
+def resolve_migrated_checkpoint_dir(policy_dir):
+    """Return the lerobot v0.6.0 checkpoint directory for `policy_dir`.
+
+    v0.6.0 loads a policy from a directory (clean model.safetensors plus the
+    policy_preprocessor / policy_postprocessor files), not from a raw .pt state
+    dict. migrate_checkpoints.py writes those next to the original as
+    "<original>_lerobot_v06"; if `policy_dir` is already such a directory it is
+    used as-is.
+    """
+    p = Path(policy_dir)
+    candidates = [p.parent / f"{p.name}_lerobot_v06", p]
+    for c in candidates:
+        if (c / "model.safetensors").exists() and (c / "policy_preprocessor.json").exists():
+            return c
+    raise FileNotFoundError(
+        f"No migrated checkpoint for {policy_dir}. Expected "
+        f"{p.parent / (p.name + '_lerobot_v06')} containing model.safetensors and "
+        "policy_preprocessor.json. Run migrate_checkpoints.py first."
+    )
+
 
 def csv_list(arg: str):
     if not arg or not arg.strip():
@@ -126,6 +149,7 @@ def make_mask_tensor(mask_img, device):
         torch.from_numpy(mask_3ch)
         .permute(2, 0, 1)
         .float()
+        .div(255.0)
         .unsqueeze(0)
         .to(device)
     )
@@ -137,6 +161,7 @@ def make_image_tensor(frame, device):
         torch.from_numpy(frame)
         .permute(2, 0, 1)
         .float()
+        .div(255.0)
         .unsqueeze(0)
         .to(device)
     )
@@ -413,26 +438,31 @@ def build_policy(dataset_root, policy_dir, device, checkpoint_mode="latest", che
         optimizer_lr_backbone=1e-5,
     )
 
-    policy = make_policy(cfg, ds_meta=dataset_metadata)
-
     ckpt_path = find_checkpoint(
         policy_dir,
         checkpoint_mode=checkpoint_mode,
         checkpoint_step=checkpoint_step,
     )
-    ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
-    state_dict = ckpt["policy_state_dict"] if "policy_state_dict" in ckpt else ckpt
+    migrated_dir = resolve_migrated_checkpoint_dir(policy_dir)
 
-    missing, unexpected = policy.load_state_dict(state_dict, strict=True)
-    if missing or unexpected:
-        raise RuntimeError(
-            f"State dict mismatch for {policy_dir}\n"
-            f"Missing: {missing}\nUnexpected: {unexpected}"
-        )
+    # CHANGED (lerobot v0.6.0): load the policy together with its normalization
+    # pipelines from a migrated checkpoint directory. Building a fresh policy and
+    # loading a raw .pt state dict no longer works -- those state dicts carry the
+    # old embedded `normalize_inputs.*` buffers, which the v0.6.0 model does not
+    # define, so a strict load fails. `migrated_dir` is the directory produced
+    # by migrate_checkpoints.py (named "<original>_lerobot_v06").
+    policy = ACTPolicy.from_pretrained(migrated_dir)
+
+    preprocessor = PolicyProcessorPipeline.from_pretrained(
+        migrated_dir, config_filename="policy_preprocessor.json"
+    )
+    postprocessor = PolicyProcessorPipeline.from_pretrained(
+        migrated_dir, config_filename="policy_postprocessor.json"
+    )
 
     policy.to(device)
     policy.eval()
-    return policy, dataset_metadata, ckpt_path
+    return policy, preprocessor, postprocessor, dataset_metadata, ckpt_path
 
 
 def reset_robot(right_bot):
@@ -505,6 +535,7 @@ def append_result(csv_path: Path, row: dict):
 
 def run_single_rollout(
     policy,
+    preprocessor,
     dataset_metadata,
     right_bot,
     pipelines,
@@ -538,7 +569,7 @@ def run_single_rollout(
                 yolo_conf=yolo_conf,
             )
 
-            output = policy.select_action(obs)
+            output = policy.select_action(preprocessor(obs))
             action_np = output.squeeze().detach().cpu().numpy()
 
             print(
@@ -690,7 +721,7 @@ def main():
                 input("Press Enter when ready to reset robot and start rollout...")
 
                 reset_robot(right_bot)
-                policy, dataset_metadata, ckpt_path = build_policy(
+                policy, preprocessor, postprocessor, dataset_metadata, ckpt_path = build_policy(
                     args.dataset_root,
                     run_dir,
                     device,
@@ -703,6 +734,7 @@ def main():
 
                 run_single_rollout(
                     policy=policy,
+                    preprocessor=preprocessor,
                     dataset_metadata=dataset_metadata,
                     right_bot=right_bot,
                     pipelines=pipelines,
@@ -722,6 +754,7 @@ def main():
 
                 aborted = run_single_rollout(
                     policy=policy,
+                    preprocessor=preprocessor,
                     dataset_metadata=dataset_metadata,
                     right_bot=right_bot,
                     pipelines=pipelines,
