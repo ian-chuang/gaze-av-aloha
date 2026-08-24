@@ -145,6 +145,28 @@ def select(argv: Optional[List[str]] = None) -> str:
     return mode
 
 
+def select_table(argv: Optional[List[str]] = None) -> bool:
+    """Read `--table on|off` (or GIAVA_TABLE) and apply it to os.environ.
+
+    Tabletop avoidance (ik_study/table_collision.py's soft cost + the
+    table_gate.py hard floor gate) is UNVALIDATED -- no sweep, no hardware
+    trial -- unlike the inter-arm collision modes above.  Both halves share
+    ONE switch here so the whole feature can be killed in one flag if it
+    misbehaves on hardware, instead of hunting two env vars mid-session.
+
+    MUST be called before study_ik or table_gate are imported: both read
+    their configuration from the environment at module import."""
+    val = take_option("table", argv, os.environ.get("GIAVA_TABLE", "on"))
+    val = str(val).strip().lower()
+    if val not in ("on", "off"):
+        raise SystemExit(f"--table must be on|off, got '{val}'")
+    enabled = "1" if val == "on" else "0"
+    os.environ.setdefault("GIAVA_IK_TABLE_ENABLE", enabled)
+    os.environ.setdefault("GIAVA_TABLE_GATE", enabled)
+    os.environ["GIAVA_TABLE"] = val
+    return val == "on"
+
+
 def banner(mode: str) -> str:
     _, summary = MODES[mode]
     g = os.environ
@@ -168,7 +190,15 @@ def banner(mode: str) -> str:
            f"{float(g.get('GIAVA_CAPSULE_GATE_MARGIN', '0.025')) * 1e3:.0f} mm"
            "   -- decides WHERE YOU STOP"),
         "-" * 74,
-        "  Switch with:  --collision sphere | capsule | gjk",
+        f"  Table (UNVALIDATED)  : "
+        + ("OFF -- nothing prevents the arms pressing into the table"
+           if g.get("GIAVA_TABLE", "on") != "on" else
+           f"soft cost + hard z-floor gate, margin "
+           f"{float(g.get('GIAVA_TABLE_GATE_MARGIN', '0.025')) * 1e3:.0f} mm"
+           "   -- allows contact, resists penetration; see "
+           "table_collision.py / table_gate.py"),
+        "-" * 74,
+        "  Switch with:  --collision sphere | capsule | gjk   --table on | off",
         "  The mode is recorded in the episode log.",
         "=" * 74,
     ])

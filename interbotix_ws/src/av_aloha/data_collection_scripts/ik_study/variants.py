@@ -283,10 +283,20 @@ class ComboIK:
         robot_coll: Optional[RobotCollision] = None,
         max_iterations: int = 100,
         collision_margin: float = COLLISION_MARGIN,
+        table_coll: Optional[RobotCollision] = None,
+        table_geom=None,  # pk.collision.CollGeom, e.g. table_collision.table_halfspace()
+        table_margin: float = 0.020,
     ) -> None:
-        assert set(extras) <= {"smoothing", "centering", "collision", "manipulability"}
+        assert set(extras) <= {
+            "smoothing", "centering", "collision", "manipulability", "table",
+        }
         if "collision" in extras and robot_coll is None:
             raise ValueError("collision combo needs robot_coll")
+        if "table" in extras and (table_coll is None or table_geom is None):
+            raise ValueError("table combo needs table_coll and table_geom "
+                              "(see table_collision.py) -- UNVALIDATED, see "
+                              "its module docstring before trusting it on "
+                              "hardware")
         self.robot = robot
         self.extras = dict(extras)
         self.max_iterations = max_iterations
@@ -355,6 +365,15 @@ class ComboIK:
                             weight=extras["manipulability"],
                         )
                     )
+            if "table" in extras:
+                costs.append(
+                    pk.costs.world_collision_cost(
+                        robot=robot, robot_coll=table_coll, joint_var=joint_var,
+                        world_geom=table_geom,
+                        margin=table_margin,
+                        weight=extras["table"],
+                    )
+                )
             sol, summary = (
                 jaxls.LeastSquaresProblem(costs=costs, variables=[joint_var])
                 .analyze()

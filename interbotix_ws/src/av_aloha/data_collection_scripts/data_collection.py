@@ -16,10 +16,13 @@ import threading
 try:
     from .collision_modes import banner as _collision_banner
     from .collision_modes import select as _collision_select
+    from .collision_modes import select_table as _table_select
 except ImportError:
     from collision_modes import banner as _collision_banner
     from collision_modes import select as _collision_select
+    from collision_modes import select_table as _table_select
 COLLISION_MODE = _collision_select()
+TABLE_MODE = _table_select()
 from pathlib import Path
 
 import numpy as np
@@ -387,6 +390,7 @@ def main():
     episode_stats = reset_episode_log(active_cameras, arm_names)
     tick_counter = 0
     _gate_last_print = [-10**9]
+    _table_gate_last_print = [-10**9]
     _frozen_prev = {"left": None, "right": None}
     _frozen_ticks = {"left": 0, "right": 0}
 
@@ -448,6 +452,17 @@ def main():
     from yourdfpy import URDF as _URDF_for_gate
     capsule_gate = _build_capsule_gate(robot, _URDF_for_gate.load(URDF_PATH))
     stats.collision_mode = COLLISION_MODE
+
+    ## Hard tabletop-floor gate, same call site and reasoning as the
+    ## inter-arm gate above but against the table plane instead of the other
+    ## arms (table_gate.py). UNVALIDATED, unlike capsule_gate: disable with
+    ## --table off / GIAVA_TABLE_GATE=0.
+    try:
+        from .table_gate import build_gate as _build_table_gate
+    except ImportError:
+        from table_gate import build_gate as _build_table_gate
+    table_gate = _build_table_gate(robot, _URDF_for_gate.load(URDF_PATH))
+    stats.table_mode = TABLE_MODE
 
     for arm_name in arm_names:
         move_to_named_pose(robots[arm_name], arm_name, "forward")
@@ -806,6 +821,10 @@ def main():
                 capsule_gate.validate(
                     coupled_ik.driver_to_urdf(cmd_kin.q_cmd),
                     where="teleop enable")
+            if table_gate is not None:
+                table_gate.validate(
+                    coupled_ik.driver_to_urdf(cmd_kin.q_cmd),
+                    where="teleop enable")
 
             start_teleop_session(
                 teleop_state,
@@ -1093,6 +1112,48 @@ def main():
                                   f"{_alpha * 100:.0f}%: {_pair[0]} <-> "
                                   f"{_pair[1]} stopping at "
                                   f"{_dist * 1e3:+.1f} mm")
+
+                ## HARD TABLE-FLOOR GATE, same call site and shrink-only
+                ## logic as the inter-arm gate above, run on whatever the
+                ## inter-arm gate left standing -- so the two compose
+                ## (chaining two shrink-only scalers can only ever leave the
+                ## command more conservative than either alone). See
+                ## table_gate.py; UNVALIDATED, disable with --table off.
+                if table_gate is not None and pending_cmds:
+                    q_prev_full = cmd_kin.q_cmd.copy()
+                    q_target_full = q_prev_full.copy()
+                    for _arm, _idx, _q, _ in pending_cmds:
+                        q_target_full[_idx] = _q
+                    _alpha, _dist, _link = table_gate.largest_safe_fraction(
+                        coupled_ik.driver_to_urdf(q_prev_full),
+                        coupled_ik.driver_to_urdf(q_target_full))
+
+                    if _alpha >= 1.0:
+                        pass                      # full step is clear
+                    elif _alpha <= 0.0:
+                        episode_stats.table_gate_blocks += 1
+                        if (tick_counter - _table_gate_last_print[0]) >= 25:
+                            _table_gate_last_print[0] = tick_counter
+                            print(f"[table gate] HOLDING: {_link} at "
+                                  f"{_dist * 1e3:+.1f} mm above the table "
+                                  f"(margin {table_gate.margin * 1e3:.0f} "
+                                  f"mm). Move away from the table.")
+                        pending_cmds = []
+                    else:
+                        episode_stats.table_gate_scaled += 1
+                        episode_stats.table_gate_min_alpha = min(
+                            episode_stats.table_gate_min_alpha, float(_alpha))
+                        scaled = []
+                        for _arm, _idx, _q, _prev in pending_cmds:
+                            _qs = (q_prev_full[_idx]
+                                   + _alpha * (_q - q_prev_full[_idx]))
+                            scaled.append((_arm, _idx, _qs, _prev))
+                        pending_cmds = scaled
+                        if (tick_counter - _table_gate_last_print[0]) >= 25:
+                            _table_gate_last_print[0] = tick_counter
+                            print(f"[table gate] limiting step to "
+                                  f"{_alpha * 100:.0f}%: {_link} stopping "
+                                  f"at {_dist * 1e3:+.1f} mm above the table")
 
                 for arm, joint_idx, q_arm_cmd, prev_cmd in pending_cmds:
                     cmd_step = np.linalg.norm(q_arm_cmd - prev_cmd)

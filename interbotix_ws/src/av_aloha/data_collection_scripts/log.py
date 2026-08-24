@@ -63,6 +63,11 @@ class SessionStats:
     ## healthy near the boundary; blocks are the harsher outcome.
     capsule_gate_scaled: int = 0
     capsule_gate_min_alpha: float = 1.0
+    ## Same two counters, for the tabletop floor gate (table_gate.py) --
+    ## UNVALIDATED, so worth watching separately from the inter-arm gate.
+    table_gate_blocks: int = 0
+    table_gate_scaled: int = 0
+    table_gate_min_alpha: float = 1.0
     driver_clamp_joints: dict[str, int] = field(default_factory=dict)
     # Residual misalignment of each timestep's camera frames, in seconds:
     # max minus min of the timestamps actually chosen.  Only populated when
@@ -74,6 +79,8 @@ class SessionStats:
     overruns: int = 0
     ## Which collision configuration produced this session (collision_modes.py).
     collision_mode: str = "unknown"
+    ## Whether tabletop avoidance was on for this session (--table, UNVALIDATED).
+    table_mode: str = "unknown"
 
 def reset_episode_log(active_cameras, active_arms):
     stats = SessionStats()
@@ -83,6 +90,7 @@ def reset_episode_log(active_cameras, active_arms):
     ## episode's feel is uninterpretable without knowing which model
     ## produced it.
     stats.collision_mode = _os.environ.get("GIAVA_COLLISION", "unknown")
+    stats.table_mode = _os.environ.get("GIAVA_TABLE", "unknown")
 
     for camera in active_cameras:
         stats.cameras[camera] = CameraStats()
@@ -136,6 +144,15 @@ def log_episode_info(episode_idx, episode_stats):
         msg.append(
             f"capsule_gate_scaled={episode_stats.capsule_gate_scaled}"
             f"(min step {episode_stats.capsule_gate_min_alpha * 100:.0f}%)")
+    _tm = getattr(episode_stats, "table_mode", None)
+    if _tm and _tm not in ("unknown", "off"):
+        msg.append(f"table={_tm}")
+    if episode_stats.table_gate_blocks:
+        msg.append(f"table_gate_blocks={episode_stats.table_gate_blocks}")
+    if episode_stats.table_gate_scaled:
+        msg.append(
+            f"table_gate_scaled={episode_stats.table_gate_scaled}"
+            f"(min step {episode_stats.table_gate_min_alpha * 100:.0f}%)")
     if episode_stats.driver_clamp_ticks:
         worst = sorted(episode_stats.driver_clamp_joints.items(),
                        key=lambda kv: -kv[1])[:3]

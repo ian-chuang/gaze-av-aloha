@@ -51,6 +51,7 @@ from yourdfpy import URDF  # noqa: E402
 
 from collision_models import (pruned_sphere_collision,  # noqa: E402
                               pruned_tight_capsule_collision)
+from table_collision import table_halfspace, table_robot_collision  # noqa: E402
 from variants import ComboIK  # noqa: E402
 
 ARM_ORDER = ("left", "right", "middle")
@@ -199,6 +200,20 @@ COLLISION_MARGIN = _env("GIAVA_IK_COLLISION_MARGIN", 0.020)  # m
 ## clamped command regardless of what is selected here.
 COLLISION_MODEL = os.environ.get("GIAVA_IK_COLLISION_MODEL", "sphere")
 
+## Tabletop world-collision (table_collision.py). UNVALIDATED -- no Phase-9-
+## style margin x weight sweep has been run for this term, unlike every other
+## weight above.  OFF by default; opt in per-run with
+##     GIAVA_IK_TABLE_ENABLE=1 python data_collection.py
+## and inspect it in ik_study/view_table_collision.py before trusting it on
+## hardware.  Margin/weight default to the self-collision winner's values as
+## a starting point only.
+TABLE_ENABLE = os.environ.get("GIAVA_IK_TABLE_ENABLE", "0") == "1"
+TABLE_W = _env("GIAVA_IK_TABLE_W", 100.0)
+TABLE_MARGIN = _env("GIAVA_IK_TABLE_MARGIN", 0.020)  # m
+TABLE_Z = _env("GIAVA_IK_TABLE_Z", 0.0)  # m, world frame -- same convention
+                                          # as calibration/base_validation.py
+                                          # --table-z
+
 ## Levenberg-Marquardt budget.  ComboIK defaults to 100; the study's winner
 ## converges in a handful of iterations from a warm start, and the benchmark
 ## measured a 20-iteration cap as bit-identical on tracking at a fraction of the
@@ -219,12 +234,17 @@ STUDY_DT = 0.02
 
 def describe_weights() -> str:
     """One-line summary, printed at startup so the deployed values are logged."""
+    table = (
+        f" table=UNVALIDATED,w={TABLE_W:g},margin={TABLE_MARGIN * 1e3:g}mm,"
+        f"z={TABLE_Z * 1e3:g}mm"
+        if TABLE_ENABLE else ""
+    )
     return (
         f"pos={POS_W:g} ori={ORI_W:g} "
         f"pos_mid={POS_W_MIDDLE:g} ori_mid={ORI_W_MIDDLE:g} smoothing={SMOOTHING_W:g} "
         f"centering={CENTERING_W:g} collision={COLLISION_W:g}"
         f"[{COLLISION_MODEL}] "
-        f"margin={COLLISION_MARGIN * 1e3:g}mm max_iter={MAX_ITERATIONS}"
+        f"margin={COLLISION_MARGIN * 1e3:g}mm max_iter={MAX_ITERATIONS}{table}"
     )
 
 
@@ -284,19 +304,31 @@ class CoupledStudyIK:
                 self._joint_offsets[j] = off
             except ValueError:
                 print(f"[study_ik] offsets file names unknown joint '{name}'")
+        extras = {
+            # Rescaled so w/(v_nom*STUDY_DT) equals the study's scale at the
+            # *actual* control period: w_eff = w * STUDY_DT / control_dt.
+            "smoothing": SMOOTHING_W * STUDY_DT / max(control_dt, 1e-6),
+            "centering": CENTERING_W,
+            "collision": COLLISION_W,
+        }
+        table_coll, table_geom = None, None
+        if TABLE_ENABLE:
+            extras["table"] = TABLE_W
+            table_coll = table_robot_collision(urdf, _IK_STUDY / "results")
+            table_geom = table_halfspace(TABLE_Z)
+            print("[study_ik] TABLE COLLISION ENABLED -- UNVALIDATED "
+                  "(see ik_study/table_collision.py). Inspect in "
+                  "view_table_collision.py before trusting on hardware.")
         self._ik = ComboIK(
             robot,
             tuple(ee_links[a] for a in ARM_ORDER),
-            extras={
-                # Rescaled so w/(v_nom*STUDY_DT) equals the study's scale at the
-                # *actual* control period: w_eff = w * STUDY_DT / control_dt.
-                "smoothing": SMOOTHING_W * STUDY_DT / max(control_dt, 1e-6),
-                "centering": CENTERING_W,
-                "collision": COLLISION_W,
-            },
+            extras=extras,
             robot_coll=robot_coll,
             collision_margin=COLLISION_MARGIN,
             max_iterations=max_iterations,
+            table_coll=table_coll,
+            table_geom=table_geom,
+            table_margin=TABLE_MARGIN,
         )
         self.control_dt = control_dt
         self.max_iterations = max_iterations
