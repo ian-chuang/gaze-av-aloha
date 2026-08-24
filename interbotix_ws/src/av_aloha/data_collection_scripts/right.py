@@ -22,7 +22,7 @@ from interbotix_xs_msgs.srv import RegisterValues, RegisterValuesRequest
 from scipy.spatial.transform import Rotation as R
 from yourdfpy import URDF
 from lerobot.datasets import LeRobotDataset
-from webrtc_headset import WebRTCHeadset
+from headset_link import make_headset
 from transform_utils import pose2mat
 
 logging.basicConfig(
@@ -615,7 +615,7 @@ def main():
     threading.Thread(target=keyboard_listener, daemon=True).start()
 
     # headset thread
-    headset = WebRTCHeadset()
+    headset = make_headset()
     headset.run_in_thread()
 
     # camera pipelines

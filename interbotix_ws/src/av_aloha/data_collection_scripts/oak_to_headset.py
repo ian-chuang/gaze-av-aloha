@@ -31,7 +31,7 @@ if str(_HERE) not in sys.path:
 import cv2  # noqa: E402
 import depthai as dai  # noqa: E402
 
-from webrtc_headset import WebRTCHeadset  # noqa: E402
+from headset_link import make_headset  # noqa: E402
 import camera_manager as cm  # noqa: E402
 from camera_manager import compose_eye_view, oak_stream_settings  # noqa: E402
 
@@ -102,12 +102,15 @@ def main() -> None:
           "device: RTEMS heap corruption on any stream config).")
     print(f"depthai version: {dai.__version__}")
 
-    headset = WebRTCHeadset()
+    headset = make_headset(src_size=(WIDTH, HEIGHT), fps=FPS)
     headset.run_in_thread()
-    print("WebRTC headset signaling started — put the headset on / open the "
-          "app to connect.")
+    print("Headset link started — put the headset on / open the app to "
+          "connect.")
 
     pipeline, q_left, q_right = build_pipeline()
+    ## build_pipeline() is what reads the OAK's calibration, so the measured
+    ## geometry only exists now -- after the headset was constructed.
+    cm._push_camera_params_to_headset(headset)
     print(f"Streaming {WIDTH}x{HEIGHT} color @ {FPS} fps ... Ctrl+C to stop")
     print(f"Stereo comfort: scale={cm.EYE_VIEW_SCALE:.2f} "
           f"inward={cm.EYE_VIEW_INWARD_FRAC:.2f} — tune live: a/z = "

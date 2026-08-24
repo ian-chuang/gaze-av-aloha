@@ -45,7 +45,8 @@ def append_save_debug_line(root: Path, message: str) -> None:
 class BackgroundEpisodeSaver:
     def __init__(self, dataset: LeRobotDataset):
         self.dataset = dataset
-        self.next_episode_index = dataset.episode_buffer["episode_index"]
+        self.next_episode_index = int(dataset.episode_buffer["episode_index"])
+        self._finalized = False
 
     def save_episode_async(self) -> int:
         if self.dataset.episode_buffer["size"] == 0:
@@ -74,8 +75,29 @@ class BackgroundEpisodeSaver:
     def close(self) -> None:
         # finalize() flushes buffered episode metadata and writes the parquet
         # footers. Without it the dataset on disk cannot be loaded back.
-        self.dataset.finalize()
+        #
+        # IDEMPOTENT on purpose: this is registered with atexit as well as
+        # being called from the normal 'q' shutdown, because a session that
+        # ends any other way (exception, Ctrl-C, rospy shutdown) would
+        # otherwise leave every episode it recorded unreadable.  Whichever
+        # path gets here first does the work; the other returns.
+        if self._finalized:
+            return
+        self._finalized = True
+        try:
+            self.dataset.finalize()
+        except Exception as exc:
+            # Reported, not re-raised: this also runs from atexit, where an
+            # exception would bury the one line that says what went wrong
+            # under an interpreter-shutdown traceback.
+            append_save_debug_line(self.dataset.root, f"FINALIZE FAILED: {exc}")
+            print(f"[dataset] FINALIZE FAILED: {exc}\n"
+                  f"[dataset] {self.dataset.root} may not load back -- "
+                  "check it with replay_episode.py --dry-run before recording "
+                  "more.")
+            return
         append_save_debug_line(self.dataset.root, "DATASET FINALIZED")
+        print(f"[dataset] finalized -> {self.dataset.root}")
 
 
 def build_state_names(active_arms):

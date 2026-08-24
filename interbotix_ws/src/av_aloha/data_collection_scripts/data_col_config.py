@@ -48,6 +48,13 @@ ACTION_LAYOUTS = {
         "right_gripper": 6,
     },
 
+    # The camera arm has 7 joints and no gripper -- build_action_names() lays
+    # it out as 7 values, nothing after.  Missing until now, so replaying a
+    # middle-only recording raised KeyError on a mode argparse accepted.
+    "middle": {
+        "middle_arm": slice(0, 7),
+    },
+
     "bimanual": {
         "left_arm": slice(0, 6),
         "left_gripper": 6,

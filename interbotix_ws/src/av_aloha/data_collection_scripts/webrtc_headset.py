@@ -47,20 +47,46 @@ def force_codec(pc, sender, forced_codec):
         [codec for codec in codecs if codec.mimeType == forced_codec]
     )
 
-## aiortc's VP8 encoder is hard-capped at 1.5 Mbps (aiortc/codecs/vpx.py:
-## MAX_BITRATE) -- shared across TWO 1280x800@25 streams that is ~0.06 bits per
-## pixel, which is exactly the smeared / "not fully formed" look on the
-## headset.  Raise the cap; local WiFi to the headset handles tens of Mbps.
+## aiortc's encoders ship with low hard-coded bitrate caps -- shared across TWO
+## 1280x800@25 streams they give ~0.06 bits per pixel, which is exactly the
+## smeared / "not fully formed" look on the headset.  Raise them; local WiFi to
+## the headset handles tens of Mbps.
+##
+## Both codecs are patched because the cap lives in whichever codec is actually
+## negotiated.  run_offer() forces H264 (hardware-decoded on Quest), so
+## aiortc/codecs/h264.py is the one that matters today -- patching only vpx, as
+## this block used to, had no effect at all on the H264 path.
+##
+## h264.py clamps target_bitrate to [MIN_BITRATE, MAX_BITRATE] and starts at
+## DEFAULT_BITRATE before any REMB arrives.  Its stock values are
+## 500k/1M/3M.  Starting high matters: the receiver's REMB estimate is based on
+## what it actually receives, so a sender that starts at 1 Mbps and gets
+## throttled from there can settle far below what the link would carry.
 import os as _os
 _HEADSET_BITRATE = int(float(_os.environ.get("GIAVA_HEADSET_BITRATE", 8e6)))
+## Floor kept well under the ceiling: forcing a high minimum on a link that
+## cannot carry it just converts bandwidth starvation into loss and freezes.
+_HEADSET_MIN_BITRATE = int(float(_os.environ.get("GIAVA_HEADSET_MIN_BITRATE", 1e6)))
 try:
     from aiortc.codecs import vpx as _vpx
     _vpx.DEFAULT_BITRATE = _HEADSET_BITRATE
     _vpx.MAX_BITRATE = _HEADSET_BITRATE
+    _vpx.MIN_BITRATE = min(_vpx.MIN_BITRATE, _HEADSET_MIN_BITRATE)
     print(f"[headset] VP8 bitrate cap {_HEADSET_BITRATE / 1e6:.1f} Mbps "
           f"(GIAVA_HEADSET_BITRATE to change)")
 except Exception as _e:
     print(f"[headset] could not raise VP8 bitrate cap: {_e}")
+try:
+    from aiortc.codecs import h264 as _h264
+    _h264.MAX_BITRATE = _HEADSET_BITRATE
+    _h264.DEFAULT_BITRATE = _HEADSET_BITRATE
+    _h264.MIN_BITRATE = _HEADSET_MIN_BITRATE
+    print(f"[headset] H264 bitrate {_HEADSET_MIN_BITRATE / 1e6:.1f}-"
+          f"{_HEADSET_BITRATE / 1e6:.1f} Mbps, start "
+          f"{_HEADSET_BITRATE / 1e6:.1f} Mbps "
+          f"(GIAVA_HEADSET_BITRATE / GIAVA_HEADSET_MIN_BITRATE to change)")
+except Exception as _e:
+    print(f"[headset] could not raise H264 bitrate cap: {_e}")
 
 
 class BufferVideoStreamTrack(VideoStreamTrack):

@@ -393,6 +393,64 @@ def build_oak_rectify_maps(calib, w, h):
     }
 
 
+def oak_gvlink_camera_params(calib, w, h, fisheye=None):
+    """
+    Rectified intrinsics + baseline for the headset viewer, in gvlink wire form.
+
+    The viewer places each image from these numbers instead of the operator guessing a
+    field of view, so they must describe the frames actually sent -- i.e. the RECTIFIED
+    ones. That means P1/P2 out of cv2.stereoRectify, not the raw K: after rectification
+    fx = P1[0,0], cx = P1[0,2], and the baseline is -P2[0,3] / fx.
+
+    Deliberately runs the same stereoRectify call as build_oak_rectify_maps() with the
+    same flags, so the geometry the viewer is told matches the remap the sender applies.
+    """
+    left, right = dai.CameraBoardSocket.CAM_B, dai.CameraBoardSocket.CAM_C
+    K1 = np.array(calib.getCameraIntrinsics(left, w, h), dtype=np.float64)
+    K2 = np.array(calib.getCameraIntrinsics(right, w, h), dtype=np.float64)
+    D1 = np.array(calib.getDistortionCoefficients(left), dtype=np.float64)
+    D2 = np.array(calib.getDistortionCoefficients(right), dtype=np.float64)
+    ext = np.array(calib.getCameraExtrinsics(left, right), dtype=np.float64)
+    R, T = ext[:3, :3], ext[:3, 3]
+    if K1[0, 0] < 10 or K2[0, 0] < 10 or not np.any(T):
+        raise ValueError("EEPROM has no real calibration")
+
+    if fisheye is None:
+        try:
+            fisheye = calib.getDistortionModel(left) == dai.CameraModel.Fisheye
+        except Exception:
+            fisheye = False
+
+    size = (w, h)
+    if fisheye:
+        d1, d2 = D1[:4].reshape(4, 1), D2[:4].reshape(4, 1)
+        _R1, _R2, P1, P2, _Q = cv2.fisheye.stereoRectify(
+            K1, d1, K2, d2, size, R, T, flags=cv2.CALIB_ZERO_DISPARITY, balance=0.0)
+    else:
+        _R1, _R2, P1, P2 = cv2.stereoRectify(
+            K1, D1, K2, D2, size, R, T, flags=cv2.CALIB_ZERO_DISPARITY, alpha=0)[:4]
+
+    fx = float(P1[0, 0])
+    baseline = abs(float(P2[0, 3]) / fx) if fx else 0.0
+    return {
+        "w": int(w), "h": int(h),
+        "b": baseline,
+        # The frames really are rectified before they are sent (see oak_worker), and the
+        # viewer refuses to undistort, so this must stay true.
+        "rect": True,
+        "l": {"fx": fx, "fy": float(P1[1, 1]),
+              "cx": float(P1[0, 2]), "cy": float(P1[1, 2])},
+        "r": {"fx": float(P2[0, 0]), "fy": float(P2[1, 1]),
+              "cx": float(P2[0, 2]), "cy": float(P2[1, 2])},
+    }
+
+
+## Filled in by setup_oak_stereo() so the headset link can describe the camera without
+## re-reading the device. None means "no calibration"; the link then synthesises a
+## symmetric pinhole from GIAVA_HEADSET_HFOV, which is a guess, not the truth.
+OAK_GVLINK_CAMERA = {"params": None}
+
+
 def setup_oak_stereo():
     if dai is None:
         raise ImportError("depthai is required for OAK stereo cameras.")
@@ -420,8 +478,16 @@ def setup_oak_stereo():
               "rectified.")
     except Exception as e_file:
         try:
-            OAK_RECTIFY["maps"] = build_oak_rectify_maps(
-                device.readCalibration(), _w, _h)
+            _calib = device.readCalibration()
+            OAK_RECTIFY["maps"] = build_oak_rectify_maps(_calib, _w, _h)
+            try:
+                OAK_GVLINK_CAMERA["params"] = oak_gvlink_camera_params(_calib, _w, _h)
+                print(f"[OAK] headset camera params: {OAK_GVLINK_CAMERA['params']['w']}x"
+                      f"{OAK_GVLINK_CAMERA['params']['h']} "
+                      f"fx={OAK_GVLINK_CAMERA['params']['l']['fx']:.0f} "
+                      f"baseline={OAK_GVLINK_CAMERA['params']['b'] * 1000:.0f} mm")
+            except Exception as e_cam:
+                print(f"[OAK] could not derive headset camera params ({e_cam})")
             print(f"[OAK] checkerboard npz unavailable ({e_file}); using "
                   "EEPROM calibration — headset stream undistorted + "
                   "rectified.")
@@ -544,6 +610,30 @@ def setup_realsense_cameras(active_cameras, camera_shutdown, frame_lock, latest_
 
     return rs_pipelines
 
+def _push_camera_params_to_headset(headset):
+    """Give the headset the OAK's measured geometry, if it can take it.
+
+    Best-effort by design: the WebRTC transport has no equivalent (the viewer
+    guesses a field of view there), and a headset that cannot be told is not a
+    reason to fail camera setup."""
+    if headset is None:
+        return
+    setter = getattr(headset, "set_camera_params", None)
+    if setter is None:
+        return
+    params = OAK_GVLINK_CAMERA.get("params")
+    if not params:
+        print("[OAK] no rectified calibration to send the viewer -- it will "
+              "place the images from a synthesised field of view.")
+        return
+    try:
+        if setter(params):
+            print("[OAK] viewer camera geometry updated from the OAK "
+                  "calibration.")
+    except Exception as exc:
+        print(f"[OAK] could not send camera geometry to the viewer: {exc}")
+
+
 def setup_cameras(
     active_cameras,
     camera_shutdown,
@@ -557,6 +647,14 @@ def setup_cameras(
     if any(cam.startswith("oak") for cam in active_cameras):
         cameras["oak"] = setup_oak_stereo()
         if cameras["oak"] is not None:
+            ## setup_oak_stereo() is what FILLS OAK_GVLINK_CAMERA -- the
+            ## rectified intrinsics and baseline only exist once the device
+            ## has been opened and its calibration read.  Callers build the
+            ## headset first (so the viewer can connect while the cameras come
+            ## up), which means the constructor saw None and the viewer would
+            ## otherwise place both images from a synthesised 90-degree
+            ## pinhole.  Hand the measured geometry over now.
+            _push_camera_params_to_headset(headset)
             threading.Thread(
                 target=oak_worker,
                 args=(cameras, headset, camera_shutdown, frame_lock,
@@ -581,9 +679,22 @@ def setup_cameras(
 ## by EYE_VIEW_SCALE onto a black canvas and shifted toward the nose by
 ## EYE_VIEW_INWARD_FRAC of the width (left image moves right, right image
 ## moves left), which zooms the view out and pulls the pair together.
-## Tune live with oak_to_headset.py, then paste the values here.
-EYE_VIEW_SCALE = 0.825
-EYE_VIEW_INWARD_FRAC = 0.10
+##
+## DISABLED BY DEFAULT (scale 1.0, inward 0.0): the Unity viewer now does both
+## jobs as quad geometry, for free and without touching the pixels --
+## videoVFOV/videoScale replace the scale, stereoSeparationDeg replaces the
+## inward shift (opposite sign: inward positive == stereoSeparationDeg
+## negative).  Doing it here instead cost real image quality: at scale 0.825
+## about a third of every transmitted frame was black border that the encoder
+## still had to spend bitrate on, and the resize + canvas copy ran twice per
+## frame on the capture thread that feeds the encoder.
+##
+## compose_eye_view() short-circuits and returns the frame untouched at these
+## values, so leaving them here costs nothing.  Set them again only if you
+## deliberately want the sender to do the framing -- and if you do, zero the
+## Unity side or the two will fight.
+EYE_VIEW_SCALE = 1.0
+EYE_VIEW_INWARD_FRAC = 0.0
 
 ## Runtime-tunable copies (the constants above are the defaults).  The values
 ## went stale when checkerboard rectification was added to the headset path --

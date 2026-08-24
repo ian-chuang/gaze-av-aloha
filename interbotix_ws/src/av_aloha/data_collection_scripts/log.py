@@ -35,6 +35,14 @@ class ArmStats:
 @dataclass
 class SessionStats:
     frames_added: int = 0
+    ## Frames dropped BEFORE teleop was first enabled in this episode
+    ## (GIAVA_RECORD_GATE=teleop).  These are the operator walking from the
+    ## keyboard back to the controllers: the arm parked at the reset pose,
+    ## action == reset pose, repeated.  Recording them makes the reset pose
+    ## the single most common action in the dataset and teaches a policy to
+    ## fall back to it whenever the scene looks static.  Counted so the cost
+    ## of the habit is visible per episode.
+    frames_skipped_pre_teleop: int = 0
 
     teleop_enable_count: int = 0
     teleop_disable_count: int = 0
@@ -110,6 +118,8 @@ def log_episode_info(episode_idx, episode_stats):
     msg = [
         f"episode={episode_idx:04d}",
         f"frames_added={episode_stats.frames_added}",
+        f"frames_skipped_pre_teleop="
+        f"{getattr(episode_stats, 'frames_skipped_pre_teleop', 0)}",
         f"teleop_enable={episode_stats.teleop_enable_count}",
         f"teleop_disable={episode_stats.teleop_disable_count}",
         f"overruns={episode_stats.overruns}",

@@ -26,7 +26,7 @@ except ImportError:
     rospy = None
 
 if __package__:
-    from .webrtc_headset import WebRTCHeadset
+    from .headset_link import make_headset
     from .arm_config import ARM_CONFIG
     try:
         from .three_arm_ik import make_three_arm_ik_solver
@@ -74,7 +74,7 @@ if __package__:
         log_episode_info,
     )
 else:
-    from webrtc_headset import WebRTCHeadset
+    from headset_link import make_headset
 
     from arm_config import ARM_CONFIG
     try:
@@ -289,7 +289,7 @@ def main():
     threading.Thread(target=keyboard_listener, daemon=True).start()
 
     # headset thread
-    headset = WebRTCHeadset()
+    headset = make_headset()
     headset.run_in_thread()
 
     # camera pipelines

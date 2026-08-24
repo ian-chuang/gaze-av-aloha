@@ -32,7 +32,7 @@ import sys
 import termios
 import tty
 
-from interbotix_ws.src.av_aloha.data_collection_scripts.webrtc_headset import WebRTCHeadset
+from interbotix_ws.src.av_aloha.data_collection_scripts.headset_link import make_headset
 from headset_control import HeadsetFullControl as HeadsetControl
 from headset_utils import HeadsetFeedback
 
@@ -71,7 +71,7 @@ running = True
 # HEADSET
 # ============================================================
 
-headset = WebRTCHeadset()
+headset = make_headset()
 headset.run_in_thread()
 
 headset_control = HeadsetControl()

@@ -1,10 +1,5 @@
 import os
 
-# The coupled IK study runs the solver on CPU (measured faster than GPU at
-# this problem size, ~5 ms/solve).  Must be set before jax is imported
-# anywhere (jaxlie below pulls it in).  Override by exporting JAX_PLATFORMS.
-os.environ.setdefault("JAX_PLATFORMS", "cpu")
-
 import sys
 import time
 import threading
@@ -17,12 +12,19 @@ try:
     from .collision_modes import banner as _collision_banner
     from .collision_modes import select as _collision_select
     from .collision_modes import select_table as _table_select
+    from .jax_platform import select as _jax_select
 except ImportError:
     from collision_modes import banner as _collision_banner
     from collision_modes import select as _collision_select
     from collision_modes import select_table as _table_select
+    from jax_platform import select as _jax_select
 COLLISION_MODE = _collision_select()
 TABLE_MODE = _table_select()
+## Which backend the coupled solver runs on.  GPU-first: the study's CPU
+## finding was measured on the BARE pose solver, and the deployed one carries
+## the 180-sphere collision cost and the table term on top.  `--jax cpu`
+## restores the studied configuration.  See jax_platform.py.
+JAX_PLATFORM = _jax_select()
 from pathlib import Path
 
 import numpy as np
@@ -32,9 +34,44 @@ LOG_CLEARANCE = os.environ.get("GIAVA_LOG_CLEARANCE", "0") == "1"
 DEBUG_HEAD = os.environ.get("GIAVA_DEBUG_HEAD", "0") == "1"
 DEBUG_HANDS = os.environ.get("GIAVA_DEBUG_HANDS", "0") == "1"
 TRACK_LOG = os.environ.get("GIAVA_TRACK_LOG", "0") == "1"
-# Middle-arm activation: "y" (default, dedicated Y button) or "either"
-# (middle follows whenever X or A is held -- the original coupled behavior).
-MIDDLE_BUTTON = os.environ.get("GIAVA_MIDDLE_BUTTON", "y")
+# Middle-arm activation.
+#   "either" (default) -- the camera arm follows the head whenever EITHER
+#       gripper arm is being driven (X or A held), and also on its own with Y.
+#       Active vision is a property of the task, not a fourth thing to hold:
+#       the operator's head is already looking where the hands are working, so
+#       coupling the camera to "am I teleoperating at all" is what makes the
+#       recorded gaze trajectory match the manipulation it belongs to.
+#   "y" -- camera arm ONLY while Y (left button two) is held.  Use this when
+#       deliberately parking the camera, or to isolate head-motion effects
+#       while debugging the gripper arms.
+# When a frame starts being written into the episode.
+#
+#   "teleop" (default) -- not until teleop has been enabled at least once in
+#       this episode.  Recording begins on the 'r' key, but the operator then
+#       has to put the headset back on and squeeze a button, and every frame
+#       in between is the arm PARKED AT THE RESET POSE with action == reset
+#       pose.  A few seconds of that per episode makes the reset pose by far
+#       the most common action in the dataset, at near-zero variance, paired
+#       with observations of a static scene -- which is exactly the recipe for
+#       a policy that snaps precisely back to the reset pose whenever the
+#       scene stops changing.  Nothing "leaked" from the reset AFTER the save;
+#       the reset pose was in the episodes from the front all along.
+#   "all" -- record every frame from 'r' onward (the historical behaviour).
+#
+# The tail is deliberately NOT trimmed: frames after the operator releases the
+# buttons are a hold at the FINAL pose, which is a reasonable thing for a
+# policy to learn, and cutting them would need lookahead this loop does not
+# have.
+RECORD_GATE = os.environ.get("GIAVA_RECORD_GATE", "teleop").strip().lower()
+if RECORD_GATE not in ("teleop", "all"):
+    print(f"[config] GIAVA_RECORD_GATE={RECORD_GATE!r} is not teleop|all; "
+          "using 'teleop'")
+    RECORD_GATE = "teleop"
+MIDDLE_BUTTON = os.environ.get("GIAVA_MIDDLE_BUTTON", "either").strip().lower()
+if MIDDLE_BUTTON not in ("either", "y"):
+    print(f"[config] GIAVA_MIDDLE_BUTTON={MIDDLE_BUTTON!r} is not either|y; "
+          "using 'either'")
+    MIDDLE_BUTTON = "either"
 # Default OFF (2026-08, revised): on-hardware testing with the debug tool
 # showed the gripper arms HIGHLY affected by head motion with composition ON,
 # and behaving correctly with raw streams.  (An earlier stand-up test pointed
@@ -65,7 +102,7 @@ except ImportError:
     rospy = None
 
 if __package__:
-    from .webrtc_headset import WebRTCHeadset
+    from .headset_link import make_headset
     from .arm_config import ARM_CONFIG, URDF_PATH
     try:
         from .three_arm_ik import make_three_arm_ik_solver
@@ -128,7 +165,7 @@ if __package__:
         log_episode_info,
     )
 else:
-    from webrtc_headset import WebRTCHeadset
+    from headset_link import make_headset
 
     from arm_config import ARM_CONFIG, URDF_PATH
     try:
@@ -246,15 +283,16 @@ def safe_shutdown(robots, pipelines, dataset, episode_saver, collecting_episode,
     """Minimal safe shutdown helper to avoid undefined-symbol crashes."""
     try:
         if collecting_episode and dataset is not None:
-            # CHANGED: queue the in-progress episode so shutdown can wait on the
-            # single background writer instead of blocking the control loop first.
+            ## Save whatever was in progress rather than losing it on exit.
             episode_saver.save_episode_async()
             collecting_episode = False
     except Exception:
         pass
 
     try:
-        # CHANGED: make shutdown wait until all queued episode saves finish.
+        ## close() -> dataset.finalize(), which flushes the buffered episode
+        ## metadata and writes the parquet footers.  WITHOUT IT THE DATASET ON
+        ## DISK CANNOT BE LOADED BACK -- quit with 'q', never Ctrl-C.
         if episode_saver is not None:
             episode_saver.close()
     except Exception:
@@ -285,6 +323,9 @@ def main():
 
     global latest_key
     collecting_episode = False
+    ## True once teleop has been enabled during the CURRENT episode; see
+    ## RECORD_GATE above.  Reset with every r / s / d.
+    episode_armed = False
     cfg = TeleopConfig()
 
     stats = SessionStats()
@@ -361,7 +402,7 @@ def main():
     threading.Thread(target=keyboard_listener, daemon=True).start()
 
     # headset thread
-    headset = WebRTCHeadset()
+    headset = make_headset()
     headset.run_in_thread()
 
     # camera pipelines
@@ -521,11 +562,17 @@ def main():
     if _flags:
         raise SystemExit(
             f"unrecognised option(s): {' '.join(_flags)}\n"
-            f"  usage: python data_collection.py [episode_index] "
-            f"[--collision sphere|capsule|gjk] [--mode av|bimanual|left|"
-            f"right|middle]\n"
-            f"  (--collision is consumed before startup; see "
-            f"collision_modes.py)")
+            f"  usage: python data_collection.py [episode_index]\n"
+            f"         [--collision sphere|capsule|gjk]   see collision_modes.py\n"
+            f"         [--table on|off]                   tabletop avoidance\n"
+            f"         [--jax gpu|cpu|cuda]               solver backend, see "
+            f"jax_platform.py\n"
+            f"         [--mode av|bimanual|left|right|middle]\n"
+            f"  (every flag above is consumed before startup, which is why an "
+            f"unknown one lands here rather than in the episode index)")
+    ## A starting hint only: create_dataset() always opens a FRESH run folder,
+    ## so the dataset's own episode counter starts at 0 regardless, and 'r'
+    ## below replaces this with that authoritative index.
     try:
         episode_idx = int(_pos[0]) if _pos else 0
     except ValueError:
@@ -548,9 +595,19 @@ def main():
         if REQUIRE_CALIBRATION:
             raise
 
-    # CHANGED: background saver lets collection continue while a single worker
-    # serializes episodes into the shared dataset folder.
+    ## Thin adapter over lerobot's own streaming encoder (dataset.py): frames
+    ## reach the per-camera encoder threads as they are recorded, so saving an
+    ## episode does not block the control loop.
     episode_saver = BackgroundEpisodeSaver(dataset)
+
+    ## finalize() is what makes the recorded episodes LOADABLE -- without it
+    ## the parquet footers are never written and nothing can read the dataset
+    ## back, replay included.  It used to run only on the 'q' path, so any
+    ## other way out of a session (a traceback, Ctrl-C, roscore going away)
+    ## silently cost every episode recorded in that run.  close() is
+    ## idempotent, so the 'q' path still works exactly as before.
+    import atexit
+    atexit.register(episode_saver.close)
 
     # print(f"Dataset: {dataset}")
     # print(f"Dataset root: {dataset_root}")
@@ -592,9 +649,23 @@ def main():
                 print("\nStarting the save")
                 stop_teleop_session(teleop_state)
                 collecting_episode = False
-                # CHANGED: hand off saving to the background worker and continue
-                # collecting in the same dataset folder.
-                episode_saver.save_episode_async()
+                episode_armed = False
+                ## Despite the name, this no longer hands off to a worker
+                ## thread of ours: lerobot streams each frame to per-camera
+                ## encoder threads AS IT IS RECORDED, so by now the video is
+                ## already encoded and save_episode() only writes metadata.
+                ## See dataset.py.  The name is kept because safe_shutdown()
+                ## and the three-arm script call it too.
+                ## save_episode_async() raises on an empty buffer (r then s with
+                ## no frames in between).  That must not take the session down:
+                ## the arms are live and an operator mis-keystroke is not a
+                ## reason to lose the run.
+                try:
+                    episode_idx = episode_saver.save_episode_async()
+                except Exception as exc:
+                    print(f"\nNOTHING TO SAVE ({exc}) -- episode dropped.")
+                    episode_stats = reset_episode_log(active_cameras, arm_names)
+                    continue
                 log_episode_info(episode_idx, episode_stats)
                 if TRACK_LOG:
                     _ld = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -617,8 +688,14 @@ def main():
                                      scale=cfg.position_scale, arm=_a,
                                      traj=f"episode_{episode_idx}", weights=_w)
                             print(f"[track] wrote {os.path.basename(_lp)}")
-                episode_idx += 1
-                print(f"\nEPISODE QUEUED FOR SAVE")
+                ## The DATASET decides the next index, not a local counter.
+                ## They diverge the first time an episode is discarded --
+                ## clear_episode_buffer() reuses the index, a counter does not
+                ## -- and from then on every logged episode number, every
+                ## track-log filename and anything the operator writes down
+                ## names a different episode than `--episode-idx` will replay.
+                episode_idx = episode_saver.next_episode_index
+                print(f"\nEPISODE SAVED (next: episode_{episode_idx:04d})")
 
                 # LOGGING TBD
             continue
@@ -630,13 +707,19 @@ def main():
                 print("\nDiscarding the current episode.")
                 stop_teleop_session(teleop_state)
                 collecting_episode = False
-                # CHANGED: discard only the active foreground buffer while
-                # leaving any queued background saves untouched.
+                episode_armed = False
+                ## Cancels the in-flight streaming encode and drops the
+                ## buffer.  Episodes already saved are untouched.
                 episode_saver.discard_current_episode()
-                episode_idx += 1
-                episode_stats = None
-                reset_episode_log(active_cameras, arm_names)
-                print(f"\nEPISODE DISCARDED")
+                ## Do NOT advance the index: clear_episode_buffer() reuses it,
+                ## so the next save really is this same episode number.
+                ## And KEEP the return value -- this used to set episode_stats
+                ## to None and drop the fresh log on the floor, so the next
+                ## tick's episode_stats.headset.append() killed the session
+                ## every time an episode was discarded.
+                episode_stats = reset_episode_log(active_cameras, arm_names)
+                print(f"\nEPISODE DISCARDED (episode_{episode_idx:04d} will be "
+                      "reused)")
             continue
 
         if key == "r":
@@ -644,9 +727,13 @@ def main():
                 print("\nAlready recording episode. Press s to save or d to discard.")
             else:
                 collecting_episode = True
+                episode_armed = False
 
                 episode_stats = reset_episode_log(active_cameras, arm_names)
 
+                ## Announce the dataset's index, so what the operator writes in
+                ## the notebook matches what --episode-idx replays.
+                episode_idx = episode_saver.next_episode_index
                 print(f"\nCOLLECTING: episode_{episode_idx:04d}")
 
         # Live stereo-comfort tuning (headset view only; dataset unaffected).
@@ -740,14 +827,15 @@ def main():
         button_pressed = (headset_data.r_button_one or headset_data.l_button_one
                           or headset_data.l_button_two)
 
-        # Per-arm buttons: X (left one) = left arm, A (right one) = right arm,
-        # Y (left two) = middle/camera arm ONLY.  The camera stays parked
-        # unless Y is held, so incidental head motion moves nothing.
+        # Per-arm buttons: X (left one) = left arm, A (right one) = right arm.
+        # The camera arm follows the head whenever EITHER gripper arm is being
+        # driven, and Y (left two) drives it alone -- so the camera can be
+        # aimed before a grasp without holding a gripper button.  With
+        # GIAVA_MIDDLE_BUTTON=y only the Y button counts and the camera stays
+        # parked through incidental head motion.
         arm_active = {
             "left": headset_data.l_button_one,
             "right": headset_data.r_button_one,
-            "middle": (headset_data.l_button_two if MIDDLE_BUTTON == "y" else
-                       (headset_data.l_button_one or headset_data.r_button_one)),
         }
         # Tool parity: a frozen device (asleep / untracked, probe-measured 0.5 m
         # drift on re-acquire) must not drive an arm.  Refuse activation and
@@ -768,6 +856,16 @@ def main():
                 if tick_counter % 50 == 0:
                     print(f"[tracking] {_side} controller frozen -- {_arm} arm "
                           "held (wiggle the controller)")
+
+        ## Middle is decided AFTER the tracking guard, from the arms that
+        ## actually ended up driving -- not from the raw buttons.  A controller
+        ## that falls asleep keeps reporting whatever it was holding, and
+        ## reading the raw button would let a dead device that is no longer
+        ## allowed to drive its own arm keep the camera following the head.
+        arm_active["middle"] = (
+            headset_data.l_button_two if MIDDLE_BUTTON == "y" else
+            (arm_active["left"] or arm_active["right"]
+             or headset_data.l_button_two))
 
         for arm in arm_names:
             if arm not in teleop_state.arms:
@@ -835,7 +933,15 @@ def main():
             )
 
             print("\nTeleop ENABLED")
-            episode_stats.teleop_enable_count += 1
+            if collecting_episode and not episode_armed:
+                episode_armed = True
+                if episode_stats.frames_skipped_pre_teleop:
+                    print(f"[record] episode starts here; skipped "
+                          f"{episode_stats.frames_skipped_pre_teleop} parked "
+                          f"frames since 'r' "
+                          f"({episode_stats.frames_skipped_pre_teleop * cfg.control_dt:.1f} s "
+                          f"at the reset pose). GIAVA_RECORD_GATE=all to keep "
+                          f"them.")
             episode_stats.teleop_enable_count += 1
         elif (not button_pressed) and teleop_state.active:
             stop_teleop_session(teleop_state)
@@ -1219,7 +1325,16 @@ def main():
 
             episode_stats.ik_solve.append(now() - t_solve_start)
 
-        if collecting_episode:
+        ## See RECORD_GATE: frames before the first teleop enable are the arm
+        ## sitting at the reset pose, and writing them is what put thousands of
+        ## identical reset-pose actions into every recorded dataset.
+        if collecting_episode and RECORD_GATE == "teleop" and not episode_armed:
+            episode_stats.frames_skipped_pre_teleop += 1
+            collecting_episode_now = False
+        else:
+            collecting_episode_now = collecting_episode
+
+        if collecting_episode_now:
             obs_ts = now()
 
             images = {}

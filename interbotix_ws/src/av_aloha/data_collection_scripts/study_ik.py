@@ -26,15 +26,33 @@ Notes for this integration:
   TeleopConfig (whose pos 40 / ori 0.25 / dq 0.18 belong to the old per-arm
   solver).  Expect much stiffer orientation tracking than before — that is
   the study's central correction, not a bug.  Tune here if the feel is off.
-- Runs on CPU by design (study: ~5 ms/solve; GPU is slower at this problem
-  size).  The env pin must happen before jax is imported anywhere.
+- Runs on the GPU by default (jax_platform.py).  The study's "CPU is faster"
+  result was measured on the BARE pose solver; this one carries the
+  180-sphere self-collision cost and the tabletop term, which is the regime
+  where the arithmetic outweighs kernel-launch overhead.  `--jax cpu` (or
+  GIAVA_JAX_PLATFORM=cpu) restores the studied configuration, and the backend
+  that actually initialised is printed at construction -- CUDA falls back to
+  CPU silently otherwise.
 """
 
 from __future__ import annotations
 
 import os
 
-os.environ.setdefault("JAX_PLATFORMS", "cpu")
+## Backend selection, before ANY jax import below (jaxlie pulls it in).
+## GPU-first -- see jax_platform.py for why the study's CPU result does not
+## carry over to the collision-carrying solver this file actually builds.
+## `--jax cpu` on the entry point, or GIAVA_JAX_PLATFORM=cpu, restores it.
+try:
+    from .jax_platform import apply as _jax_apply
+except ImportError:
+    import sys as _sys
+    from pathlib import Path as _Path
+    _HERE = str(_Path(__file__).resolve().parent)
+    if _HERE not in _sys.path:
+        _sys.path.insert(0, _HERE)
+    from jax_platform import apply as _jax_apply
+_jax_apply()
 
 import sys
 from pathlib import Path
@@ -341,6 +359,15 @@ class CoupledStudyIK:
         self.last_solve_ms: float = float("nan")
         self.last_iterations: int = 0
         print(f"[study_ik] weights: {describe_weights()}")
+        ## Name the backend that ACTUALLY initialised.  "cuda,cpu" falls back
+        ## silently by design (a missing driver must not stop data
+        ## collection), which is exactly how a GPU that never engaged stays
+        ## invisible -- so it is printed rather than assumed.
+        try:
+            from .jax_platform import describe as _jax_describe
+        except ImportError:
+            from jax_platform import describe as _jax_describe
+        print(_jax_describe())
 
     # ------------------------------------------------------------------ #
     def driver_to_urdf(self, q_driver: np.ndarray) -> np.ndarray:
