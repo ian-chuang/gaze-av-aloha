@@ -59,7 +59,7 @@ if _GVLINK_PATH not in sys.path:
 try:
     from gvlink.beacon import Beacon, build_payload
     from gvlink.camera import CameraParams
-    from gvlink.foveal import AtlasLayout, SaccadeWidener
+    from gvlink.foveal import MIN_CANVAS, AtlasLayout, SaccadeWidener
     from gvlink.protocol import (BUTTON_ONE, BUTTON_STICK, BUTTON_TWO, CODEC_H264,
                                  CODEC_MJPEG, DEFAULT_PORTS, EYE_LEFT, EYE_RIGHT,
                                  MTU_PAYLOAD, MTU_PAYLOAD_TUNNEL, HeadsetInput)
@@ -84,6 +84,13 @@ def _env_float(name: str, default: float) -> float:
         return float(os.environ.get(name, default))
     except (TypeError, ValueError):
         return default
+
+
+def _tighten(layout: "AtlasLayout") -> "AtlasLayout":
+    try:
+        return layout.tightened()
+    except Exception:
+        return layout
 
 
 def _env_int(name: str, default: int) -> int:
@@ -140,12 +147,14 @@ class GvLinkHeadset:
         canvas = canvas or (_env_int("GIAVA_CANVAS_W", 1024), _env_int("GIAVA_CANVAS_H", 1024))
         self.foveation = (foveation if foveation is not None
                           else os.environ.get("GIAVA_FOVEATION", "1") not in ("0", "false", "False"))
-        self.layout = AtlasLayout(
+        # tightened() trims the atlas to what the layers actually occupy; the reference
+        # sender does the same, and it is worth roughly 2x encode and 14% bitrate.
+        self.layout = _tighten(AtlasLayout(
             canvas_w=canvas[0], canvas_h=canvas[1],
             coarse_scale=(coarse_scale if coarse_scale is not None
                           else _env_float("GIAVA_COARSE_SCALE", 0.35)),
             fovea_scale=(fovea_scale if fovea_scale is not None
-                         else _env_float("GIAVA_FOVEA_SCALE", 0.5)))
+                         else _env_float("GIAVA_FOVEA_SCALE", 0.5))))
 
         codec = (codec or os.environ.get("GIAVA_HEADSET_CODEC", "h264")).lower()
         self.codec = CODEC_MJPEG if codec == "mjpeg" else CODEC_H264
@@ -413,20 +422,52 @@ class GvLinkHeadset:
             return None
         return (sess.addr, getattr(sess, "video_port", self.ports["video"])), sess
 
+    def _layout_for(self, sess) -> "AtlasLayout":
+        """
+        The viewer may ask for its own atlas shape -- it is the end that knows its own
+        decoder and its own link. A requested canvas is honoured AS GIVEN, not
+        re-tightened: the viewer allocates its decode texture at the size it asked for
+        and divides every layer span by that number, so changing it underneath would
+        leave it sampling the wrong part of the atlas. The clamp is a guard against a
+        broken client, not a negotiation.
+        """
+        if sess is None or not getattr(sess, "canvas", None):
+            return self.layout
+        try:
+            w, h = sess.canvas
+            return AtlasLayout(
+                max(MIN_CANVAS, min(2048, int(w))), max(MIN_CANVAS, min(2048, int(h))),
+                coarse_scale=(sess.coarse_scale if getattr(sess, "coarse_scale", None)
+                              else self.layout.coarse_scale),
+                fovea_scale=(sess.fovea_scale if getattr(sess, "fovea_scale", None)
+                             else self.layout.fovea_scale))
+        except (ValueError, TypeError) as exc:
+            print(f"[headset] ignoring requested stream shape: {exc}")
+            return self.layout
+
     def _send_pair(self, dest_and_session, pair, now: float) -> None:
         (dest, sess) = dest_and_session
         codec = getattr(sess, "codec", self.codec)
         want_fovea = self.foveation and getattr(sess, "foveation", True)
 
-        if self._active != (dest, codec):
-            self._active = (dest, codec)
+        layout = self._layout_for(sess)
+        shape = (layout.canvas_w, layout.canvas_h, layout.coarse_scale, layout.fovea_scale)
+        # Keyed on the session id as well as the settings. A reconnect that lands
+        # between two frames never shows up as a None session here, so an identical
+        # address and codec looked like nothing had changed -- leaving the encoders
+        # running mid-GOP while the headset's freshly built decoder waited for a
+        # keyframe that never came. That is a reliable black screen on reconnect.
+        key = (getattr(sess, "id", None), dest, codec, shape)
+        if self._active != key:
+            self._active = key
             self._senders = {
-                eye: EyeStreamSender(self._sock, dest, eye, self.layout, self.fps,
+                eye: EyeStreamSender(self._sock, dest, eye, layout, self.fps,
                                      self._rate.target_kbps, True, codec=codec,
                                      jpeg_quality=85, mtu_payload=self.mtu_payload)
                 for eye in (EYE_LEFT, EYE_RIGHT)
             }
             print(f"[headset] streaming to {dest[0]}:{dest[1]} "
+                  f"canvas {layout.canvas_w}x{layout.canvas_h} "
                   f"fovea={'on' if want_fovea else 'off'}")
 
         gl = gr = None
@@ -511,6 +552,14 @@ class GvLinkHeadset:
         d.gaze_r = tuple(pkt.gaze_r)
         d.gaze_confidence = float(pkt.gaze_confidence)
         d.gaze_valid = bool(pkt.gaze_valid)
+
+        # Deadman: the operator's "I am holding on" signal, added in input protocol v3.
+        # Nothing downstream gates on it yet, but teleop should -- a dropped uplink or a
+        # released grip is exactly when the arms must not keep moving.
+        d.deadman = bool(getattr(pkt, "deadman", False))
+        d.hands_valid = bool(getattr(pkt, "hands_valid", False))
+        d.hand_l = getattr(pkt, "hand_l", None)
+        d.hand_r = getattr(pkt, "hand_r", None)
         return d
 
     # ----------------------------------------------------------------- feedback
