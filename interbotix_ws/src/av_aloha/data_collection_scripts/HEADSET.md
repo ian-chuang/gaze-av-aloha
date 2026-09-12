@@ -88,9 +88,12 @@ Two behaviours that differ from the WebRTC version and will surprise you:
 |---|---|
 | [data_collection.py](data_collection.py) | the real episode-recording loop; the primary consumer |
 | [teleop.py](teleop.py) | standalone teleoperation without recording |
-| [camera_manager.py](camera_manager.py) | OAK stereo capture; `_push_camera_params_to_headset()` and `oak_gvlink_camera_params()` are the headset-facing parts |
-| [headset_control.py](headset_control.py) | maps headset poses onto arm targets, builds the feedback sent back to the viewer |
-| [transform_utils.py](transform_utils.py) | the pose maths the above depend on |
+| [camera_manager.py](camera_manager.py) | OAK stereo capture. `oak_gvlink_camera_params()` builds the rectified intrinsics + baseline **in gvlink wire form**, `OAK_GVLINK_CAMERA` holds them, `_push_camera_params_to_headset()` sends them. This is the geometry the viewer places each eye from |
+| [transform_utils.py](transform_utils.py) | the pose maths. `HEAD_LOCAL_FWD` is **app-specific**: `+z` for gvlink, and it was `+x` on the WebRTC build. The stale value sat 76 deg off and put a constant yaw error into every arm's mapping — re-measured 2026-08-26 with `frame_calibrate.py` |
+
+`headset_control.py` looks like it belongs here but is **not live** — nothing in the
+recording or teleop loop imports it, only `oak_quality_debug.py` and its own
+commented-out `__main__`. Treat it as dead until something claims it.
 
 ### Debug tools — the fastest way to understand the link
 

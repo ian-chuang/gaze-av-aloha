@@ -170,7 +170,14 @@ def wxyz_to_xyzw(quat):
 ## at app start; probe measured +43 deg one session).  These build the
 ## world->robot bridge by MEASURING the operator's heading at anchor time.
 
-HEAD_LOCAL_FWD = np.array([1.0, 0.0, 0.0])  # head-local gaze axis (probe: +x, purity 0.90)
+# Head-local gaze axis.  Was +x, probed on the WebRTC app; the gvlink app
+# reports head orientation in Unity's own basis (+z forward), and the old
+# value sat 76 deg off it -- a constant yaw error in every session_yaw_remap,
+# i.e. in every arm's mapping.  Re-measured 2026-08-26 with frame_calibrate.py:
+# +z is 1.9 deg from the operator's measured forward, with a 0.90 horizontal
+# projection (the angle alone is not enough -- a near-vertical axis projects to
+# almost nothing and its angle is noise; +y scored 3.8 deg on a 0.435 projection).
+HEAD_LOCAL_FWD = np.array([0.0, 0.0, 1.0])
 
 
 def session_yaw_remap(head_pose, base_remap):
