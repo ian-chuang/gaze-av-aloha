@@ -10,9 +10,31 @@ except ImportError:
     UniTuple = None
 
 
+## A quaternion this short is not a rotation, it is an absence of one.  Well
+## below any plausible unit quaternion, well above float noise on a real one.
+_QUAT_MIN_NORM = 1e-8
+
+
 def pose2mat(pos, quat):
+    """Pose matrix from position + xyzw quaternion.
+
+    A zero-norm quaternion means "this device had no pose", and it arrives on a
+    perfectly ordinary packet: GvInputUplink.Update sends
+    `default(GvControllerState)` for both controllers whenever the runtime is
+    tracking hands, and C# zero-initialises that struct -- so Rotation is
+    (0,0,0,0), not identity.  scipy 1.16 rejects it outright ("Found zero norm
+    quaternions"), which took down data collection from inside receive_data(),
+    BEFORE data_collection.py's tracking guard could see the zeroed position
+    and hold the arm.
+
+    So: substitute identity and let the position speak.  The zeros stay in
+    l_pos/r_pos, the guard still reads them as LOST and refuses to drive that
+    arm.  Crashing here would be the wrong call regardless -- no packet content
+    should be able to kill teleop mid-episode."""
     homo_pose_mat = np.eye(4)
-    homo_pose_mat[:3, :3] = R.from_quat(np.asarray(quat, dtype=float)).as_matrix()
+    q = np.asarray(quat, dtype=float)
+    if q.shape == (4,) and np.linalg.norm(q) >= _QUAT_MIN_NORM:
+        homo_pose_mat[:3, :3] = R.from_quat(q).as_matrix()
     homo_pose_mat[:3, 3] = np.asarray(pos, dtype=float)
     return homo_pose_mat
 
@@ -47,6 +69,24 @@ class HeadsetData:
     r_button_one = False
     r_button_two = False
     r_button_thumbstick = False
+
+    # gvlink-only fields (input protocol v3+). Defaulted here so code reading
+    # them works whether or not gvlink_headset.py has run -- the webrtc
+    # transport never sets these at all, and there is one tick before the
+    # first packet arrives even under gvlink.
+    gaze_l = (0.5, 0.5)
+    gaze_r = (0.5, 0.5)
+    gaze_confidence = 0.0
+    gaze_valid = False
+    hands_valid = False
+    hand_l = None
+    hand_r = None
+    # Whether l_pos/r_pos came from hand-tracking wrist poses this tick rather
+    # than the controller fields (gvlink_headset.receive_data() resolves
+    # per-side, since ControllerState defaults to the origin when a
+    # controller was never tracked -- see receive_data()'s docstring).
+    l_using_hand_track = False
+    r_using_hand_track = False
 
 class HeadsetFeedback:
     head_out_of_sync = False

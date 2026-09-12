@@ -51,7 +51,10 @@ import time
 
 import numpy as np
 
-_DEFAULT_GVLINK = os.path.expanduser("~/dev/av-aloha-unity/Guided-Vision/python")
+# The live checkout: ~/av-aloha-unity is where the v2 branch with the OAK colour fix
+# and the v3 input protocol actually lives.  (~/dev/av-aloha-unity is a stale
+# WebRTC-era clone that predates gvlink entirely -- importing from there fails.)
+_DEFAULT_GVLINK = os.path.expanduser("~/av-aloha-unity/Guided-Vision/python")
 _GVLINK_PATH = os.environ.get("GVLINK_PATH", _DEFAULT_GVLINK)
 if _GVLINK_PATH not in sys.path:
     sys.path.insert(0, _GVLINK_PATH)
@@ -62,7 +65,8 @@ try:
     from gvlink.foveal import MIN_CANVAS, AtlasLayout, SaccadeWidener
     from gvlink.protocol import (BUTTON_ONE, BUTTON_STICK, BUTTON_TWO, CODEC_H264,
                                  CODEC_MJPEG, DEFAULT_PORTS, EYE_LEFT, EYE_RIGHT,
-                                 MTU_PAYLOAD, MTU_PAYLOAD_TUNNEL, HeadsetInput)
+                                 INPUT_LEFT_VALID, INPUT_RIGHT_VALID, MTU_PAYLOAD,
+                                 MTU_PAYLOAD_TUNNEL, HeadsetInput)
     from gvlink.ratecontrol import BitrateController
     from gvlink.robotlink import RobotLink
     from gvlink.stream import EyeStreamSender, make_udp_socket
@@ -98,6 +102,16 @@ def _env_int(name: str, default: int) -> int:
         return int(float(os.environ.get(name, default)))
     except (TypeError, ValueError):
         return default
+
+
+## How old the newest input packet may be before receive_data() calls it nothing.
+##
+## Deliberately separate from the 0.5 s default _fresh_input() keeps for the gaze
+## path: there, a brief hiccup falling back to a centred fovea is a visible quality
+## flicker for no gain, so leniency is right.  On the CONTROL path leniency is the
+## opposite of right -- 0.5 s at the headset's 90 Hz uplink is ~45 missed packets
+## driven on stale poses before anything notices.  0.15 s is ~13.
+CONTROL_STALE_S = _env_float("GIAVA_CONTROL_STALE_S", 0.15)
 
 
 class GvLinkHeadset:
@@ -142,19 +156,44 @@ class GvLinkHeadset:
                              else _env_int("GIAVA_HEADSET_BITRATE_KBPS", 12000))
         self.min_bitrate_kbps = (min_bitrate_kbps if min_bitrate_kbps is not None
                                  else _env_int("GIAVA_HEADSET_MIN_KBPS", 800))
+        ## GIAVA_HEADSET_ADAPT=0 pins the bitrate at bitrate_kbps and ignores
+        ## viewer reports entirely.  Adaptation earns its place on a link whose
+        ## capacity is unknown or shared; on a quiet LAN it is solving a
+        ## problem that does not exist, and its delay heuristic misfires (see
+        ## GIAVA_RATE_DELAY_MS below).  There is no safety argument for keeping
+        ## it on here -- the failure mode of too much bitrate is dropped
+        ## fragments, which the viewer already reports and you can see.
+        if adapt_bitrate and os.environ.get("GIAVA_HEADSET_ADAPT", "1") in ("0", "false", "False"):
+            adapt_bitrate = False
         self.adapt_bitrate = adapt_bitrate
 
         canvas = canvas or (_env_int("GIAVA_CANVAS_W", 1024), _env_int("GIAVA_CANVAS_H", 1024))
         self.foveation = (foveation if foveation is not None
                           else os.environ.get("GIAVA_FOVEATION", "1") not in ("0", "false", "False"))
-        # tightened() trims the atlas to what the layers actually occupy; the reference
-        # sender does the same, and it is worth roughly 2x encode and 14% bitrate.
-        self.layout = _tighten(AtlasLayout(
+        _layout = AtlasLayout(
             canvas_w=canvas[0], canvas_h=canvas[1],
             coarse_scale=(coarse_scale if coarse_scale is not None
                           else _env_float("GIAVA_COARSE_SCALE", 0.35)),
             fovea_scale=(fovea_scale if fovea_scale is not None
-                         else _env_float("GIAVA_FOVEA_SCALE", 0.5))))
+                         else _env_float("GIAVA_FOVEA_SCALE", 0.5)))
+        # tightened() trims the atlas to what the layers actually occupy; the reference
+        # sender does the same, and it is worth roughly 2x encode and 14% bitrate.
+        #
+        # ONLY ON THE FOVEATED PATH.  Tightening is sound there because the two layers
+        # keep their exact pixel sizes -- it scales the canvas by
+        # max(coarse_scale, fovea_scale) and divides both scales by the same factor, so
+        # every scale*dimension product is unchanged and the sender simply declines to
+        # encode black padding.
+        #
+        # With foveation OFF there are no layers.  build_atlas takes its `gaze is None`
+        # branch and returns `_downscale(src, canvas_w, canvas_h)` -- the whole image
+        # IS the whole canvas, and the scales are never read.  Tightening then shrinks
+        # the picture itself: at the shipping defaults (0.35 / 0.5) it halved a
+        # 1024x1024 canvas to 512x512, so `--fovea off` downscaled the OAK's native
+        # 1280x800 into 512x512 and looked far worse than the foveated stream it
+        # replaced.  That is not a quality setting anyone chose; it is the two-band
+        # assumption applied where it does not hold.
+        self.layout = _tighten(_layout) if self.foveation else _layout
 
         codec = (codec or os.environ.get("GIAVA_HEADSET_CODEC", "h264")).lower()
         self.codec = CODEC_MJPEG if codec == "mjpeg" else CODEC_H264
@@ -173,8 +212,13 @@ class GvLinkHeadset:
         # Preferred over everything else: it describes the frames actually being sent.
         self._camera_wire = camera_params
         self._hfov = hfov_deg if hfov_deg is not None else _env_float("GIAVA_HEADSET_HFOV", 90.0)
+        # Fallback only -- used when no measured calibration reaches the viewer
+        # (no OAK, or its params could not be derived).  0.062 m is the OAK's
+        # nominal stereo baseline; the checkerboard calibration measures the
+        # RECTIFIED baseline at 64.3 mm, and when those params are available
+        # they take precedence over this number entirely (see camera()).
         self._baseline = (baseline_m if baseline_m is not None
-                          else _env_float("GIAVA_HEADSET_BASELINE", 0.075))
+                          else _env_float("GIAVA_HEADSET_BASELINE", 0.062))
         self._rectified = rectified
         # The viewer connects before the camera has produced anything, and it needs the
         # geometry to place the very first frame -- so this is configuration, not
@@ -186,9 +230,36 @@ class GvLinkHeadset:
         self._widener = SaccadeWidener(
             max_zoom=(saccade_zoom if saccade_zoom is not None
                       else _env_float("GIAVA_SACCADE_ZOOM", 2.5)))
+        ## GIAVA_HEADSET_STATS=<seconds>: periodic link telemetry.  Off by
+        ## default because the terminal is also carrying episode feedback, but
+        ## it is the only way to tell an ENCODER-limited picture from a
+        ## LINK-limited one.  adapt_bitrate cuts the target by 25% on 2%
+        ## fragment loss or 40 ms of queueing and only raises it 8% a second,
+        ## so a link pushed past what it can carry sits far below the
+        ## requested bitrate almost all the time -- and looks exactly like a
+        ## bitrate that was never raised.
+        self._stats_every = _env_float("GIAVA_HEADSET_STATS", 0.0)
+        ## Congestion threshold, in ms of queueing above the rolling minimum.
+        ##
+        ## THE DEFAULT IS DANGEROUSLY CLOSE TO ONE FRAME PERIOD.  40 ms IS one
+        ## frame at 25 fps, and `latency_ms` is (viewer clock - robot capture
+        ## stamp) sampled per report, so ordinary frame pacing and decode
+        ## jitter land right on the threshold.  Combined with a baseline that
+        ## is a rolling MINIMUM decaying only 2 ms/s, one lucky low sample
+        ## pins the floor and every normal sample afterwards reads as ~60 ms
+        ## of "queue" -- congestion that is not there.
+        ##
+        ## The controller then loses by construction: cuts are multiplicative
+        ## (x0.75, as often as every 0.35 s) and raises are gentler (x1.08, at
+        ## most once a second), so a false positive every few seconds walks the
+        ## target down to min_kbps and pins it there.  Observed on this rig at
+        ## 25 fps over LAN: 43 cuts / 33 raises, target stuck at the 800 kbps
+        ## floor against a requested 25000.
+        _delay_ms = _env_float("GIAVA_RATE_DELAY_MS", 40.0)
         self._rate = BitrateController(start_kbps=self.bitrate_kbps,
                                        min_kbps=self.min_bitrate_kbps,
-                                       max_kbps=max(self.bitrate_kbps, self.min_bitrate_kbps))
+                                       max_kbps=max(self.bitrate_kbps, self.min_bitrate_kbps),
+                                       delay_rise_ms=_delay_ms)
 
         self._want_beacon = beacon
         self._beacon: Beacon | None = None
@@ -246,14 +317,53 @@ class GvLinkHeadset:
         if self._want_beacon:
             self._start_beacon()
 
+        if os.environ.get("GIAVA_MEMDEBUG") == "1":
+            self._spawn(self._memdebug_loop, "gv-memdebug")
+        if self._stats_every > 0:
+            self._spawn(self._stats_loop, "gv-stats")
+
         print(f"[headset] gvlink up as '{self.name}': control :{self.ports['control']}, "
               f"video :{self.ports['video']}, input :{self.ports['input']}"
               + (f", beacon :{self.ports['beacon']}" if self._beacon else ""))
         print(f"[headset] {self.fps} fps cap, {self.bitrate_kbps} kbps/eye, "
               f"canvas {self.layout.canvas_w}x{self.layout.canvas_h}, "
               f"fovea={'on' if self.foveation else 'off'}, "
-              f"codec={'mjpeg' if self.codec == CODEC_MJPEG else 'h264'}")
+              f"codec={'mjpeg' if self.codec == CODEC_MJPEG else 'h264'}, "
+              f"rate={'adaptive' if self.adapt_bitrate else 'FIXED'}"
+              + (f" (floor {self.min_bitrate_kbps}, congestion at "
+                 f"{self._rate.delay_rise_ms:.0f} ms)" if self.adapt_bitrate else ""))
         return self
+
+    def _stats_loop(self) -> None:
+        """GIAVA_HEADSET_STATS=<seconds>: one line of link telemetry per tick.
+
+        Reports what the rate controller has actually settled on, not what was
+        requested.  A target sitting well under `bitrate_kbps` with a rising
+        `cuts` count means the link is dropping fragments and the picture is
+        link-limited -- lowering the requested bitrate will IMPROVE it, because
+        the controller stops thrashing.  A target pinned at the requested value
+        with a grainy picture means the opposite: the link is fine and the
+        encoder is the limit (see GIAVA_X264_PRESET)."""
+        while not self._stop.is_set():
+            if self._stop.wait(self._stats_every):
+                break
+            print(f"[headset] {self.describe()}")
+
+    def _memdebug_loop(self) -> None:
+        """GIAVA_MEMDEBUG=1: periodic tracemalloc snapshot diff, to find what is
+        actually growing rather than guessing from code review."""
+        import tracemalloc
+        tracemalloc.start(15)
+        prev = tracemalloc.take_snapshot()
+        while not self._stop.is_set():
+            if self._stop.wait(15.0):
+                break
+            snap = tracemalloc.take_snapshot()
+            top = snap.compare_to(prev, "lineno")
+            print("[memdebug] top growth since last sample:")
+            for stat in top[:12]:
+                print(f"  {stat}")
+            prev = snap
 
     def _spawn(self, fn, name: str) -> None:
         t = threading.Thread(target=fn, name=name, daemon=True)
@@ -313,8 +423,11 @@ class GvLinkHeadset:
                       f"synthesising from hfov={self._hfov}")
         if self.camera is None:
             self.camera = CameraParams.from_hfov(w, h, self._hfov, self._baseline)
-        # CameraParams is a frozen dataclass, so this is a copy rather than a mutation.
-        if self.camera.rectified != self._rectified:
+        # Measured params carry their own honest "rect" flag (an unrectified stream
+        # says so); only the synthesised fallback takes it from the constructor,
+        # because a guess has no opinion of its own.
+        if not self._camera_wire and self.camera.rectified != self._rectified:
+            # CameraParams is frozen, so this is a copy rather than a mutation.
             self.camera = dataclasses.replace(self.camera, rectified=self._rectified)
         print(f"[headset] camera: {self.camera.describe()}")
         return self.camera
@@ -352,6 +465,33 @@ class GvLinkHeadset:
             self._active = None
             return
         print(f"[headset] viewer connected: {session}")
+        ## THE ATLAS IS NEGOTIATED, NOT CHOSEN.  _layout_for() honours a
+        ## canvas the viewer asks for, and the viewer tightens its own request
+        ## before making it -- so the robot's GIAVA_CANVAS_W/H can be silently
+        ## discarded and every quality knob upstream of it becomes a no-op.
+        ## That is invisible without this line: the startup banner prints the
+        ## robot's PREFERENCE, and "streaming to ..." only appears once the
+        ## first frame goes out, by which point it has scrolled past whatever
+        ## the operator was reading.  Say it here, at the moment it is
+        ## decided, and say WHOSE number won.
+        _mine, _used = self.layout, self._layout_for(session)
+        if (_used.canvas_w, _used.canvas_h) != (_mine.canvas_w, _mine.canvas_h):
+            _src_px = self._src_wh or ("?", "?")
+            print(f"[headset] ATLAS OVERRIDDEN BY THE VIEWER: it asked for "
+                  f"{_used.canvas_w}x{_used.canvas_h}, robot wanted "
+                  f"{_mine.canvas_w}x{_mine.canvas_h}. The camera is "
+                  f"{_src_px[0]}x{_src_px[1]}, so frames are being resampled "
+                  f"to the viewer's size. THE ROBOT CANNOT OVERRIDE THIS: "
+                  f"GvVideoSource allocates its decode texture ONCE from the "
+                  f"size it requested (CreateExternalTexture(Width, Height)), "
+                  f"so a differently-shaped atlas is squashed into that "
+                  f"texture and then aspect-corrected again by the quad -- it "
+                  f"arrives stretched. Fix it at the viewer: raise its canvas "
+                  f"in the start menu (its sizes are SQUARE, so pick the one "
+                  f"matching the camera's LONG side).")
+        else:
+            print(f"[headset] atlas {_used.canvas_w}x{_used.canvas_h} "
+                  f"(robot's own; the viewer requested none)")
         cam = self._ensure_camera()
         if cam is not None:
             self._link.publish("camera/params", cam.to_wire())
@@ -460,6 +600,17 @@ class GvLinkHeadset:
         key = (getattr(sess, "id", None), dest, codec, shape)
         if self._active != key:
             self._active = key
+            # Each EyeStreamSender owns a real libx264 encoder context (EyeEncoder,
+            # gvlink/video.py) that only frees cleanly through its own close() --
+            # dropping the reference here without draining it leaks one x264 context
+            # per abandoned sender.  A flaky link reconnects often (observed: 180
+            # cycles inside one session), so this reliably OOMs the process rather
+            # than leaking slowly -- it's how a 3 GB process becomes ~60 GB and gets
+            # killed mid-teleop.
+            for old in self._senders.values():
+                enc = getattr(old, "enc", None)
+                if enc is not None:
+                    enc.close()
             self._senders = {
                 eye: EyeStreamSender(self._sock, dest, eye, layout, self.fps,
                                      self._rate.target_kbps, True, codec=codec,
@@ -488,15 +639,37 @@ class GvLinkHeadset:
 
     def _input_loop(self) -> None:
         rate_at, rate_n = time.monotonic(), 0
+        dropped = 0
+        seen_reasons: set = set()
         while not self._stop.is_set():
             try:
-                data, _ = self._input_sock.recvfrom(4096)
+                data, addr = self._input_sock.recvfrom(4096)
             except socket.timeout:
                 continue
             except OSError:
                 break
             pkt = HeadsetInput.unpack(data)
             if pkt is None:
+                # NEVER in silence.  A packet that arrives and cannot be parsed
+                # is indistinguishable, downstream, from no packet at all: both
+                # show up as "0 Hz, last=never", which points at the network or
+                # the address and is wrong on both counts.  It cost a session
+                # here -- the headset was running an older build still speaking
+                # input protocol v2, HeadsetInput.unpack rejected every packet
+                # on the version check, and this `continue` threw away the one
+                # fact that would have explained it.  Ian hit the same thing
+                # twice in one session on gvlink's own InputListener.
+                #
+                # Reported once per distinct reason, so a mismatched sender says
+                # so exactly once instead of at 90 Hz.
+                dropped += 1
+                reason = self._why_unparseable(data)
+                key = (addr[0], reason)
+                if key not in seen_reasons:
+                    seen_reasons.add(key)
+                    print(f"[headset] DROPPING input packets from {addr[0]}: "
+                          f"{reason} -- the uplink will read as 0 Hz until this "
+                          f"is fixed (dropped {dropped} so far)")
                 continue
             now = time.monotonic()
             with self._input_lock:
@@ -505,6 +678,24 @@ class GvLinkHeadset:
             if now - rate_at >= 1.0:
                 self.input_rate_hz = rate_n / (now - rate_at)
                 rate_at, rate_n = now, 0
+
+    @staticmethod
+    def _why_unparseable(data: bytes) -> str:
+        """Name the reason a datagram was rejected, in the sender's terms."""
+        from gvlink.protocol import INPUT_MAGIC, INPUT_SIZE, INPUT_VERSION
+        if len(data) < 6:
+            return f"runt packet ({len(data)} bytes, need at least {INPUT_SIZE})"
+        magic = data[:4]
+        if magic != INPUT_MAGIC:
+            return (f"not a gvlink input packet (magic {magic!r}, want "
+                    f"{INPUT_MAGIC!r}) -- something else is sending to this port")
+        version = data[4]
+        if version != INPUT_VERSION:
+            return (f"input protocol v{version}, this robot speaks "
+                    f"v{INPUT_VERSION} -- REBUILD THE HEADSET APP")
+        if len(data) < INPUT_SIZE:
+            return f"truncated ({len(data)} bytes, need {INPUT_SIZE})"
+        return f"unpack failed ({len(data)} bytes, magic and version both look right)"
 
     def _fresh_input(self, stale_s: float = 0.5) -> HeadsetInput | None:
         with self._input_lock:
@@ -520,18 +711,63 @@ class GvLinkHeadset:
 
         Poses go through the same left-to-right handedness conversion the WebRTC path
         used, so the arm control maths downstream is unchanged.
+
+        "Fresh" here is CONTROL_STALE_S, tighter than the gaze path's tolerance --
+        this is the data the arms are driven from.
         """
-        pkt = self._fresh_input()
+        pkt = self._fresh_input(CONTROL_STALE_S)
         if pkt is None:
             return None
 
         d = HeadsetData()
         d.h_pos, d.h_quat = convert_left_to_right_coordinates(
             np.asarray(pkt.head_pos, dtype=float), np.asarray(pkt.head_rot, dtype=float))
+
+        # Controller pose vs. hand-tracking wrist pose: the operator uses exactly
+        # one at a time (Quest falls back to hand tracking the instant it can't
+        # see a controller), and ControllerState defaults to (0,0,0) when it was
+        # never populated -- so on a hand-tracking session, using pkt.left/right
+        # unconditionally sends BOTH "controllers" to the same point (world
+        # origin composed with the head), which reads as the hands overlapping
+        # and the arms refusing to move (self-collision at zero separation).
+        # Resolved per side, independently, because one hand can drop tracking
+        # while the other keeps a controller. Hand wrist poses ride the same
+        # uplink frame as controller poses (HEADSET_API.md), so the same
+        # handedness conversion applies unchanged.
+        # OFF by default (2026-08-26).  Resolving the POSE from a wrist is only
+        # half of hand control and the other half does not exist: the trigger
+        # and button fields below are read from ControllerState, which the
+        # viewer zeroes out wholesale on a hand session (GvInputUplink.Update).
+        # So with hands live the grippers never actuate AND the arms never
+        # activate -- l_button_one/r_button_one are what data_collection.py
+        # gates arm_active on.  Enabling the pose half alone buys a correctly
+        # tracked hand that cannot drive anything, while making the arms move
+        # in response to hands the operator did not mean to control with.
+        # Controllers-only is the honest configuration until pinch -> trigger
+        # and a hand gesture for arm-activate are wired up.
+        #     GIAVA_HEADSET_HAND_TRACKING=1   re-enable the pose fallback
+        hand_fallback = os.environ.get("GIAVA_HEADSET_HAND_TRACKING") == "1"
+
+        l_tracked = bool(hand_fallback and pkt.hand_l is not None and pkt.hand_l.tracked)
+        r_tracked = bool(hand_fallback and pkt.hand_r is not None and pkt.hand_r.tracked)
+        l_ctrl_valid = bool(pkt.flags & INPUT_LEFT_VALID)
+        r_ctrl_valid = bool(pkt.flags & INPUT_RIGHT_VALID)
+
+        if l_tracked and not l_ctrl_valid:
+            l_pos_raw, l_rot_raw = pkt.hand_l.wrist_pos, pkt.hand_l.wrist_rot
+        else:
+            l_pos_raw, l_rot_raw = pkt.left.pos, pkt.left.rot
+        if r_tracked and not r_ctrl_valid:
+            r_pos_raw, r_rot_raw = pkt.hand_r.wrist_pos, pkt.hand_r.wrist_rot
+        else:
+            r_pos_raw, r_rot_raw = pkt.right.pos, pkt.right.rot
+
         d.l_pos, d.l_quat = convert_left_to_right_coordinates(
-            np.asarray(pkt.left.pos, dtype=float), np.asarray(pkt.left.rot, dtype=float))
+            np.asarray(l_pos_raw, dtype=float), np.asarray(l_rot_raw, dtype=float))
         d.r_pos, d.r_quat = convert_left_to_right_coordinates(
-            np.asarray(pkt.right.pos, dtype=float), np.asarray(pkt.right.rot, dtype=float))
+            np.asarray(r_pos_raw, dtype=float), np.asarray(r_rot_raw, dtype=float))
+        d.l_using_hand_track = l_tracked and not l_ctrl_valid
+        d.r_using_hand_track = r_tracked and not r_ctrl_valid
 
         d.l_thumbstick_x, d.l_thumbstick_y = float(pkt.left.stick[0]), float(pkt.left.stick[1])
         d.r_thumbstick_x, d.r_thumbstick_y = float(pkt.right.stick[0]), float(pkt.right.stick[1])
@@ -553,10 +789,10 @@ class GvLinkHeadset:
         d.gaze_confidence = float(pkt.gaze_confidence)
         d.gaze_valid = bool(pkt.gaze_valid)
 
-        # Deadman: the operator's "I am holding on" signal, added in input protocol v3.
-        # Nothing downstream gates on it yet, but teleop should -- a dropped uplink or a
-        # released grip is exactly when the arms must not keep moving.
-        d.deadman = bool(getattr(pkt, "deadman", False))
+        # NOTE: the uplink still carries INPUT_DEADMAN (bit 6) and gvlink still
+        # decodes it as `pkt.deadman`; it is deliberately not copied onto
+        # HeadsetData any more.  Nothing in this repo gates on it as of
+        # 2026-09-01 -- see LinkGuard in data_col_config.py for why.
         d.hands_valid = bool(getattr(pkt, "hands_valid", False))
         d.hand_l = getattr(pkt, "hand_l", None)
         d.hand_r = getattr(pkt, "hand_r", None)
